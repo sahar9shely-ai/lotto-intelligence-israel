@@ -1,0 +1,13 @@
+---
+pid: 28888
+cwd: "C:\\Users\\owner\\.cursor\\projects\\C-Users-owner-AppData-Local-Temp-0f411ce2-a803-4bdd-b068-f46bc9af436f\\backend"
+command: ".\\.venv\\Scripts\\python.exe -m alembic current"
+started_at: 2026-06-04T18:42:57.531Z
+running_for_ms: 155092   
+---
+
+---
+exit_code: 4294967295
+elapsed_ms: 157100
+ended_at: 2026-06-04T18:45:34.631Z
+---

@@ -1,0 +1,19 @@
+---
+pid: 12440
+cwd: "C:\\Users\\owner\\.cursor\\projects\\C-Users-owner-AppData-Local-Temp-0f411ce2-a803-4bdd-b068-f46bc9af436f\\backend"
+command: ".\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+started_at: 2026-06-04T16:47:05.890Z
+running_for_ms: 9        
+---
+INFO:     Started server process [3288]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+
+---
+exit_code: 1
+elapsed_ms: 2551
+ended_at: 2026-06-04T16:47:08.441Z
+---

@@ -1,0 +1,13 @@
+---
+pid: 4248
+cwd: "C:\\Users\\owner\\.cursor\\projects\\C-Users-owner-AppData-Local-Temp-0f411ce2-a803-4bdd-b068-f46bc9af436f\\backend"
+command: ".\\.venv\\Scripts\\python.exe -m alembic upgrade head"
+started_at: 2026-06-04T18:42:57.507Z
+running_for_ms: 155116   
+---
+
+---
+exit_code: 4294967295
+elapsed_ms: 157125
+ended_at: 2026-06-04T18:45:34.632Z
+---

@@ -1,0 +1,20 @@
+---
+pid: 17552
+cwd: "C:\\Users\\owner\\.cursor\\projects\\C-Users-owner-AppData-Local-Temp-0f411ce2-a803-4bdd-b068-f46bc9af436f\\backend"
+command: ".\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+started_at: 2026-06-04T16:47:23.164Z
+running_for_ms: 7466586  
+---
+INFO:     Started server process [25992]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:64448 - "OPTIONS /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64449 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54827 - "GET /health HTTP/1.1" 200 OK
+
+---
+exit_code: 4294967295
+elapsed_ms: 7468387
+ended_at: 2026-06-04T18:51:51.551Z
+---

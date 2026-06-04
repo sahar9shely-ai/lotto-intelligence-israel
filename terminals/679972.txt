@@ -1,0 +1,21 @@
+---
+pid: 4648
+cwd: "C:\\Users\\owner\\.cursor\\projects\\C-Users-owner-AppData-Local-Temp-0f411ce2-a803-4bdd-b068-f46bc9af436f\\frontend"
+command: "npm run dev -- --host 127.0.0.1 --port 5173"
+started_at: 2026-06-04T16:46:34.511Z
+running_for_ms: 7516800  
+---
+
+> lotto-intelligence-frontend@0.1.0 dev
+> vite --host 127.0.0.1 --port 5173
+
+
+  VITE v5.4.21  ready in 904 ms
+
+  ➜  Local:   http://127.0.0.1:5173/
+
+---
+exit_code: 4294967295
+elapsed_ms: 7516954
+ended_at: 2026-06-04T18:51:51.465Z
+---
