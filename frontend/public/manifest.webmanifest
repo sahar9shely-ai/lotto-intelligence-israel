@@ -1,0 +1,19 @@
+{
+  "name": "GOT URS",
+  "short_name": "GOT URS",
+  "description": "חדרים בהפתעה — האפליקציה שלך להרגיש בלתי נשכחת",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0612",
+  "theme_color": "#0a0612",
+  "lang": "he",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

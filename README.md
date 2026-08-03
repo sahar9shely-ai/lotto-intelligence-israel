@@ -1,152 +1,51 @@
-# Lotto Intelligence Israel
+# GOT URS
 
-Production-grade educational analytics platform for Israeli Lotto historical draw analysis.
+אפליקציית מובייל (PWA) בעברית — חדרים בהפתעה, פרופיל, נקודות, פרימיום, צ'אט והזמנת חברים.
 
-Phase 1 MVP is complete and tagged as `v1.0.0`.
+## למה זה עובד גם בטלפון אחר
 
-## Project Scope (Phase 1)
+1. פותחים את הכתובת בדפדפן של כל טלפון (או מוסיפים למסך הבית כ־PWA).
+2. נרשמים / מתחברים עם אותו אימייל וסיסמה.
+3. הנתונים (נקודות, חדרים, מועדפים, פרימיום, צ'אט) מסונכרנים דרך ה־API.
 
-This repository provides:
+אורחים יכולים להשתמש מקומית בלי חשבון; לסנכרון בין מכשירים צריך התחברות.
 
-- Historical draw import and validation pipeline
-- Versioned draw storage with current/superseded revisions
-- Deterministic statistics and snapshot generation engine
-- REST APIs for health, import, draws, and analytics retrieval
-- Operational snapshot generation endpoint (generate/reuse/dry-run)
-- React frontend dashboard and analytics screens (RTL, responsive)
-
-This repository does **not** provide:
-
-- Prediction features
-- Recommendation features
-- Gambling advice
-
-## Tech Stack
-
-### Backend
-
-- Python, FastAPI
-- SQLAlchemy + Alembic
-- PostgreSQL
-- Pydantic schemas
-- Pytest test suite
-
-### Frontend
-
-- React + TypeScript (strict mode)
-- React Router
-- TanStack Query
-- Recharts
-- Vite
-- Hebrew RTL UI
-
-## Repository Layout
-
-```text
-backend/      FastAPI service, import/statistics engines, tests, migrations
-frontend/     React application with analytics screens
-docker/       Docker Compose stack definitions
-README.md     Project documentation
-```
-
-## Implemented API Endpoints
-
-### Health
-
-- `GET /health`
-
-### Import
-
-- `POST /api/v1/import/draws`
-
-### Draws
-
-- `GET /api/v1/draws`
-- `GET /api/v1/draws/{draw_id}`
-
-### Statistics
-
-- `GET /api/v1/stats/frequency`
-- `GET /api/v1/stats/strong-number`
-- `GET /api/v1/stats/pairs`
-- `GET /api/v1/stats/summary`
-
-### Operational Snapshot
-
-- `POST /api/v1/admin/stats/snapshots/generate`
-
-## Frontend Screens (Phase 1)
-
-- Dashboard (`/dashboard`)
-- Draw History (`/draws`)
-- Number Frequency (`/stats/frequency`)
-- Strong Number Statistics (`/stats/strong-number`)
-- Pair Analysis (`/stats/pairs`)
-- Snapshot Management (`/stats/snapshots`)
-- System Health (`/health`)
-
-## Local Setup
-
-1. Copy environment file:
+## הרצה מקומית
 
 ```bash
-cp .env.example .env
-```
-
-2. Start full stack:
-
-```bash
-docker compose -f docker/docker-compose.yml up --build
-```
-
-3. Open:
-
-- Frontend: [http://localhost:5173](http://localhost:5173)
-- Backend health: [http://localhost:8000/health](http://localhost:8000/health)
-
-## Database Migration
-
-From `backend/`:
-
-```powershell
-.\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m alembic current
-```
-
-## Validation Commands
-
-### Backend
-
-```powershell
+# Backend
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q
-```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-### Frontend
-
-```powershell
+# Frontend (טרמינל שני)
 cd frontend
-npm run build
-npm run typecheck
-npm run validate:routes
+npm install
+npm run dev
 ```
 
-## Release Information
+פתחו בדפדפן:
 
-- Current release tag: `v1.0.0`
-- Release notes: `RELEASE_NOTES_v1.0.0.md`
+- מחשב: http://localhost:5173
+- טלפון באותה רשת: `http://<IP-של-המחשב>:5173`
 
-## Known Limitations (Phase 1)
+## מסכים עיקריים
 
-- Authentication/authorization is not yet implemented
-- Operational hardening (rate limits, full observability stack) is partial
-- Frontend bundle optimization can be improved via code splitting
+| מסך | נתיב | פעולות |
+| --- | --- | --- |
+| פתיחה | `/` | התחל עכשיו / התחבר / אורח |
+| בית | `/app/home` | בחירת קטגוריה / הפתעה |
+| הפתעה | `/app/surprise` | הפתיעי אותי / בחירה ידנית |
+| חדר | `/app/room/:id` | מועדף / התחל חוויה |
+| הצלחה | `/app/success` | חזרה לבית |
+| פרופיל / נקודות / פרימיום / צ'אט / הזמנות | `/app/...` | סנכרון עם חשבון |
 
-## Phase 2 Direction
+## API לסנכרון
 
-- Security hardening (authn/authz, RBAC, endpoint protection)
-- CI/CD and deployment automation
-- Expanded observability (metrics, tracing, alerting)
-- Frontend automated tests and performance optimization
-- Scalability and load/performance hardening
-
+- `POST /api/v1/goturs/register`
+- `POST /api/v1/goturs/login`
+- `GET /api/v1/goturs/me`
+- `PATCH /api/v1/goturs/me`
+- `GET|POST /api/v1/goturs/chat`

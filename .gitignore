@@ -24,3 +24,7 @@ coverage/
 # Alembic / local artifacts
 *.sqlite3
 
+# GOT URS local sync store
+backend/data/
+/data/
+
