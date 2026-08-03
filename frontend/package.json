@@ -1,18 +1,15 @@
 {
-  "name": "lotto-intelligence-frontend",
+  "name": "got-urs",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "validate:routes": "tsx src/app/router/runRouteValidation.ts"
+    "preview": "vite preview --host 0.0.0.0 --port 5173",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.80.7",
-    "recharts": "^2.15.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0"
@@ -21,9 +18,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.2",
-    "tsx": "^4.20.6",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }
 }
-
