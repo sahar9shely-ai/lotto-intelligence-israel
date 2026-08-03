@@ -80,7 +80,12 @@ def _default_user(email: str, name: str) -> dict[str, Any]:
 
 
 def _empty_store() -> dict[str, Any]:
-    return {"users": {}, "tokens": {}, "payments": {}}
+    return {
+        "users": {},
+        "tokens": {},
+        "payments": {},
+        "community": {"messages": [], "presence": {}},
+    }
 
 
 def _load() -> dict[str, Any]:
@@ -96,6 +101,9 @@ def _load() -> dict[str, Any]:
     data.setdefault("users", {})
     data.setdefault("tokens", {})
     data.setdefault("payments", {})
+    data.setdefault("community", {"messages": [], "presence": {}})
+    data["community"].setdefault("messages", [])
+    data["community"].setdefault("presence", {})
     return data
 
 
@@ -267,6 +275,211 @@ class ChatBody(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
 
 
+class CommunityPostBody(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    guestId: str | None = Field(default=None, max_length=80)
+    guestName: str | None = Field(default=None, max_length=40)
+
+
+class PresenceBody(BaseModel):
+    guestId: str | None = Field(default=None, max_length=80)
+    guestName: str | None = Field(default=None, max_length=40)
+
+
+class BotChatBody(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    history: list[dict[str, str]] | None = None
+
+
+ONLINE_WINDOW_SEC = 45
+
+ROOM_BOT_CATALOG = [
+    {
+        "id": "romantic-1",
+        "title": "חדר רומנטי",
+        "keywords": ["רומנטי", "זוגי", "אהבה", "דייט", "romantic"],
+        "price": 149,
+        "pitch": "מושלם לערב זוגי עם נרות ואווירה חמה",
+    },
+    {
+        "id": "pamper-1",
+        "title": "חדר פינוק",
+        "keywords": ["פינוק", "ספא", "ג'קוזי", "רגיעה", "spa"],
+        "price": 179,
+        "pitch": "למי שרוצה להירגע ולהתפנק עד הסוף",
+    },
+    {
+        "id": "party-1",
+        "title": "חדר מסיבה",
+        "keywords": ["מסיבה", "מסיבה", "מוזיקה", "אנרגיה", "party"],
+        "price": 159,
+        "pitch": "אורות, מוזיקה ואדרנלין",
+    },
+    {
+        "id": "games-1",
+        "title": "חדר משחקים",
+        "keywords": ["משחק", "משחקים", "חידה", "תפקידים"],
+        "price": 139,
+        "pitch": "לשחק, לגלות ולהתחבר מחדש",
+    },
+    {
+        "id": "cinema-1",
+        "title": "חדר קולנוע",
+        "keywords": ["קולנוע", "סרט", "נטפליקס", "cinema"],
+        "price": 129,
+        "pitch": "חוויית מסך ביתית עם הפתעות",
+    },
+    {
+        "id": "vacation-1",
+        "title": "חדר חופשה",
+        "keywords": ["חופשה", "ים", "בריחה", "vacation"],
+        "price": 189,
+        "pitch": "תחושת חופש בלי לצאת מהעיר",
+    },
+]
+
+
+def _parse_iso(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now(timezone.utc)
+
+
+def _online_users(presence: dict[str, Any]) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    online: list[dict[str, Any]] = []
+    for user_id, meta in presence.items():
+        last = _parse_iso(str(meta.get("lastSeen", "")))
+        if (now - last).total_seconds() <= ONLINE_WINDOW_SEC:
+            online.append(
+                {
+                    "id": user_id,
+                    "name": meta.get("name") or "אורח/ת",
+                    "isBot": False,
+                }
+            )
+    online.sort(key=lambda u: u["name"])
+    return online
+
+
+def _touch_presence(
+    store: dict[str, Any],
+    *,
+    user_id: str,
+    name: str,
+) -> None:
+    store["community"]["presence"][user_id] = {
+        "name": name.strip() or "אורח/ת",
+        "lastSeen": _now(),
+    }
+
+
+def _actor_from_store(
+    store: dict[str, Any],
+    authorization: str | None,
+    guest_id: str | None,
+    guest_name: str | None,
+) -> tuple[str, str]:
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+        user_id = store["tokens"].get(token)
+        if not user_id or user_id not in store["users"]:
+            raise HTTPException(status_code=401, detail="ההתחברות פגה")
+        user = store["users"][user_id]
+        return user_id, str(user.get("name") or "משתמש/ת")
+    gid = (guest_id or "").strip() or f"guest_{secrets.token_hex(4)}"
+    gname = (guest_name or "").strip() or "אורח/ת"
+    return gid, gname[:40]
+
+
+def _bot_reply(text: str) -> dict[str, Any]:
+    lowered = text.strip().lower()
+    suggestions: list[dict[str, Any]] = []
+
+    if any(k in lowered for k in ["היי", "שלום", "הי", "בוקר", "ערב", "hello", "hi"]):
+        reply = (
+            "היי, אני העוזרת של GOT URS 💜\n"
+            "ספרי לי איזה מצב רוח יש לך — רומנטי, פינוק, מסיבה, משחקים, קולנוע או חופשה — "
+            "ואכוון אותך לסגירת חדר בביט."
+        )
+        suggestions = [
+            {"label": "רומנטי", "path": "/app/pay?kind=room&item=romantic-1"},
+            {"label": "הפתיעו אותי", "path": "/app/surprise"},
+            {"label": "פרימיום", "path": "/app/pay?kind=premium&item=premium-month"},
+        ]
+        return {"reply": reply, "suggestions": suggestions}
+
+    if any(k in lowered for k in ["פרימיום", "premium", "מנוי"]):
+        reply = (
+            "פרימיום פותח חדרים בלעדיים ומוריד הגבלות.\n"
+            f"חודשי: ₪{PREMIUM_PRICES['premium-month']} · שנתי: ₪{PREMIUM_PRICES['premium-year']}.\n"
+            "רוצה לסגור עכשיו בביט?"
+        )
+        suggestions = [
+            {"label": "פרימיום חודשי בביט", "path": "/app/pay?kind=premium&item=premium-month"},
+            {"label": "פרימיום שנתי בביט", "path": "/app/pay?kind=premium&item=premium-year"},
+        ]
+        return {"reply": reply, "suggestions": suggestions}
+
+    if any(k in lowered for k in ["הפתעה", "הפתיע", "רנדום", "לא יודע", "תבחרי", "surprise"]):
+        reply = (
+            "אוהבת את זה! בואי נלך על הפתעה — אני אכוון אותך לחדר שמתאים לרגע.\n"
+            "אפשר גם לבחור ידנית אם תרצי שליטה מלאה."
+        )
+        suggestions = [
+            {"label": "הפתיעי אותי", "path": "/app/surprise"},
+            {"label": "בחירה ידנית", "path": "/app/manual"},
+        ]
+        return {"reply": reply, "suggestions": suggestions}
+
+    matched = None
+    for room in ROOM_BOT_CATALOG:
+        if any(k in lowered for k in room["keywords"]):
+            matched = room
+            break
+
+    if matched:
+        reply = (
+            f"מצאתי התאמה: {matched['title']} ✨\n"
+            f"{matched['pitch']}.\n"
+            f"מחיר: ₪{matched['price']} · תשלום בביט ל־{BIT_MERCHANT_PHONE}.\n"
+            "לחצי למטה כדי לסגור עכשיו."
+        )
+        suggestions = [
+            {
+                "label": f"סגרו {matched['title']} בביט",
+                "path": f"/app/pay?kind=room&item={matched['id']}",
+            },
+            {"label": "עוד אפשרויות", "path": "/app/discover"},
+        ]
+        return {"reply": reply, "suggestions": suggestions}
+
+    if any(k in lowered for k in ["מחיר", "כמה", "עלות", "payment", "ביט"]):
+        reply = (
+            "התשלום בביט עובר ישירות ל־0528012311.\n"
+            "חדרים מ־₪129 ועד ₪299. פרימיום חודשי ₪49.9.\n"
+            "מה בא לך לסגור?"
+        )
+        suggestions = [
+            {"label": "חדר רומנטי", "path": "/app/pay?kind=room&item=romantic-1"},
+            {"label": "חדר פינוק", "path": "/app/pay?kind=room&item=pamper-1"},
+            {"label": "פרימיום", "path": "/app/pay?kind=premium&item=premium-month"},
+        ]
+        return {"reply": reply, "suggestions": suggestions}
+
+    reply = (
+        "אני כאן כדי לעזור לך לסגור חדר 💫\n"
+        "כתבי למשל: רומנטי / פינוק / מסיבה / משחקים / קולנוע / חופשה / הפתעה / פרימיום."
+    )
+    suggestions = [
+        {"label": "רומנטי", "path": "/app/pay?kind=room&item=romantic-1"},
+        {"label": "פינוק", "path": "/app/pay?kind=room&item=pamper-1"},
+        {"label": "הפתעה", "path": "/app/surprise"},
+    ]
+    return {"reply": reply, "suggestions": suggestions}
+
+
 class CreatePaymentBody(BaseModel):
     kind: str = Field(pattern="^(room|premium)$")
     itemId: str = Field(min_length=1, max_length=80)
@@ -401,6 +614,98 @@ def post_chat(
         store["users"][user_id] = user
         _save(store)
         return {"messages": user["messages"]}
+
+
+@router.post("/community/presence")
+def community_presence(
+    body: PresenceBody,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    with _LOCK:
+        store = _load()
+        user_id, name = _actor_from_store(
+            store, authorization, body.guestId, body.guestName
+        )
+        _touch_presence(store, user_id=user_id, name=name)
+        now = datetime.now(timezone.utc)
+        fresh = {}
+        for pid, meta in store["community"]["presence"].items():
+            last = _parse_iso(str(meta.get("lastSeen", "")))
+            if (now - last).total_seconds() <= ONLINE_WINDOW_SEC * 4:
+                fresh[pid] = meta
+        store["community"]["presence"] = fresh
+        _save(store)
+        online = _online_users(store["community"]["presence"])
+    return {"online": online, "onlineCount": len(online), "selfId": user_id}
+
+
+@router.get("/community")
+def get_community(
+    authorization: str | None = Header(default=None),
+    guestId: str | None = None,
+    guestName: str | None = None,
+) -> dict[str, Any]:
+    with _LOCK:
+        store = _load()
+        user_id, name = _actor_from_store(store, authorization, guestId, guestName)
+        _touch_presence(store, user_id=user_id, name=name)
+        _save(store)
+        messages = list(store["community"].get("messages", []))[-100:]
+        online = _online_users(store["community"]["presence"])
+    return {
+        "messages": messages,
+        "online": online,
+        "onlineCount": len(online),
+        "selfId": user_id,
+    }
+
+
+@router.post("/community/messages")
+def post_community_message(
+    body: CommunityPostBody,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="הודעה ריקה")
+    with _LOCK:
+        store = _load()
+        user_id, name = _actor_from_store(
+            store, authorization, body.guestId, body.guestName
+        )
+        _touch_presence(store, user_id=user_id, name=name)
+        message = {
+            "id": str(uuid.uuid4()),
+            "userId": user_id,
+            "name": name,
+            "text": text,
+            "at": _now(),
+            "kind": "user",
+        }
+        messages = list(store["community"].get("messages", []))
+        messages.append(message)
+        store["community"]["messages"] = messages[-200:]
+        _save(store)
+        online = _online_users(store["community"]["presence"])
+        out_messages = list(store["community"]["messages"])[-100:]
+    return {
+        "messages": out_messages,
+        "online": online,
+        "onlineCount": len(online),
+        "selfId": user_id,
+    }
+
+
+@router.post("/bot/chat")
+def bot_chat(body: BotChatBody) -> dict[str, Any]:
+    result = _bot_reply(body.text)
+    return {
+        "id": str(uuid.uuid4()),
+        "role": "bot",
+        "text": result["reply"],
+        "suggestions": result["suggestions"],
+        "at": _now(),
+    }
 
 
 @router.get("/catalog/prices")

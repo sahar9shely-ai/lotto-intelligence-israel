@@ -122,3 +122,48 @@ def test_goturs_bit_payment_room_and_premium(tmp_path, monkeypatch):
     )
     assert confirm_premium.status_code == 200
     assert confirm_premium.json()["user"]["isPremium"] is True
+
+
+def test_community_live_chat_and_bot(tmp_path, monkeypatch):
+    store_file = tmp_path / "goturs_store.json"
+    monkeypatch.setattr("app.api.v1.goturs.DATA_FILE", store_file)
+    monkeypatch.setattr("app.api.v1.goturs.DATA_DIR", tmp_path)
+    client = TestClient(app)
+
+    a = client.post(
+        "/api/v1/goturs/register",
+        json={"email": "a@example.com", "password": "secret", "name": "אנה"},
+    ).json()["token"]
+    b = client.post(
+        "/api/v1/goturs/register",
+        json={"email": "b@example.com", "password": "secret", "name": "בן"},
+    ).json()["token"]
+
+    post_a = client.post(
+        "/api/v1/goturs/community/messages",
+        headers={"Authorization": f"Bearer {a}"},
+        json={"text": "היי לכולם מהקהילה"},
+    )
+    assert post_a.status_code == 200
+    assert post_a.json()["onlineCount"] >= 1
+
+    feed_b = client.get(
+        "/api/v1/goturs/community",
+        headers={"Authorization": f"Bearer {b}"},
+    )
+    assert feed_b.status_code == 200
+    assert any(m["text"] == "היי לכולם מהקהילה" for m in feed_b.json()["messages"])
+    names = {u["name"] for u in feed_b.json()["online"]}
+    assert "אנה" in names or "בן" in names
+
+    guest = client.post(
+        "/api/v1/goturs/community/messages",
+        json={"text": "גם אני כאן", "guestId": "guest_x", "guestName": "אורחת"},
+    )
+    assert guest.status_code == 200
+    assert any(m["name"] == "אורחת" for m in guest.json()["messages"])
+
+    bot = client.post("/api/v1/goturs/bot/chat", json={"text": "רומנטי"})
+    assert bot.status_code == 200
+    assert "רומנטי" in bot.json()["text"]
+    assert any("romantic-1" in s["path"] for s in bot.json()["suggestions"])

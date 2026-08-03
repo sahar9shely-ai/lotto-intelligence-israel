@@ -1728,3 +1728,127 @@ img {
 .pay-destination--compact strong {
   font-size: 1.1rem;
 }
+
+/* Community live chat + booking bot */
+.community-screen .chat-screen__head h1 {
+  margin-bottom: 0.15rem;
+}
+
+.community-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+}
+
+.community-tabs__btn {
+  border: 1px solid rgba(199, 125, 255, 0.25);
+  background: rgba(20, 10, 34, 0.7);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.55rem 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.community-tabs__btn.is-active {
+  color: white;
+  background: linear-gradient(120deg, #9d4edd, #7b2cbf);
+  box-shadow: 0 0 16px rgba(157, 78, 221, 0.35);
+}
+
+.online-row {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.55rem;
+  margin-bottom: 0.35rem;
+  scrollbar-width: none;
+}
+
+.online-row::-webkit-scrollbar {
+  display: none;
+}
+
+.online-row__empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.online-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(20, 10, 34, 0.8);
+  border: 1px solid rgba(199, 125, 255, 0.22);
+  font-size: 0.78rem;
+  color: #e8dcf8;
+}
+
+.online-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.8);
+}
+
+.online-chip.is-me {
+  border-color: rgba(199, 125, 255, 0.55);
+  color: var(--purple-3);
+}
+
+.community-empty {
+  text-align: center;
+  margin: auto;
+  color: var(--muted);
+}
+
+.community-empty p {
+  margin: 0 0 0.35rem;
+  color: #f0e6ff;
+}
+
+.community-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.community-bubble__name {
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
+
+.bubble--bot {
+  align-self: flex-end;
+  background: linear-gradient(145deg, rgba(90, 24, 154, 0.75), rgba(30, 200, 216, 0.25));
+  border: 1px solid rgba(122, 240, 255, 0.28);
+  max-width: 92%;
+}
+
+.bot-suggestions,
+.bot-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.35rem 0 0.65rem;
+  justify-content: flex-start;
+}
+
+.bot-chip {
+  border-radius: 999px;
+  border: 1px solid rgba(199, 125, 255, 0.35);
+  background: rgba(20, 10, 34, 0.85);
+  color: var(--purple-3);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.bot-chip:disabled {
+  opacity: 0.55;
+}

@@ -39,6 +39,41 @@ export interface ChatMessage {
   at: string;
 }
 
+export interface CommunityMessage {
+  id: string;
+  userId: string;
+  name: string;
+  text: string;
+  at: string;
+  kind?: string;
+}
+
+export interface OnlineUser {
+  id: string;
+  name: string;
+  isBot?: boolean;
+}
+
+export interface CommunityFeed {
+  messages: CommunityMessage[];
+  online: OnlineUser[];
+  onlineCount: number;
+  selfId: string;
+}
+
+export interface BotSuggestion {
+  label: string;
+  path: string;
+}
+
+export interface BotReply {
+  id: string;
+  role: "bot";
+  text: string;
+  suggestions: BotSuggestion[];
+  at: string;
+}
+
 export interface BitPayment {
   id: string;
   kind: "room" | "premium";
@@ -138,6 +173,70 @@ export const api = {
       },
       token,
     );
+  },
+
+  getCommunity(
+    token: string | null,
+    guest?: { guestId: string; guestName: string },
+  ) {
+    const params = new URLSearchParams();
+    if (!token && guest) {
+      params.set("guestId", guest.guestId);
+      params.set("guestName", guest.guestName);
+    }
+    const q = params.toString();
+    return request<CommunityFeed>(
+      `/api/v1/goturs/community${q ? `?${q}` : ""}`,
+      {},
+      token,
+    );
+  },
+
+  sendCommunity(
+    text: string,
+    token: string | null,
+    guest?: { guestId: string; guestName: string },
+  ) {
+    return request<CommunityFeed>(
+      "/api/v1/goturs/community/messages",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          guestId: guest?.guestId,
+          guestName: guest?.guestName,
+        }),
+      },
+      token,
+    );
+  },
+
+  presence(
+    token: string | null,
+    guest?: { guestId: string; guestName: string },
+  ) {
+    return request<{
+      online: OnlineUser[];
+      onlineCount: number;
+      selfId: string;
+    }>(
+      "/api/v1/goturs/community/presence",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          guestId: guest?.guestId,
+          guestName: guest?.guestName,
+        }),
+      },
+      token,
+    );
+  },
+
+  botChat(text: string) {
+    return request<BotReply>("/api/v1/goturs/bot/chat", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
   },
 
   createBitPayment(
