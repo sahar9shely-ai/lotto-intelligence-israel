@@ -26,5 +26,5 @@ coverage/
 
 # GOT URS local sync store
 backend/data/
-data/
+/data/
 
