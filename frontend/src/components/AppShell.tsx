@@ -30,11 +30,11 @@ export function AppShell({
           {showBack ? (
             onBack ? (
               <button type="button" className="icon-btn" onClick={onBack} aria-label="חזרה">
-                ›
+                →
               </button>
             ) : (
               <Link to={backTo} className="icon-btn" aria-label="חזרה">
-                ›
+                →
               </Link>
             )
           ) : showMenu ? (

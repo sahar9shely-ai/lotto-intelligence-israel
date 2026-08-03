@@ -49,3 +49,14 @@ npm run dev
 - `GET /api/v1/goturs/me`
 - `PATCH /api/v1/goturs/me`
 - `GET|POST /api/v1/goturs/chat`
+
+## תשלום בביט
+
+- מסך תשלום: `/app/pay?kind=room|premium&item=...`
+- `GET /api/v1/goturs/catalog/prices`
+- `POST /api/v1/goturs/payments/bit` — יצירת תשלום + קישור ביט
+- `POST /api/v1/goturs/payments/bit/confirm` — אישור (דמו / עד חיבור webhook של Tranzila/Hyp)
+- משתני סביבה: `GOTURS_BIT_MODE`, `GOTURS_BIT_PHONE`, `GOTURS_BIT_NAME`
+
+במצב `demo` אפשר לבדוק את כל הזרימה באייפון בלי חשבון סליקה.
+במצב live מחברים `notify_url` של Bit Business דרך ספק (Tranzila / Hyp) במקום כפתור האישור.

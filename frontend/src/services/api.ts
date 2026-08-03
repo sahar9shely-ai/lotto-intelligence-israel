@@ -1,5 +1,15 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
+export interface OrderRecord {
+  id: string;
+  kind: "room" | "premium";
+  itemId: string;
+  title: string;
+  amountIls: number;
+  method: string;
+  paidAt: string;
+}
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -9,10 +19,12 @@ export interface UserProfile {
   roomsOpened: number;
   friends: number;
   isPremium: boolean;
+  phone?: string;
   referralCode: string;
   favorites: string[];
   openedRooms: string[];
   achievements: string[];
+  orders?: OrderRecord[];
 }
 
 export interface AuthResponse {
@@ -25,6 +37,26 @@ export interface ChatMessage {
   from: "me" | "them";
   text: string;
   at: string;
+}
+
+export interface BitPayment {
+  id: string;
+  kind: "room" | "premium";
+  itemId: string;
+  title: string;
+  amountIls: number;
+  currency: string;
+  status: "pending" | "paid" | "failed";
+  method: "bit";
+  phone: string;
+  bitDeepLink: string;
+  bitFallbackUrl: string;
+  bitQrPayload: string;
+  merchantName: string;
+  merchantPhone: string;
+  mode: string;
+  createdAt: string;
+  paidAt?: string | null;
 }
 
 async function request<T>(
@@ -103,6 +135,35 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify({ text }),
+      },
+      token,
+    );
+  },
+
+  createBitPayment(
+    payload: { kind: "room" | "premium"; itemId: string; phone: string },
+    token?: string | null,
+  ) {
+    return request<BitPayment>(
+      "/api/v1/goturs/payments/bit",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      token,
+    );
+  },
+
+  getPayment(paymentId: string) {
+    return request<BitPayment>(`/api/v1/goturs/payments/${paymentId}`);
+  },
+
+  confirmBitPayment(paymentId: string, token?: string | null) {
+    return request<{ payment: BitPayment; user: UserProfile | null }>(
+      "/api/v1/goturs/payments/bit/confirm",
+      {
+        method: "POST",
+        body: JSON.stringify({ paymentId }),
       },
       token,
     );

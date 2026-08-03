@@ -15,6 +15,7 @@ import { PremiumPage } from "./pages/PremiumPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { InvitePage } from "./pages/InvitePage";
+import { PaymentPage } from "./pages/PaymentPage";
 
 function BootGate({ children }: { children: React.ReactNode }) {
   const { loading } = useAuth();
@@ -46,6 +47,7 @@ export function App() {
           <Route path="/app/manual" element={<ManualSelectPage />} />
           <Route path="/app/rooms/:categoryId" element={<CategoryRoomsPage />} />
           <Route path="/app/room/:roomId" element={<RoomDetailPage />} />
+          <Route path="/app/pay" element={<PaymentPage />} />
           <Route path="/app/success" element={<SuccessPage />} />
           <Route path="/app/profile" element={<ProfilePage />} />
           <Route path="/app/points" element={<PointsPage />} />

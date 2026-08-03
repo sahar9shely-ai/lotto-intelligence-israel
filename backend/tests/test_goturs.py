@@ -60,3 +60,65 @@ def test_goturs_register_login_and_sync(tmp_path, monkeypatch):
     )
     assert chat.status_code == 200
     assert any(m["text"] == "היי מהטלפון השני" for m in chat.json()["messages"])
+
+
+def test_goturs_bit_payment_room_and_premium(tmp_path, monkeypatch):
+    store_file = tmp_path / "goturs_store.json"
+    monkeypatch.setattr("app.api.v1.goturs.DATA_FILE", store_file)
+    monkeypatch.setattr("app.api.v1.goturs.DATA_DIR", tmp_path)
+
+    client = TestClient(app)
+    register = client.post(
+        "/api/v1/goturs/register",
+        json={"email": "bit@example.com", "password": "secret", "name": "סהר"},
+    )
+    token = register.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    prices = client.get("/api/v1/goturs/catalog/prices")
+    assert prices.status_code == 200
+    assert prices.json()["rooms"]["romantic-1"] == 149
+
+    create = client.post(
+        "/api/v1/goturs/payments/bit",
+        headers=headers,
+        json={"kind": "room", "itemId": "romantic-1", "phone": "0501234567"},
+    )
+    assert create.status_code == 200
+    payment = create.json()
+    assert payment["status"] == "pending"
+    assert payment["method"] == "bit"
+    assert payment["amountIls"] == 149
+    assert payment["bitDeepLink"].startswith("bit://")
+
+    bad_phone = client.post(
+        "/api/v1/goturs/payments/bit",
+        headers=headers,
+        json={"kind": "room", "itemId": "romantic-1", "phone": "050123456"},
+    )
+    assert bad_phone.status_code == 400
+
+    confirm = client.post(
+        "/api/v1/goturs/payments/bit/confirm",
+        headers=headers,
+        json={"paymentId": payment["id"]},
+    )
+    assert confirm.status_code == 200
+    assert confirm.json()["payment"]["status"] == "paid"
+    user = confirm.json()["user"]
+    assert "romantic-1" in user["openedRooms"]
+    assert user["orders"][0]["method"] == "bit"
+
+    premium = client.post(
+        "/api/v1/goturs/payments/bit",
+        headers=headers,
+        json={"kind": "premium", "itemId": "premium-month", "phone": "0501234567"},
+    )
+    assert premium.status_code == 200
+    confirm_premium = client.post(
+        "/api/v1/goturs/payments/bit/confirm",
+        headers=headers,
+        json={"paymentId": premium.json()["id"]},
+    )
+    assert confirm_premium.status_code == 200
+    assert confirm_premium.json()["user"]["isPremium"] is True

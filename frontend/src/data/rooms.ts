@@ -14,6 +14,7 @@ export interface Room {
   description: string;
   icon: string;
   image: string;
+  priceIls: number;
   locked?: boolean;
   isNew?: boolean;
   premium?: boolean;
@@ -85,6 +86,7 @@ export const ROOMS: Room[] = [
     description: "נרות, ורדים ותאורה רכה — חוויה זוגית בלתי נשכחת.",
     icon: "♡",
     image: CATEGORIES[0].image,
+    priceIls: 149,
   },
   {
     id: "pamper-1",
@@ -94,6 +96,7 @@ export const ROOMS: Room[] = [
     description: "ג'קוזי, ניחוחות ושקט מוחלט — הזמן שלך להתפנק.",
     icon: "❀",
     image: CATEGORIES[1].image,
+    priceIls: 179,
     isNew: true,
   },
   {
@@ -104,6 +107,7 @@ export const ROOMS: Room[] = [
     description: "דיסקו, אורות סגול ואווירה שמרימה את האנרגיה.",
     icon: "✦",
     image: CATEGORIES[2].image,
+    priceIls: 159,
   },
   {
     id: "games-1",
@@ -113,6 +117,7 @@ export const ROOMS: Room[] = [
     description: "חידות, משחקי תפקידים והפתעות שמחכות מאחורי הדלת.",
     icon: "◐",
     image: CATEGORIES[3].image,
+    priceIls: 139,
   },
   {
     id: "cinema-1",
@@ -122,6 +127,7 @@ export const ROOMS: Room[] = [
     description: "קולנוע ביתי עם תוכן מותאם במיוחד עבורך.",
     icon: "▶",
     image: CATEGORIES[4].image,
+    priceIls: 129,
     isNew: true,
   },
   {
@@ -132,6 +138,7 @@ export const ROOMS: Room[] = [
     description: "אווירת חוף וחופש — בלי לצאת מהעיר.",
     icon: "☀",
     image: CATEGORIES[5].image,
+    priceIls: 189,
   },
   {
     id: "gourmet-1",
@@ -142,6 +149,7 @@ export const ROOMS: Room[] = [
     icon: "◈",
     image:
       "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&w=800&q=80",
+    priceIls: 219,
     isNew: true,
     premium: true,
   },
@@ -154,10 +162,30 @@ export const ROOMS: Room[] = [
     icon: "♛",
     image:
       "https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=800&q=80",
+    priceIls: 299,
     premium: true,
     locked: true,
   },
 ];
+
+export const PREMIUM_PLANS = [
+  {
+    id: "premium-month",
+    title: "פרימיום חודשי",
+    subtitle: "חודש מלא של הפתעות",
+    priceIls: 49.9,
+    period: "לחודש",
+    badge: "פופולרי",
+  },
+  {
+    id: "premium-year",
+    title: "פרימיום שנתי",
+    subtitle: "חסכון של חודשיים",
+    priceIls: 399,
+    period: "לשנה",
+    badge: "משתלם",
+  },
+] as const;
 
 export const POINT_ACTIONS = [
   { id: "open_room", label: "פתיחת חדר", points: 100 },
@@ -173,6 +201,14 @@ export const ACHIEVEMENTS = [
   { id: "legend", title: "אגדה", icon: "♛" },
 ] as const;
 
+export function formatIls(amount: number): string {
+  return new Intl.NumberFormat("he-IL", {
+    style: "currency",
+    currency: "ILS",
+    maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
+  }).format(amount);
+}
+
 export function getRoomById(id: string): Room | undefined {
   return ROOMS.find((room) => room.id === id);
 }
@@ -187,4 +223,8 @@ export function pickSurpriseRoom(excludeIds: string[] = []): Room {
   );
   const pool = unlocked.length > 0 ? unlocked : ROOMS.filter((r) => !r.locked);
   return pool[Math.floor(Math.random() * pool.length)] ?? ROOMS[0];
+}
+
+export function getPremiumPlan(id: string) {
+  return PREMIUM_PLANS.find((plan) => plan.id === id);
 }

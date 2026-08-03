@@ -1,12 +1,15 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "../components/AppShell";
-import { CATEGORIES, ROOMS, type RoomCategory } from "../data/rooms";
+import { CATEGORIES, ROOMS, formatIls, type RoomCategory } from "../data/rooms";
 
 const FILTERS: Array<{ id: "all" | "new" | RoomCategory; label: string }> = [
   { id: "all", label: "הכל" },
   { id: "new", label: "חדש" },
-  ...CATEGORIES.map((c) => ({ id: c.id as RoomCategory, label: c.title.replace("חדר ", "") })),
+  ...CATEGORIES.map((c) => ({
+    id: c.id as RoomCategory,
+    label: c.title.replace("חדר ", ""),
+  })),
 ];
 
 export function DiscoverPage() {
@@ -61,9 +64,14 @@ export function DiscoverPage() {
                 <div className="discover-card__top">
                   <strong>{room.title}</strong>
                   {room.isNew ? <span className="badge">חדש</span> : null}
-                  {room.premium ? <span className="badge badge--gold">פרימיום</span> : null}
+                  {room.premium ? (
+                    <span className="badge badge--gold">פרימיום</span>
+                  ) : null}
                 </div>
                 <p>{room.subtitle}</p>
+                <span className="price-tag price-tag--sm">
+                  {formatIls(room.priceIls)}
+                </span>
               </div>
             </Link>
           ))}

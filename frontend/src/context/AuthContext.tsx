@@ -23,10 +23,12 @@ function defaultGuest(): UserProfile {
     roomsOpened: 0,
     friends: 0,
     isPremium: false,
+    phone: "",
     referralCode: "GOTURS2024",
     favorites: [],
     openedRooms: [],
     achievements: [],
+    orders: [],
   };
 }
 
@@ -54,6 +56,7 @@ interface AuthContextValue {
   openRoom: (roomId: string) => Promise<void>;
   toggleFavorite: (roomId: string) => Promise<void>;
   upgradePremium: () => Promise<void>;
+  applyServerUser: (next: UserProfile) => void;
   chatMessages: ChatMessage[];
   sendMessage: (text: string) => Promise<void>;
   refreshChat: () => Promise<void>;
@@ -224,6 +227,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await updateUser({ isPremium: true });
   }, [updateUser]);
 
+  const applyServerUser = useCallback(
+    (next: UserProfile) => {
+      persist(next, token);
+      setOnlineSync(Boolean(token));
+    },
+    [persist, token],
+  );
+
   const refreshChat = useCallback(async () => {
     if (!token) return;
     try {
@@ -276,6 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       openRoom,
       toggleFavorite,
       upgradePremium,
+      applyServerUser,
       chatMessages,
       sendMessage,
       refreshChat,
@@ -293,6 +305,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       openRoom,
       toggleFavorite,
       upgradePremium,
+      applyServerUser,
       chatMessages,
       sendMessage,
       refreshChat,
