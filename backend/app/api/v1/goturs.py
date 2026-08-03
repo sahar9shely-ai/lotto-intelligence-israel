@@ -23,7 +23,7 @@ _LOCK = threading.Lock()
 
 # Merchant phone for Bit P2P / payment-request style demos.
 # Replace with real Bit Business / Tranzila credentials in production.
-BIT_MERCHANT_PHONE = os.getenv("GOTURS_BIT_PHONE", "0500000000")
+BIT_MERCHANT_PHONE = os.getenv("GOTURS_BIT_PHONE", "0528012311")
 BIT_MERCHANT_NAME = os.getenv("GOTURS_BIT_NAME", "GOT URS")
 BIT_MODE = os.getenv("GOTURS_BIT_MODE", "demo")  # demo | live
 

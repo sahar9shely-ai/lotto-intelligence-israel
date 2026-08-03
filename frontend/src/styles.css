@@ -1695,3 +1695,36 @@ img {
   font-weight: 700;
   white-space: nowrap;
 }
+
+.pay-destination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+  background: rgba(8, 30, 36, 0.65);
+  border: 1px solid rgba(30, 200, 216, 0.35);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.pay-destination strong {
+  color: #7af0ff;
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 16px rgba(122, 240, 255, 0.35);
+}
+
+.pay-destination--compact {
+  flex-direction: row;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.pay-destination--compact strong {
+  font-size: 1.1rem;
+}

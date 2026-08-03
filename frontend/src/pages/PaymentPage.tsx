@@ -149,6 +149,11 @@ export function PaymentPage() {
         <h1 className="page-title">תשלום בביט</h1>
         <p className="page-sub">מאובטח · מהיר · בלי פרטי אשראי באפליקציה</p>
 
+        <div className="pay-destination">
+          <span>התשלום יועבר ישירות לביט</span>
+          <strong dir="ltr">052-801-2311</strong>
+        </div>
+
         <div className="pay-summary">
           {item.image ? <img src={item.image} alt="" /> : <div className="pay-summary__diamond">◆</div>}
           <div>
@@ -161,7 +166,7 @@ export function PaymentPage() {
         {step === "form" ? (
           <form className="auth-form" onSubmit={startBitPayment}>
             <label className="field">
-              <span>מספר טלפון המחובר לביט</span>
+              <span>המספר שלכם בביט (משלמים ממנו)</span>
               <input
                 value={phone}
                 onChange={(e) => setPhone(normalizePhoneInput(e.target.value))}
@@ -175,8 +180,8 @@ export function PaymentPage() {
             <div className="pay-method is-active">
               <div className="pay-method__icon">bit</div>
               <div>
-                <strong>ביט</strong>
-                <small>תשלום באפליקציית ביט של בנק הפועלים</small>
+                <strong>ביט → 0528012311</strong>
+                <small>העברה ישירה למספר העסק של GOT URS</small>
               </div>
               <span className="pay-method__check">✓</span>
             </div>
@@ -184,10 +189,10 @@ export function PaymentPage() {
             {error ? <p className="form-error">{error}</p> : null}
 
             <button type="submit" className="bit-pay-btn" disabled={busy}>
-              {busy ? "פותחים את ביט..." : `שלמו ${formatIls(item.amount)} בביט`}
+              {busy ? "פותחים את ביט..." : `העבירו ${formatIls(item.amount)} ל־0528012311`}
             </button>
             <p className="secure-note">
-              בלחיצה תיפתח ביט. לאחר התשלום חזרו לכאן ואשרו.
+              בלחיצה תיפתח ביט להעברה למספר 0528012311. לאחר התשלום חזרו לכאן ואשרו.
             </p>
             {isGuest ? (
               <p className="page-sub">
@@ -210,6 +215,10 @@ export function PaymentPage() {
             <h2>ממתינים לאישור בביט</h2>
             <p>
               סכום לתשלום: <strong>{formatIls(payment.amountIls)}</strong>
+            </p>
+            <p className="pay-destination pay-destination--compact">
+              <span>אל</span>
+              <strong dir="ltr">{payment.merchantPhone || "0528012311"}</strong>
             </p>
             <p className="page-sub">
               אם ביט לא נפתחה אוטומטית, לחצו שוב על הכפתור למטה.
