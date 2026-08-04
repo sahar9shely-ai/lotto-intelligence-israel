@@ -3,7 +3,7 @@ import { Panel } from "../components/Panel";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Quote } from "../types/investments";
-import { buildMonthSchedule, openQuotePdf } from "../utils/quotePdf";
+import { buildMonthSchedule, downloadQuotePdf } from "../utils/quotePdf";
 import { formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 
 export function QuotesPage() {
@@ -12,6 +12,7 @@ export function QuotesPage() {
   const [showForm, setShowForm] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [pdfBusyId, setPdfBusyId] = useState<number | null>(null);
 
   const preview = useMemo(() => data ?? [], [data]);
 
@@ -47,11 +48,16 @@ export function QuotesPage() {
     reload();
   }
 
-  function exportPdf(quote: Quote) {
+  async function exportPdf(quote: Quote) {
+    setPdfBusyId(quote.id);
+    setMessage(null);
     try {
-      openQuotePdf(quote);
+      await downloadQuotePdf(quote);
+      setMessage(`הקובץ PDF עבור ${quote.prospect_name} ירד בהצלחה`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "ייצוא PDF נכשל");
+    } finally {
+      setPdfBusyId(null);
     }
   }
 
@@ -198,8 +204,13 @@ export function QuotesPage() {
                 ) : null}
 
                 <div className="page-head__actions">
-                  <button type="button" className="btn btn--ghost" onClick={() => exportPdf(q)}>
-                    הורדת PDF
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    disabled={pdfBusyId === q.id}
+                    onClick={() => exportPdf(q)}
+                  >
+                    {pdfBusyId === q.id ? "מכינים PDF..." : "הורדת PDF"}
                   </button>
                   {q.status !== "converted" ? (
                     <button
