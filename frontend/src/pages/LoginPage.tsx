@@ -32,24 +32,29 @@ export function LoginPage() {
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
         <p className="hero__eyebrow">גישה למשתמשים רשומים בלבד</p>
-        <h1 className="auth-card__brand">תזרים</h1>
+        <h1 className="auth-card__brand">התחברות</h1>
         <p className="muted">התחברות עם שם משתמש וסיסמה — בלי תלות במייל.</p>
 
-        <form className="form" onSubmit={onSubmit}>
+        <form className="form" onSubmit={onSubmit} autoComplete="off">
           <label>
             שם משתמש
             <input
               type="text"
-              autoComplete="username"
+              name="tazrim_username"
+              autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="sahar"
+              placeholder=""
             />
           </label>
           <PasswordField
             label="סיסמה"
-            autoComplete="current-password"
+            name="tazrim_password"
+            autoComplete="new-password"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
