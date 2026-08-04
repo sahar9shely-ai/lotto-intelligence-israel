@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
@@ -30,17 +32,19 @@ def login(payload: LoginRequest, db: Session = Depends(get_investment_db)):
     try:
         return auth_svc.login_user(db, payload.email, payload.password)
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        detail: object
+        try:
+            detail = json.loads(str(exc))
+        except json.JSONDecodeError:
+            detail = str(exc)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
 
 @router.post("/forgot-password", response_model=MessageOut)
 def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_investment_db)):
-    auth_svc.request_forgot_password(db, payload.email)
-    return {
-        "message": "אם המייל קיים במערכת — נשלח קישור להגדרת / שחזור סיסמה"
-    }
+    return auth_svc.request_forgot_password(db, payload.email)
 
 
 @router.post("/reset-password", response_model=MessageOut)
@@ -223,10 +227,15 @@ def resend_invite(
             status_code=400,
             detail="עדכני מייל אמיתי לפני שליחת הזמנה",
         )
-    auth_svc.send_invite_email(db, user)
+    _token, link, delivered = auth_svc.send_invite_email(db, user)
     db.commit()
-    return {"message": f"נשלח מייל הזמנה אל {user.email}"}
-
+    if delivered:
+        return {"message": f"נשלח מייל הזמנה אל {user.email}", "reset_link": link, "email_delivered": True}
+    return {
+        "message": f"שירות המייל לא מחובר — העתיקי את הקישור ושלחי ל-{user.email}",
+        "reset_link": link,
+        "email_delivered": False,
+    }
 
 @router.get("/login-alerts", response_model=list[LoginAlertOut])
 def list_login_alerts(

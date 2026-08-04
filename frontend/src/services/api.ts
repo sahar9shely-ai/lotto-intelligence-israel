@@ -51,12 +51,15 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
     } catch {
       /* ignore */
     }
-    const message =
-      typeof detail === "string"
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((d) => d.msg || JSON.stringify(d)).join(", ")
-          : "בקשה נכשלה";
+    let message = "בקשה נכשלה";
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (detail && typeof detail === "object") {
+      // Preserve structured errors (e.g. first-login reset_link)
+      message = JSON.stringify(detail);
+    } else if (Array.isArray(detail)) {
+      message = detail.map((d) => d.msg || JSON.stringify(d)).join(", ");
+    }
     throw new Error(message);
   }
 
@@ -72,7 +75,7 @@ export const api = {
       false,
     ),
   forgotPassword: (email: string) =>
-    request<{ message: string }>(
+    request<{ message: string; reset_link?: string | null; email_delivered?: boolean }>(
       "/api/v1/auth/forgot-password",
       { method: "POST", body: JSON.stringify({ email }) },
       false,
@@ -117,9 +120,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
   resendInvite: (id: number) =>
-    request<{ message: string }>(`/api/v1/auth/users/${id}/resend-invite`, {
-      method: "POST",
-    }),
+    request<{ message: string; reset_link?: string | null; email_delivered?: boolean }>(
+      `/api/v1/auth/users/${id}/resend-invite`,
+      { method: "POST" },
+    ),
   loginAlerts: (unreadOnly = false) =>
     request<LoginAlert[]>(
       `/api/v1/auth/login-alerts${unreadOnly ? "?unread_only=true" : ""}`,

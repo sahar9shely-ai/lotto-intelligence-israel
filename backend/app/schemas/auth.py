@@ -43,6 +43,8 @@ class TokenResponse(BaseModel):
 
 class MessageOut(BaseModel):
     message: str
+    reset_link: Optional[str] = None
+    email_delivered: Optional[bool] = None
 
 
 class LoginAlertOut(BaseModel):

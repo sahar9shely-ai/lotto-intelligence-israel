@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -54,11 +55,11 @@ def reset_link(token: str) -> str:
     return f"{base}/reset-password?token={token}"
 
 
-def send_invite_email(db: Session, user: User) -> PasswordResetToken:
+def send_invite_email(db: Session, user: User) -> tuple[PasswordResetToken, str, bool]:
     token = create_reset_token(db, user, purpose="invite")
     name = user.investor.name if user.investor else user.email
     link = reset_link(token.token)
-    send_email(
+    _, delivered = send_email(
         db,
         to_email=user.email,
         subject="תזרים — הגדרת סיסמה ראשונה",
@@ -73,14 +74,14 @@ def send_invite_email(db: Session, user: User) -> PasswordResetToken:
         kind="invite",
         meta={"user_id": user.id, "token": token.token, "link": link},
     )
-    return token
+    return token, link, delivered
 
 
-def send_forgot_email(db: Session, user: User) -> PasswordResetToken:
+def send_forgot_email(db: Session, user: User) -> tuple[PasswordResetToken, str, bool]:
     token = create_reset_token(db, user, purpose="forgot")
     name = user.investor.name if user.investor else user.email
     link = reset_link(token.token)
-    send_email(
+    _, delivered = send_email(
         db,
         to_email=user.email,
         subject="תזרים — שחזור סיסמה",
@@ -95,7 +96,7 @@ def send_forgot_email(db: Session, user: User) -> PasswordResetToken:
         kind="forgot",
         meta={"user_id": user.id, "token": token.token, "link": link},
     )
-    return token
+    return token, link, delivered
 
 
 def notify_manager_login(db: Session, user: User) -> LoginAlert:
@@ -248,10 +249,21 @@ def login_user(db: Session, email: str, password: str) -> dict:
 
     if user.must_reset_password or not user.password_hash:
         # Re-send invite to help first-time users
-        send_invite_email(db, user)
+        _token, link, delivered = send_invite_email(db, user)
         db.commit()
         raise PermissionError(
-            "זו כניסה ראשונה — נשלח אליך מייל להגדרת סיסמה. יש להשלים איפוס לפני התחברות."
+            json.dumps(
+                {
+                    "message": (
+                        "זו כניסה ראשונה — יש להגדיר סיסמה מהקישור."
+                        if not delivered
+                        else "זו כניסה ראשונה — נשלח אליך מייל להגדרת סיסמה."
+                    ),
+                    "reset_link": link,
+                    "email_delivered": delivered,
+                },
+                ensure_ascii=False,
+            )
         )
 
     if not verify_password(password, user.password_hash):
@@ -296,7 +308,7 @@ def apply_password_reset(db: Session, token_value: str, new_password: str) -> Us
     return user
 
 
-def request_forgot_password(db: Session, email: str) -> None:
+def request_forgot_password(db: Session, email: str) -> dict:
     user = (
         db.query(User)
         .options(joinedload(User.investor))
@@ -304,9 +316,28 @@ def request_forgot_password(db: Session, email: str) -> None:
         .first()
     )
     # Always succeed outwardly to avoid email enumeration; still send if found.
-    if user:
-        if not user.password_hash:
-            send_invite_email(db, user)
-        else:
-            send_forgot_email(db, user)
-        db.commit()
+    if not user:
+        return {
+            "message": "אם המייל קיים במערכת — נשלח קישור להגדרת / שחזור סיסמה",
+            "reset_link": None,
+            "email_delivered": False,
+        }
+
+    if not user.password_hash:
+        _token, link, delivered = send_invite_email(db, user)
+    else:
+        _token, link, delivered = send_forgot_email(db, user)
+    db.commit()
+
+    if delivered:
+        message = "נשלח קישור למייל שלך להגדרת / שחזור סיסמה"
+    else:
+        message = (
+            "שירות המייל עדיין לא מחובר — השתמשי בקישור למטה להגדרת הסיסמה "
+            "(אותו קישור שנשלח גם לתיבת המיילים במערכת)."
+        )
+    return {
+        "message": message,
+        "reset_link": link,
+        "email_delivered": delivered,
+    }

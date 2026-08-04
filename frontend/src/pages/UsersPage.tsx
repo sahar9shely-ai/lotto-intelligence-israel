@@ -165,7 +165,11 @@ export function UsersPage() {
                 onClick={async () => {
                   try {
                     const res = await api.resendInvite(u.id);
-                    setMessage(res.message);
+                    setMessage(
+                      res.reset_link && !res.email_delivered
+                        ? `${res.message} — קישור: ${res.reset_link}`
+                        : res.message,
+                    );
                     reloadOutbox();
                   } catch (err) {
                     setErrorMsg(err instanceof Error ? err.message : "שליחה נכשלה");
