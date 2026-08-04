@@ -21,6 +21,10 @@ export function PaymentsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [alignBusy, setAlignBusy] = useState(false);
+  const [openBusy, setOpenBusy] = useState(false);
+  const [markBusy, setMarkBusy] = useState(false);
+
+  const investorFilter = investorId ? Number(investorId) : undefined;
 
   const { data: investors } = useAsync(
     () => (isManager ? api.investors() : Promise.resolve([])),
@@ -31,53 +35,119 @@ export function PaymentsPage() {
       api.payments({
         year,
         status: status || undefined,
-        investor_id: investorId ? Number(investorId) : undefined,
+        investor_id: investorFilter,
       }),
-    [year, status, investorId],
+    [year, status, investorFilter],
+  );
+  const {
+    data: report,
+    reload: reloadReport,
+  } = useAsync(
+    () => api.paymentReport(year, investorFilter),
+    [year, investorFilter],
   );
 
   const payments = useMemo(() => data ?? [], [data]);
+  const yearly = report?.yearly;
+  const lifetime = report?.lifetime;
 
-  const totals = useMemo(() => {
-    const paid = payments.filter((p) => p.status === "paid");
-    return {
-      investor: paid.reduce((s, p) => s + p.investor_amount, 0),
-      manager: paid.reduce((s, p) => s + p.manager_amount, 0),
-      scheduled: payments.filter((p) => p.status === "scheduled").length,
-      paidCount: paid.length,
-    };
-  }, [payments]);
+  const yearOptions = useMemo(() => {
+    const fromApi = report?.available_years ?? [];
+    const set = new Set<number>([...fromApi, yearNow, yearNow - 1, yearNow - 2, 2025]);
+    return [...set].sort((a, b) => b - a);
+  }, [report?.available_years, yearNow]);
 
   const selectedInvestorName = useMemo(() => {
     if (!investorId) return null;
     return (investors ?? []).find((i) => String(i.id) === investorId)?.name ?? null;
   }, [investorId, investors]);
 
+  function refreshAll() {
+    reload();
+    reloadReport();
+  }
+
   async function markPaid(id: number) {
     await api.updatePayment(id, { status: "paid" });
-    reload();
+    refreshAll();
   }
 
   async function markScheduled(id: number) {
     await api.updatePayment(id, { status: "scheduled" });
-    reload();
+    refreshAll();
   }
 
   async function exportYearPdf() {
     setPdfBusy(true);
     setMessage(null);
     try {
+      // Export the full year (ignore status filter) so the annual report is complete.
+      const yearPayments = await api.payments({
+        year,
+        investor_id: investorFilter,
+      });
       await downloadYearlyPaymentsPdf({
         year,
-        payments,
+        payments: yearPayments,
         isManager,
         investorFilterName: selectedInvestorName,
+        lifetime,
       });
       setMessage(`דוח שנתי ${year} ירד בהצלחה`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "ייצוא PDF נכשל");
     } finally {
       setPdfBusy(false);
+    }
+  }
+
+  async function openReportingYear() {
+    if (
+      !window.confirm(
+        `לפתוח לוח תשלומים מלא לשנת ${year}?\nיווצר מסלול 1 בינואר–31 בדצמבר לפי תנאי המסלול הנוכחי של כל משקיע.`,
+      )
+    ) {
+      return;
+    }
+    setOpenBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.openCalendarYear(year);
+      setMessage(
+        result.created_count
+          ? `נפתח לוח לשנת ${year} עבור ${result.created_count} משקיעים — אפשר למלא את הדוח`
+          : `כבר קיים לוח לשנת ${year}`,
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "פתיחת שנת דיווח נכשלה");
+    } finally {
+      setOpenBusy(false);
+    }
+  }
+
+  async function markEntireYearPaid() {
+    if (
+      !window.confirm(
+        `לסמן את כל התשלומים המתוכננים בשנת ${year} כשולמו?\nמתאים למילוי דוח שנתי היסטורי.`,
+      )
+    ) {
+      return;
+    }
+    setMarkBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.markYearPaid(year, investorFilter);
+      setMessage(
+        result.marked_count
+          ? `סומנו ${result.marked_count} תשלומים כשולמו לשנת ${year}`
+          : `אין תשלומים ממתינים לשנת ${year}`,
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "סימון שנתי נכשל");
+    } finally {
+      setMarkBusy(false);
     }
   }
 
@@ -98,7 +168,7 @@ export function PaymentsPage() {
           ? `יושרו ${result.count} מסלולים לשנת ${year} (1 בינואר – 31 בדצמבר)`
           : `כל המסלולים כבר מיושרים לשנה הקלנדרית ${year}`,
       );
-      reload();
+      refreshAll();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "יישור שנתי נכשל");
     } finally {
@@ -111,7 +181,7 @@ export function PaymentsPage() {
     return (
       <div className="state state--error">
         <p>{error}</p>
-        <button type="button" className="btn" onClick={reload}>
+        <button type="button" className="btn" onClick={refreshAll}>
           נסי שוב
         </button>
       </div>
@@ -128,14 +198,24 @@ export function PaymentsPage() {
         </div>
         <div className="page-head__actions">
           {isManager ? (
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={alignBusy}
-              onClick={alignToCalendarYear}
-            >
-              {alignBusy ? "מיישרים..." : "יישור לתחילת שנה"}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                disabled={openBusy}
+                onClick={openReportingYear}
+              >
+                {openBusy ? "פותחים..." : `פתחי לוח ${year}`}
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                disabled={alignBusy}
+                onClick={alignToCalendarYear}
+              >
+                {alignBusy ? "מיישרים..." : "יישור לתחילת שנה"}
+              </button>
+            </>
           ) : null}
           <button
             type="button"
@@ -154,7 +234,7 @@ export function PaymentsPage() {
         <label>
           שנה
           <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-            {[yearNow, yearNow - 1, yearNow - 2].map((y) => (
+            {yearOptions.map((y) => (
               <option key={y} value={y}>
                 {y}
               </option>
@@ -185,35 +265,103 @@ export function PaymentsPage() {
         ) : null}
       </div>
 
-      <div className="stats-grid stats-grid--compact">
-        <div className="stat">
-          <span className="stat__label">{isManager ? "שולם למשקיעים" : "שולם לי"}</span>
-          <strong className="stat__value">{formatMoney(totals.investor)}</strong>
-        </div>
-        {isManager ? (
-          <div className="stat tone-manager">
-            <span className="stat__label">עמלות שהתקבלו</span>
-            <strong className="stat__value">{formatMoney(totals.manager)}</strong>
+      <div className="grid-2">
+        <Panel title="סיכום שנתי" subtitle={`שנת ${year} · מתוכנן מול שולם`}>
+          <div className="stats-grid stats-grid--compact">
+            <div className="stat">
+              <span className="stat__label">{isManager ? "שולם למשקיעים" : "שולם לי"}</span>
+              <strong className="stat__value">
+                {formatMoney(yearly?.paid_investor ?? 0)}
+              </strong>
+            </div>
+            <div className="stat">
+              <span className="stat__label">מתוכנן לשנה</span>
+              <strong className="stat__value">
+                {formatMoney(yearly?.planned_investor ?? 0)}
+              </strong>
+            </div>
+            {isManager ? (
+              <div className="stat tone-manager">
+                <span className="stat__label">עמלות ששולמו</span>
+                <strong className="stat__value">
+                  {formatMoney(yearly?.paid_manager ?? 0)}
+                </strong>
+              </div>
+            ) : null}
+            <div className="stat">
+              <span className="stat__label">שולמו / ממתינים</span>
+              <strong className="stat__value">
+                {yearly?.paid_count ?? 0} / {yearly?.scheduled_count ?? 0}
+              </strong>
+            </div>
           </div>
-        ) : null}
-        <div className="stat">
-          <span className="stat__label">תשלומים ששולמו</span>
-          <strong className="stat__value">{totals.paidCount}</strong>
-        </div>
-        <div className="stat">
-          <span className="stat__label">ממתינים</span>
-          <strong className="stat__value">{totals.scheduled}</strong>
-        </div>
+        </Panel>
+
+        <Panel title="סיכום סה״כ" subtitle="כל השנים יחד · מה ששולם בפועל">
+          <div className="stats-grid stats-grid--compact">
+            <div className="stat">
+              <span className="stat__label">{isManager ? "סה״כ שולם למשקיעים" : "סה״כ שולם לי"}</span>
+              <strong className="stat__value">
+                {formatMoney(lifetime?.paid_investor ?? 0)}
+              </strong>
+            </div>
+            <div className="stat">
+              <span className="stat__label">סה״כ מתוכנן</span>
+              <strong className="stat__value">
+                {formatMoney(lifetime?.planned_investor ?? 0)}
+              </strong>
+            </div>
+            {isManager ? (
+              <div className="stat tone-manager">
+                <span className="stat__label">סה״כ עמלות</span>
+                <strong className="stat__value">
+                  {formatMoney(lifetime?.paid_manager ?? 0)}
+                </strong>
+              </div>
+            ) : null}
+            <div className="stat">
+              <span className="stat__label">תשלומים ששולמו</span>
+              <strong className="stat__value">{lifetime?.paid_count ?? 0}</strong>
+            </div>
+          </div>
+        </Panel>
       </div>
 
       <Panel
         title={`שנת ${year}`}
         subtitle="מתחילת השנה ועד סופה · לפי חודש קלנדרי"
+        action={
+          isManager && (yearly?.scheduled_count ?? 0) > 0 ? (
+            <button
+              type="button"
+              className="btn btn--small"
+              disabled={markBusy}
+              onClick={markEntireYearPaid}
+            >
+              {markBusy ? "מסמנים..." : "סמני את כל השנה כשולמה"}
+            </button>
+          ) : null
+        }
       >
         {payments.length === 0 ? (
-          <p className="empty">
-            אין רשומות לשנה זו. צרי מסלול מתאריך 1 בינואר כדי לייצר לוח שנתי מלא.
-          </p>
+          <div className="empty-block">
+            <p className="empty">
+              אין רשומות לשנת {year}.{" "}
+              {isManager
+                ? `לחצי על «פתחי לוח ${year}» כדי ליצור לוח דיווח מלא לפי תנאי המסלולים הקיימים.`
+                : "פנו למנהלת לפתיחת לוח הדיווח לשנה זו."}
+            </p>
+            {isManager ? (
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={openBusy}
+                onClick={openReportingYear}
+              >
+                {openBusy ? "פותחים..." : `פתחי לוח תשלומים ל-${year}`}
+              </button>
+            ) : null}
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -242,7 +390,11 @@ export function PaymentsPage() {
                     {isManager ? (
                       <td className="table__actions">
                         {p.status !== "paid" ? (
-                          <button type="button" className="btn btn--small" onClick={() => markPaid(p.id)}>
+                          <button
+                            type="button"
+                            className="btn btn--small"
+                            onClick={() => markPaid(p.id)}
+                          >
                             סמני שולם
                           </button>
                         ) : (

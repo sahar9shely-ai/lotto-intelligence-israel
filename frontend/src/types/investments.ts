@@ -87,9 +87,29 @@ export type Dashboard = {
   monthly_manager_total: number;
   ytd_investor_paid: number;
   ytd_manager_earned: number;
+  lifetime_investor_paid: number;
+  lifetime_manager_earned: number;
   active_investors: number;
   active_plans: number;
   upcoming_payments: Payment[];
   recent_payments: Payment[];
   investors_summary: Investor[];
+};
+
+export type PaymentTotals = {
+  planned_investor: number;
+  paid_investor: number;
+  planned_manager: number;
+  paid_manager: number;
+  paid_count: number;
+  scheduled_count: number;
+  skipped_count: number;
+  total_count: number;
+};
+
+export type PaymentReport = {
+  year: number;
+  available_years: number[];
+  yearly: PaymentTotals;
+  lifetime: PaymentTotals;
 };

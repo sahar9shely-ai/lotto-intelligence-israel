@@ -18,6 +18,7 @@ from app.schemas.investments import (
     InvestorOut,
     InvestorUpdate,
     PaymentOut,
+    PaymentReportOut,
     PaymentUpdate,
     PlanCreate,
     PlanOut,
@@ -315,13 +316,48 @@ def list_payments(
     return [svc.serialize_payment(p) for p in payments]
 
 
+@router.get("/payment-report", response_model=PaymentReportOut)
+def payment_report(
+    year: int = Query(...),
+    investor_id: Optional[int] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    scoped = _scope_investor_id(user, investor_id)
+    return svc.get_payment_report(db, year=year, investor_id=scoped)
+
+
+@router.post("/open-calendar-year")
+def open_calendar_year(
+    year: int = Query(...),
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Open a Jan–Dec reporting year for all investors who already have a plan."""
+    try:
+        return svc.open_calendar_year_plans(db, year=year)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/payments/mark-year-paid")
+def mark_year_paid(
+    year: int = Query(...),
+    investor_id: Optional[int] = None,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Mark all scheduled payments in a calendar year as paid (for filling a year report)."""
+    return svc.mark_year_payments_paid(db, year=year, investor_id=investor_id)
+
+
 @router.post("/align-calendar-year")
 def align_calendar_year(
     year: Optional[int] = Query(default=None),
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    """Align active plans to 1 Jan–31 Dec of the calendar year."""
+    """Align active plans to 1 Jan–Dec of the calendar year."""
     return svc.align_plans_to_calendar_year(db, year=year)
 
 

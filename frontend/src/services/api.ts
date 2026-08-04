@@ -8,6 +8,7 @@ import type {
   Dashboard,
   Investor,
   Payment,
+  PaymentReport,
   Plan,
   Quote,
   Settings,
@@ -221,6 +222,27 @@ export const api = {
     if (params?.year != null) qs.set("year", String(params.year));
     const suffix = qs.toString() ? `?${qs}` : "";
     return request<Payment[]>(`/api/v1/investments/payments${suffix}`);
+  },
+  paymentReport: (year: number, investor_id?: number) => {
+    const qs = new URLSearchParams({ year: String(year) });
+    if (investor_id != null) qs.set("investor_id", String(investor_id));
+    return request<PaymentReport>(`/api/v1/investments/payment-report?${qs}`);
+  },
+  openCalendarYear: (year: number) =>
+    request<{
+      year: number;
+      created_count: number;
+      skipped_count: number;
+      created: Array<Record<string, unknown>>;
+      skipped: Array<Record<string, unknown>>;
+    }>(`/api/v1/investments/open-calendar-year?year=${year}`, { method: "POST" }),
+  markYearPaid: (year: number, investor_id?: number) => {
+    const qs = new URLSearchParams({ year: String(year) });
+    if (investor_id != null) qs.set("investor_id", String(investor_id));
+    return request<{ year: number; marked_count: number }>(
+      `/api/v1/investments/payments/mark-year-paid?${qs}`,
+      { method: "POST" },
+    );
   },
   alignCalendarYear: (year?: number) => {
     const qs = year != null ? `?year=${year}` : "";

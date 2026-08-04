@@ -729,6 +729,12 @@ textarea {
   margin: 0;
 }
 
+.empty-block {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+}
+
 @keyframes rise {
   from {
     opacity: 0;

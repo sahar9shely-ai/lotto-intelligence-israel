@@ -215,20 +215,32 @@ export function DashboardPage() {
         </Panel>
       </div>
 
-      <Panel title="סיכום שנתי עד כה" subtitle="מה ששולם בפועל מתחילת השנה" delay={200}>
+      <Panel title="סיכום שנתי וסה״כ" subtitle="שולם בפועל מתחילת השנה · וכל השנים יחד" delay={200}>
         <div className="stats-grid stats-grid--compact">
           <Stat
-            label={isManager ? "שולם למשקיעים YTD" : "שולם לי YTD"}
+            label={isManager ? "שולם למשקיעים השנה" : "שולם לי השנה"}
             value={formatMoney(data.ytd_investor_paid)}
           />
           {isManager ? (
             <Stat
-              label="עמלות ניהול שהתקבלו YTD"
+              label="עמלות השנה"
               value={formatMoney(data.ytd_manager_earned)}
               tone="manager"
             />
           ) : null}
-          <Stat label="מסלולים פעילים" value={String(data.active_plans)} />
+          <Stat
+            label={isManager ? "סה״כ שולם למשקיעים" : "סה״כ שולם לי"}
+            value={formatMoney(data.lifetime_investor_paid ?? 0)}
+          />
+          {isManager ? (
+            <Stat
+              label="סה״כ עמלות"
+              value={formatMoney(data.lifetime_manager_earned ?? 0)}
+              tone="manager"
+            />
+          ) : (
+            <Stat label="מסלולים פעילים" value={String(data.active_plans)} />
+          )}
         </div>
         {data.recent_payments.length > 0 ? (
           <ul className="list list--tight">

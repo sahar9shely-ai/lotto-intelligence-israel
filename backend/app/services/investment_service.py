@@ -322,6 +322,146 @@ def align_plans_to_calendar_year(
     return {"aligned": aligned, "count": len(aligned)}
 
 
+def _payment_totals(payments: list[Payment]) -> dict:
+    paid = [p for p in payments if p.status == "paid"]
+    scheduled = [p for p in payments if p.status == "scheduled"]
+    skipped = [p for p in payments if p.status == "skipped"]
+    return {
+        "planned_investor": round(sum(p.investor_amount for p in payments), 2),
+        "paid_investor": round(sum(p.investor_amount for p in paid), 2),
+        "planned_manager": round(sum(p.manager_amount for p in payments), 2),
+        "paid_manager": round(sum(p.manager_amount for p in paid), 2),
+        "paid_count": len(paid),
+        "scheduled_count": len(scheduled),
+        "skipped_count": len(skipped),
+        "total_count": len(payments),
+    }
+
+
+def available_payment_years(
+    db: Session, *, investor_id: Optional[int] = None
+) -> list[int]:
+    query = db.query(Payment.due_date)
+    if investor_id is not None:
+        query = query.filter(Payment.investor_id == investor_id)
+    years = {row[0].year for row in query.all() if row[0] is not None}
+    today_year = date.today().year
+    years.update({today_year, today_year - 1, today_year - 2})
+    return sorted(years, reverse=True)
+
+
+def get_payment_report(
+    db: Session, *, year: int, investor_id: Optional[int] = None
+) -> dict:
+    base = db.query(Payment)
+    if investor_id is not None:
+        base = base.filter(Payment.investor_id == investor_id)
+
+    lifetime = base.all()
+    yearly = [
+        p
+        for p in lifetime
+        if p.due_date is not None and p.due_date.year == year
+    ]
+    return {
+        "year": year,
+        "available_years": available_payment_years(db, investor_id=investor_id),
+        "yearly": _payment_totals(yearly),
+        "lifetime": _payment_totals(lifetime),
+    }
+
+
+def open_calendar_year_plans(db: Session, *, year: int) -> dict:
+    """Create Jan–Dec plans for a past/reporting year from each investor's latest plan.
+
+    Past years are marked completed so active principal on the dashboard is not doubled.
+    """
+    if year < 2000 or year > date.today().year + 1:
+        raise ValueError("שנה לא תקינה")
+
+    investors = db.query(Investor).options(joinedload(Investor.plans)).order_by(Investor.id).all()
+    created: list[dict] = []
+    skipped: list[dict] = []
+    year_start = date(year, 1, 1)
+    year_end = date(year, 12, 31)
+    plan_status = "completed" if year < date.today().year else "active"
+
+    for investor in investors:
+        plans = sorted(
+            investor.plans,
+            key=lambda p: (p.start_date or date.min, p.id),
+            reverse=True,
+        )
+        if not plans:
+            skipped.append({"investor_id": investor.id, "reason": "no_plan"})
+            continue
+
+        has_plan_in_year = any(p.start_date and p.start_date.year == year for p in plans)
+        has_payment_in_year = (
+            db.query(Payment)
+            .filter(
+                Payment.investor_id == investor.id,
+                Payment.due_date >= year_start,
+                Payment.due_date <= year_end,
+            )
+            .first()
+            is not None
+        )
+        if has_plan_in_year or has_payment_in_year:
+            skipped.append({"investor_id": investor.id, "reason": "already_exists"})
+            continue
+
+        template = next((p for p in plans if p.status == "active"), plans[0])
+        plan = InvestmentPlan(
+            investor_id=investor.id,
+            principal=template.principal,
+            monthly_rate_percent=template.monthly_rate_percent,
+            manager_fee_percent=template.manager_fee_percent,
+            start_date=year_start,
+            duration_months=12,
+            status=plan_status,
+            notes=f"לוח דיווח לשנת {year}",
+        )
+        db.add(plan)
+        db.commit()
+        db.refresh(plan)
+        generate_payment_schedule(db, plan)
+        created.append(
+            {
+                "plan_id": plan.id,
+                "investor_id": investor.id,
+                "start_date": year_start.isoformat(),
+                "status": plan_status,
+            }
+        )
+
+    return {
+        "year": year,
+        "created": created,
+        "created_count": len(created),
+        "skipped": skipped,
+        "skipped_count": len(skipped),
+    }
+
+
+def mark_year_payments_paid(
+    db: Session, *, year: int, investor_id: Optional[int] = None
+) -> dict:
+    query = db.query(Payment).filter(
+        Payment.due_date >= date(year, 1, 1),
+        Payment.due_date <= date(year, 12, 31),
+        Payment.status == "scheduled",
+    )
+    if investor_id is not None:
+        query = query.filter(Payment.investor_id == investor_id)
+    payments = query.all()
+    for payment in payments:
+        payment.status = "paid"
+        payment.paid_at = payment.due_date
+    db.commit()
+    return {"year": year, "marked_count": len(payments)}
+
+
 def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     today = date.today()
     investors_query = db.query(Investor).options(joinedload(Investor.plans)).order_by(Investor.id)
@@ -362,6 +502,13 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     ytd_investor = sum(p.investor_amount for p in paid_year)
     ytd_manager = sum(p.manager_amount for p in paid_year)
 
+    lifetime_query = db.query(Payment).filter(Payment.status == "paid")
+    if investor_id is not None:
+        lifetime_query = lifetime_query.filter(Payment.investor_id == investor_id)
+    paid_lifetime = lifetime_query.all()
+    lifetime_investor = sum(p.investor_amount for p in paid_lifetime)
+    lifetime_manager = sum(p.manager_amount for p in paid_lifetime)
+
     upcoming_query = (
         db.query(Payment)
         .options(joinedload(Payment.investor))
@@ -388,6 +535,8 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         "monthly_manager_total": round(monthly_manager_own + monthly_manager_fees, 2),
         "ytd_investor_paid": round(ytd_investor, 2),
         "ytd_manager_earned": round(ytd_manager, 2),
+        "lifetime_investor_paid": round(lifetime_investor, 2),
+        "lifetime_manager_earned": round(lifetime_manager, 2),
         "active_investors": len([i for i in investors if not i.is_manager and i.plans]),
         "active_plans": len(plans),
         "upcoming_payments": [serialize_payment(p) for p in upcoming],

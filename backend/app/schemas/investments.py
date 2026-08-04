@@ -193,8 +193,28 @@ class DashboardOut(BaseModel):
     monthly_manager_total: float
     ytd_investor_paid: float
     ytd_manager_earned: float
+    lifetime_investor_paid: float = 0.0
+    lifetime_manager_earned: float = 0.0
     active_investors: int
     active_plans: int
     upcoming_payments: list[PaymentOut]
     recent_payments: list[PaymentOut]
     investors_summary: list[InvestorOut]
+
+
+class PaymentTotalsOut(BaseModel):
+    planned_investor: float
+    paid_investor: float
+    planned_manager: float
+    paid_manager: float
+    paid_count: int
+    scheduled_count: int
+    skipped_count: int
+    total_count: int
+
+
+class PaymentReportOut(BaseModel):
+    year: int
+    available_years: list[int]
+    yearly: PaymentTotalsOut
+    lifetime: PaymentTotalsOut

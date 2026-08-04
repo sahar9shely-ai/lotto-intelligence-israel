@@ -1,4 +1,4 @@
-import type { Payment } from "../types/investments";
+import type { Payment, PaymentTotals } from "../types/investments";
 import { formatCalendarMonth, formatDate, formatMoney, statusLabel } from "./format";
 import { PDF_BASE_STYLES, renderHtmlToPdf } from "./pdfDocument";
 
@@ -15,12 +15,13 @@ export type YearlyPaymentsPdfOptions = {
   payments: Payment[];
   isManager: boolean;
   investorFilterName?: string | null;
+  lifetime?: PaymentTotals | null;
 };
 
 export async function downloadYearlyPaymentsPdf(
   options: YearlyPaymentsPdfOptions,
 ): Promise<void> {
-  const { year, payments, isManager, investorFilterName } = options;
+  const { year, payments, isManager, investorFilterName, lifetime } = options;
   const sorted = [...payments].sort((a, b) => {
     if (a.due_date === b.due_date) return a.id - b.id;
     return a.due_date < b.due_date ? -1 : 1;
@@ -68,6 +69,32 @@ export async function downloadYearlyPaymentsPdf(
       </tr>`;
     })
     .join("");
+
+  const lifetimeBlock = lifetime
+    ? `
+    <section class="pdf-totals">
+      <div class="pdf-section-title">
+        <h2>סיכום סה״כ</h2>
+        <p>כל השנים יחד</p>
+      </div>
+      <div class="pdf-totals__row">
+        <span>סה״כ מתוכנן למשקיעים</span>
+        <strong>${formatMoney(lifetime.planned_investor)}</strong>
+      </div>
+      <div class="pdf-totals__row pdf-totals__row--final">
+        <span>סה״כ ששולם בפועל</span>
+        <strong>${formatMoney(lifetime.paid_investor)}</strong>
+      </div>
+      ${
+        isManager
+          ? `<div class="pdf-totals__row">
+        <span>סה״כ עמלות שהתקבלו</span>
+        <strong>${formatMoney(lifetime.paid_manager)}</strong>
+      </div>`
+          : ""
+      }
+    </section>`
+    : "";
 
   const html = `
   <div class="pdf-sheet" dir="rtl" lang="he">
@@ -137,6 +164,10 @@ export async function downloadYearlyPaymentsPdf(
     </section>
 
     <section class="pdf-totals">
+      <div class="pdf-section-title">
+        <h2>סיכום שנתי</h2>
+        <p>שנת ${year}</p>
+      </div>
       <div class="pdf-totals__row">
         <span>סה״כ מתוכנן למשקיעים בשנת ${year}</span>
         <strong>${formatMoney(plannedInvestor)}</strong>
@@ -146,6 +177,8 @@ export async function downloadYearlyPaymentsPdf(
         <strong>${formatMoney(paidInvestor)}</strong>
       </div>
     </section>
+
+    ${lifetimeBlock}
 
     <footer class="pdf-footer">
       <p>דוח שנתי מתזרים · תקופה קלנדרית מלאה (${year}-01-01 עד ${year}-12-31)</p>

@@ -184,3 +184,50 @@ def test_align_calendar_year_moves_midyear_plans():
     ).json()
     assert year_payments[0]["due_date"] == f"{year}-01-01"
     assert year_payments[-1]["due_date"].startswith(f"{year}-12")
+
+
+def test_open_calendar_year_and_payment_report():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    report_year = 2025
+
+    opened = client.post(
+        f"/api/v1/investments/open-calendar-year?year={report_year}", headers=headers
+    )
+    assert opened.status_code == 200, opened.text
+    body = opened.json()
+    assert body["created_count"] >= 1
+
+    payments = client.get(
+        f"/api/v1/investments/payments?year={report_year}", headers=headers
+    ).json()
+    assert len(payments) >= 12
+    assert payments[0]["due_date"].startswith("2025-01")
+
+    report = client.get(
+        f"/api/v1/investments/payment-report?year={report_year}", headers=headers
+    )
+    assert report.status_code == 200
+    summary = report.json()
+    assert summary["year"] == report_year
+    assert summary["yearly"]["total_count"] >= 12
+    assert summary["lifetime"]["total_count"] >= summary["yearly"]["total_count"]
+    assert report_year in summary["available_years"]
+
+    marked = client.post(
+        f"/api/v1/investments/payments/mark-year-paid?year={report_year}",
+        headers=headers,
+    )
+    assert marked.status_code == 200
+    assert marked.json()["marked_count"] >= 1
+
+    after = client.get(
+        f"/api/v1/investments/payment-report?year={report_year}", headers=headers
+    ).json()
+    assert after["yearly"]["paid_count"] >= 1
+    assert after["lifetime"]["paid_investor"] >= after["yearly"]["paid_investor"]
+
+    # Opening again should not duplicate plans.
+    again = client.post(
+        f"/api/v1/investments/open-calendar-year?year={report_year}", headers=headers
+    ).json()
+    assert again["created_count"] == 0
