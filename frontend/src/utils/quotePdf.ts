@@ -123,11 +123,11 @@ const PDF_STYLES = `
   .pdf-root * { box-sizing: border-box; }
   .pdf-sheet {
     width: 794px;
-    padding: 48px 52px 40px;
+    padding: 36px 44px 28px;
     background: #ffffff;
     color: #0e2a22;
     font-family: "Rubik", "Segoe UI", Tahoma, sans-serif;
-    line-height: 1.45;
+    line-height: 1.4;
     direction: rtl;
     text-align: right;
   }
@@ -135,64 +135,64 @@ const PDF_STYLES = `
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 36px;
-    padding-bottom: 18px;
+    margin-bottom: 24px;
+    padding-bottom: 14px;
     border-bottom: 1px solid #d7e4dd;
   }
   .pdf-brand__mark {
     display: block;
     font-family: "Frank Ruhl Libre", "Times New Roman", serif;
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 700;
     letter-spacing: 0.02em;
     color: #0e2a22;
   }
   .pdf-brand__tag {
     display: block;
-    margin-top: 4px;
-    font-size: 13px;
+    margin-top: 2px;
+    font-size: 12px;
     color: #5a7369;
   }
   .pdf-meta {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
-    font-size: 12px;
+    gap: 6px;
+    font-size: 11px;
     color: #5a7369;
   }
   .pdf-badge {
     display: inline-block;
-    padding: 4px 10px;
+    padding: 3px 9px;
     border-radius: 999px;
     background: #f0e6d4;
     color: #8a6a2f;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
   }
-  .pdf-hero { margin-bottom: 28px; }
+  .pdf-hero { margin-bottom: 18px; }
   .pdf-hero h1 {
-    margin: 0 0 8px;
+    margin: 0 0 6px;
     font-family: "Frank Ruhl Libre", "Times New Roman", serif;
-    font-size: 40px;
+    font-size: 34px;
     font-weight: 700;
-    line-height: 1.15;
+    line-height: 1.12;
     color: #0e2a22;
   }
   .pdf-hero__sub {
     margin: 0;
-    font-size: 15px;
+    font-size: 14px;
     color: #456056;
   }
   .pdf-kpis {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 32px;
+    gap: 10px;
+    margin-bottom: 22px;
   }
   .pdf-kpi {
-    padding: 16px 18px;
-    border-radius: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
     background: #f4faf7;
     border: 1px solid #d5e5db;
   }
@@ -204,37 +204,37 @@ const PDF_STYLES = `
   .pdf-kpi--accent .pdf-kpi__label { color: #a8c4b8; }
   .pdf-kpi__label {
     display: block;
-    margin-bottom: 6px;
-    font-size: 12px;
+    margin-bottom: 4px;
+    font-size: 11px;
     color: #5a7369;
   }
   .pdf-kpi__value {
     display: block;
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     letter-spacing: -0.01em;
   }
   .pdf-section-title {
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
   .pdf-section-title h2 {
-    margin: 0 0 4px;
+    margin: 0 0 2px;
     font-family: "Frank Ruhl Libre", "Times New Roman", serif;
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 700;
   }
   .pdf-section-title p {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
     color: #5a7369;
   }
   .pdf-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13.5px;
+    font-size: 12.5px;
   }
   .pdf-table thead th {
-    padding: 11px 12px;
+    padding: 8px 10px;
     background: #eef5f1;
     color: #456056;
     font-weight: 600;
@@ -242,7 +242,7 @@ const PDF_STYLES = `
     border-bottom: 1px solid #c9dbd1;
   }
   .pdf-table td {
-    padding: 10px 12px;
+    padding: 7px 10px;
     border-bottom: 1px solid #e4eee8;
     text-align: right;
   }
@@ -250,8 +250,8 @@ const PDF_STYLES = `
   .pdf-table .col-month { color: #456056; font-weight: 500; }
   .pdf-table .col-num { font-variant-numeric: tabular-nums; font-weight: 600; }
   .pdf-totals {
-    margin-top: 22px;
-    border-radius: 14px;
+    margin-top: 16px;
+    border-radius: 12px;
     overflow: hidden;
     border: 1px solid #d5e5db;
   }
@@ -260,23 +260,23 @@ const PDF_STYLES = `
     justify-content: space-between;
     align-items: center;
     gap: 16px;
-    padding: 14px 18px;
+    padding: 11px 14px;
     background: #f4faf7;
-    font-size: 15px;
+    font-size: 14px;
   }
   .pdf-totals__row--final {
     background: #0e2a22;
     color: #eef7f2;
-    font-size: 17px;
+    font-size: 16px;
   }
   .pdf-footer {
-    margin-top: 28px;
-    padding-top: 14px;
+    margin-top: 18px;
+    padding-top: 10px;
     border-top: 1px solid #d7e4dd;
   }
   .pdf-footer p {
     margin: 0;
-    font-size: 11px;
+    font-size: 10px;
     color: #7a9087;
   }
 `;
@@ -309,22 +309,38 @@ function canvasToPdf(canvas: HTMLCanvasElement, fileName: string): void {
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 0;
-  const usableWidth = pageWidth - margin * 2;
-  const imgHeight = (canvas.height * usableWidth) / canvas.width;
-  const imgData = canvas.toDataURL("image/png", 1.0);
+  const marginX = 8;
+  const marginY = 8;
+  const usableWidth = pageWidth - marginX * 2;
+  const usableHeight = pageHeight - marginY * 2;
+  const imgData = canvas.toDataURL("image/jpeg", 0.95);
+
+  let imgWidth = usableWidth;
+  let imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+  // Fit on one page when only slightly over (avoids a nearly-blank page 2).
+  if (imgHeight <= usableHeight * 1.12) {
+    if (imgHeight > usableHeight) {
+      const scale = usableHeight / imgHeight;
+      imgWidth *= scale;
+      imgHeight = usableHeight;
+    }
+    const offsetX = marginX + (usableWidth - imgWidth) / 2;
+    pdf.addImage(imgData, "JPEG", offsetX, marginY, imgWidth, imgHeight, undefined, "FAST");
+    pdf.save(fileName);
+    return;
+  }
 
   let heightLeft = imgHeight;
-  let position = margin;
+  let position = marginY;
+  pdf.addImage(imgData, "JPEG", marginX, position, imgWidth, imgHeight, undefined, "FAST");
+  heightLeft -= usableHeight;
 
-  pdf.addImage(imgData, "PNG", margin, position, usableWidth, imgHeight, undefined, "FAST");
-  heightLeft -= pageHeight;
-
-  while (heightLeft > 0) {
-    position = margin - (imgHeight - heightLeft);
+  while (heightLeft > 8) {
+    position = marginY - (imgHeight - heightLeft);
     pdf.addPage();
-    pdf.addImage(imgData, "PNG", margin, position, usableWidth, imgHeight, undefined, "FAST");
-    heightLeft -= pageHeight;
+    pdf.addImage(imgData, "JPEG", marginX, position, imgWidth, imgHeight, undefined, "FAST");
+    heightLeft -= usableHeight;
   }
 
   pdf.save(fileName);
