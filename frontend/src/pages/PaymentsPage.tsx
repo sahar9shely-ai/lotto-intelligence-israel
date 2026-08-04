@@ -55,7 +55,26 @@ export function PaymentsPage() {
     [year, isManager],
   );
 
-  const payments = useMemo(() => data ?? [], [data]);
+  const payments = useMemo(() => {
+    const rows = data ?? [];
+    const priority: Record<string, number> = {
+      paid: 3,
+      awaiting_confirmation: 2,
+      scheduled: 1,
+      skipped: 0,
+    };
+    const unique = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      const key = `${row.investor_id}|${row.due_date}`;
+      const prev = unique.get(key);
+      if (!prev || (priority[row.status] ?? 0) > (priority[prev.status] ?? 0)) {
+        unique.set(key, row);
+      }
+    }
+    return [...unique.values()].sort((a, b) =>
+      a.due_date === b.due_date ? a.id - b.id : a.due_date < b.due_date ? -1 : 1,
+    );
+  }, [data]);
   const yearly = report?.yearly;
   const lifetime = report?.lifetime;
 

@@ -26,6 +26,42 @@ def _table_exists(engine: Engine, table: str) -> bool:
 def ensure_schema(engine: Engine) -> None:
     InvestmentBase.metadata.create_all(bind=engine)
 
+    if _table_exists(engine, "payments"):
+        with engine.begin() as conn:
+            # Deduplicate before unique indexes (keep lowest id per key).
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM payments
+                    WHERE id NOT IN (
+                      SELECT MIN(id) FROM payments GROUP BY plan_id, month_number
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM payments
+                    WHERE id NOT IN (
+                      SELECT MIN(id) FROM payments GROUP BY investor_id, due_date
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_plan_month "
+                    "ON payments(plan_id, month_number)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_investor_due "
+                    "ON payments(investor_id, due_date)"
+                )
+            )
+
     if not _table_exists(engine, "users"):
         return
 

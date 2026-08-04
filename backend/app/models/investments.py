@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.investment_base import InvestmentBase as Base
@@ -49,6 +49,10 @@ class InvestmentPlan(Base):
 
 class Payment(Base):
     __tablename__ = "payments"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "month_number", name="uq_payments_plan_month"),
+        UniqueConstraint("investor_id", "due_date", name="uq_payments_investor_due"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("investment_plans.id"), nullable=False)

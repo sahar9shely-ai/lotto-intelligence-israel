@@ -339,7 +339,26 @@ def list_payments(
         payments = query.order_by(Payment.due_date.asc(), Payment.id.asc()).all()
     else:
         payments = query.order_by(Payment.due_date.desc(), Payment.id.desc()).all()
-    return [svc.serialize_payment(p) for p in payments]
+
+    # Safety net: never return two rows for the same investor on the same due date.
+    priority = {
+        "paid": 3,
+        "awaiting_confirmation": 2,
+        "scheduled": 1,
+        "skipped": 0,
+    }
+    unique: dict[tuple[int, date], Payment] = {}
+    for payment in payments:
+        key = (payment.investor_id, payment.due_date)
+        prior = unique.get(key)
+        if prior is None or priority.get(payment.status, 0) > priority.get(prior.status, 0):
+            unique[key] = payment
+    ordered = sorted(
+        unique.values(),
+        key=lambda p: (p.due_date, p.id),
+        reverse=year is None,
+    )
+    return [svc.serialize_payment(p) for p in ordered]
 
 
 @router.get("/payment-report", response_model=PaymentReportOut)

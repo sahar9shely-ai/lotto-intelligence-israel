@@ -284,7 +284,7 @@ def test_payment_requires_investor_confirmation():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     bar = next(i for i in investors if i["name"] == "בר")
-    year = date.today().year
+    year = 2031  # isolated future year — avoids colliding with live schedules
 
     plan_res = client.post(
         "/api/v1/investments/plans",
@@ -305,6 +305,7 @@ def test_payment_requires_investor_confirmation():
     payments = client.get(
         f"/api/v1/investments/payments?plan_id={plan_id}", headers=headers
     ).json()
+    assert len(payments) == 12
     payment_id = payments[0]["id"]
 
     marked = client.patch(
@@ -340,7 +341,7 @@ def test_regenerate_after_start_change_does_not_duplicate_due_dates():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     bar = next(i for i in investors if i["name"] == "בר")
-    year = date.today().year
+    year = 2032
 
     plan_res = client.post(
         "/api/v1/investments/plans",
@@ -389,3 +390,55 @@ def test_regenerate_after_start_change_does_not_duplicate_due_dates():
     assert len(after) == 12
 
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
+
+
+def test_no_duplicate_investor_due_dates_across_plans():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    bar = next(i for i in investors if i["name"] == "בר")
+    year = 2033
+
+    first = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": bar["id"],
+            "principal": 10000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "start_date": f"{year}-01-01",
+            "duration_months": 12,
+            "generate_schedule": True,
+            "notes": "מסלול ראשון לבדיקת כפל",
+        },
+    )
+    assert first.status_code == 201
+    first_id = first.json()["id"]
+
+    second = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": bar["id"],
+            "principal": 20000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "start_date": f"{year}-01-01",
+            "duration_months": 12,
+            "generate_schedule": True,
+            "notes": "מסלול שני חופף — לא אמור ליצור כפל",
+        },
+    )
+    assert second.status_code == 201
+    second_id = second.json()["id"]
+
+    payments = client.get(
+        f"/api/v1/investments/payments?year={year}&investor_id={bar['id']}",
+        headers=headers,
+    ).json()
+    due_dates = [p["due_date"] for p in payments]
+    assert len(due_dates) == len(set(due_dates)), due_dates
+    assert len(due_dates) == 12
+
+    client.delete(f"/api/v1/investments/plans/{first_id}", headers=headers)
+    client.delete(f"/api/v1/investments/plans/{second_id}", headers=headers)
