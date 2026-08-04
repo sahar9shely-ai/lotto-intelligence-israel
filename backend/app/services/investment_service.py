@@ -202,38 +202,148 @@ def serialize_quote(quote: Quote) -> dict:
 
 
 def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment]:
-    db.query(Payment).filter(
-        Payment.plan_id == plan.id, Payment.status != "paid"
-    ).delete(synchronize_session=False)
+    """Rebuild unpaid months and keep paid months in sync with start_date.
 
-    existing_paid_months = {
-        p.month_number
-        for p in db.query(Payment).filter(
-            Payment.plan_id == plan.id, Payment.status == "paid"
-        )
-    }
-
+    Paid rows are preserved by month_number, but their due_date is always
+    rewritten to start_date + (month_number - 1) so a start-date change cannot
+    leave two payments on the same calendar day.
+    """
     monthly_investor = calc_monthly(plan.principal, plan.monthly_rate_percent)
     monthly_manager = calc_monthly(plan.principal, plan.manager_fee_percent)
-    created: list[Payment] = []
 
-    for month in range(1, plan.duration_months + 1):
-        if month in existing_paid_months:
+    existing = (
+        db.query(Payment).filter(Payment.plan_id == plan.id).order_by(Payment.id).all()
+    )
+    by_month: dict[int, Payment] = {}
+    for payment in existing:
+        prev = by_month.get(payment.month_number)
+        if prev is None:
+            by_month[payment.month_number] = payment
             continue
+        # Duplicate month_number: keep paid, else keep earliest id.
+        keep, drop = (prev, payment)
+        if payment.status == "paid" and prev.status != "paid":
+            keep, drop = payment, prev
+        if drop.status != "paid":
+            db.delete(drop)
+            by_month[payment.month_number] = keep
+        elif keep.status != "paid":
+            db.delete(keep)
+            by_month[payment.month_number] = drop
+        else:
+            db.delete(drop)
+            by_month[payment.month_number] = keep
+
+    db.flush()
+
+    created: list[Payment] = []
+    for month in range(1, plan.duration_months + 1):
+        due = add_months(plan.start_date, month - 1)
+        payment = by_month.get(month)
+        if payment is not None:
+            payment.due_date = due
+            payment.investor_id = plan.investor_id
+            if payment.status != "paid":
+                payment.investor_amount = monthly_investor
+                payment.manager_amount = monthly_manager
+            continue
+
         payment = Payment(
             plan_id=plan.id,
             investor_id=plan.investor_id,
             month_number=month,
-            due_date=add_months(plan.start_date, month - 1),
+            due_date=due,
             investor_amount=monthly_investor,
             manager_amount=monthly_manager,
             status="scheduled",
         )
         db.add(payment)
         created.append(payment)
+        by_month[month] = payment
+
+    # Remove unpaid months outside the plan length.
+    for month, payment in list(by_month.items()):
+        if month < 1 or month > plan.duration_months:
+            if payment.status != "paid":
+                db.delete(payment)
+                by_month.pop(month, None)
+
+    db.flush()
+
+    # Final safety: one payment per due_date on the plan (prefer paid).
+    remaining = (
+        db.query(Payment)
+        .filter(Payment.plan_id == plan.id)
+        .order_by(Payment.due_date.asc(), Payment.id.asc())
+        .all()
+    )
+    seen_due: dict[date, Payment] = {}
+    for payment in remaining:
+        prior = seen_due.get(payment.due_date)
+        if prior is None:
+            seen_due[payment.due_date] = payment
+            continue
+        if payment.status == "paid" and prior.status != "paid":
+            db.delete(prior)
+            seen_due[payment.due_date] = payment
+        else:
+            db.delete(payment)
 
     db.commit()
     return created
+
+
+def repair_duplicate_payments(db: Session) -> dict:
+    """Remove scheduled payments that share a due_date with another row on the same plan."""
+    plans = db.query(InvestmentPlan).all()
+    removed = 0
+    for plan in plans:
+        rows = (
+            db.query(Payment)
+            .filter(Payment.plan_id == plan.id)
+            .order_by(Payment.due_date.asc(), Payment.id.asc())
+            .all()
+        )
+        seen: dict[date, Payment] = {}
+        for payment in rows:
+            prior = seen.get(payment.due_date)
+            if prior is None:
+                seen[payment.due_date] = payment
+                continue
+            if payment.status == "paid" and prior.status != "paid":
+                db.delete(prior)
+                seen[payment.due_date] = payment
+                removed += 1
+            else:
+                db.delete(payment)
+                removed += 1
+    db.commit()
+    return {"removed": removed}
+
+
+def repair_reporting_year_plans(db: Session) -> dict:
+    """Realign auto-opened reporting plans to 1 Jan and rebuild schedules without duplicates."""
+    import re
+
+    dupes = repair_duplicate_payments(db)
+    realigned = 0
+    for plan in db.query(InvestmentPlan).all():
+        notes = plan.notes or ""
+        match = re.search(r"לוח דיווח לשנת (\d{4})", notes)
+        if not match:
+            continue
+        year = int(match.group(1))
+        expected = date(year, 1, 1)
+        if plan.start_date == expected and plan.duration_months == 12:
+            # Still regenerate to sync due dates / fill gaps safely.
+            generate_payment_schedule(db, plan)
+            continue
+        plan.start_date = expected
+        plan.duration_months = 12
+        db.commit()
+        generate_payment_schedule(db, plan)
+        realigned += 1
+    return {"duplicate_payments_removed": dupes["removed"], "plans_realigned": realigned}
 
 
 def calendar_year_start(value: date) -> date:

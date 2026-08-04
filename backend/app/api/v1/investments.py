@@ -48,6 +48,7 @@ def init_investment_db() -> None:
     db = InvestmentSessionLocal()
     try:
         svc.seed_defaults(db)
+        svc.repair_reporting_year_plans(db)
     finally:
         db.close()
 

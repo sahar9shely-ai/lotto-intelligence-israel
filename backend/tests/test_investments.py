@@ -276,3 +276,58 @@ def test_delete_plan_and_remove_from_year():
         f"/api/v1/investments/payments?plan_id={plan_id}", headers=headers
     ).json()
     assert gone == []
+
+
+def test_regenerate_after_start_change_does_not_duplicate_due_dates():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    bar = next(i for i in investors if i["name"] == "בר")
+    year = date.today().year
+
+    plan_res = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": bar["id"],
+            "principal": 10000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "start_date": f"{year}-01-01",
+            "duration_months": 12,
+            "generate_schedule": True,
+            "notes": "בדיקת כפילות",
+        },
+    )
+    assert plan_res.status_code == 201
+    plan_id = plan_res.json()["id"]
+
+    payments = client.get(
+        f"/api/v1/investments/payments?plan_id={plan_id}", headers=headers
+    ).json()
+    assert len(payments) == 12
+    september = next(p for p in payments if p["due_date"].endswith("-09-01"))
+    paid = client.patch(
+        f"/api/v1/investments/payments/{september['id']}",
+        headers=headers,
+        json={"status": "paid"},
+    )
+    assert paid.status_code == 200
+
+    updated = client.patch(
+        f"/api/v1/investments/plans/{plan_id}",
+        headers=headers,
+        json={
+            "start_date": f"{year}-09-01",
+            "regenerate_schedule": True,
+        },
+    )
+    assert updated.status_code == 200
+
+    after = client.get(
+        f"/api/v1/investments/payments?plan_id={plan_id}", headers=headers
+    ).json()
+    due_dates = [p["due_date"] for p in after]
+    assert len(due_dates) == len(set(due_dates)), due_dates
+    assert len(after) == 12
+
+    client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
