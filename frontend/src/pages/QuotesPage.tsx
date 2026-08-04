@@ -2,6 +2,8 @@ import { FormEvent, useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
+import type { Quote } from "../types/investments";
+import { buildMonthSchedule, openQuotePdf } from "../utils/quotePdf";
 import { formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 
 export function QuotesPage() {
@@ -9,6 +11,7 @@ export function QuotesPage() {
   const { data, error, loading, reload } = useAsync(() => api.quotes(), []);
   const [showForm, setShowForm] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const preview = useMemo(() => data ?? [], [data]);
 
@@ -19,7 +22,10 @@ export function QuotesPage() {
       prospect_name: String(fd.get("prospect_name") || "").trim(),
       principal: Number(fd.get("principal") || 0),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
-      manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
+      // Management fee stays internal/default — not shown on investor-facing quote.
+      manager_fee_percent: Number(
+        settings?.default_manager_fee_percent ?? 0,
+      ),
       duration_months: Number(fd.get("duration_months") || 12),
       notes: String(fd.get("notes") || "") || undefined,
     });
@@ -41,6 +47,14 @@ export function QuotesPage() {
     reload();
   }
 
+  function exportPdf(quote: Quote) {
+    try {
+      openQuotePdf(quote);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "ייצוא PDF נכשל");
+    }
+  }
+
   if (loading) return <div className="state">טוען הצעות...</div>;
   if (error)
     return (
@@ -57,7 +71,7 @@ export function QuotesPage() {
       <div className="page-head">
         <div>
           <h1>הצעות למשקיעים חדשים</h1>
-          <p className="muted">סיכום ל־12 חודשים (או יותר) לפני הכנסה כלקוח</p>
+          <p className="muted">מפרט חודשי + סה״כ רווח · אפשרות להורדת PDF</p>
         </div>
         <button type="button" className="btn btn--primary" onClick={() => setShowForm(true)}>
           הצעה חדשה
@@ -67,7 +81,7 @@ export function QuotesPage() {
       {message ? <p className="toast">{message}</p> : null}
 
       {showForm ? (
-        <Panel title="סיכום הצעה" subtitle="חישוב מהיר לפי קרן ואחוז קבוע">
+        <Panel title="סיכום הצעה" subtitle="לחישוב לפי קרן ואחוז קבוע למשקיע">
           <form className="form" onSubmit={onCreate}>
             <div className="form__grid">
               <label>
@@ -87,17 +101,6 @@ export function QuotesPage() {
                   step="0.01"
                   required
                   defaultValue={settings?.default_monthly_rate_percent ?? 0}
-                />
-              </label>
-              <label>
-                עמלת ניהול %
-                <input
-                  name="manager_fee_percent"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  required
-                  defaultValue={settings?.default_manager_fee_percent ?? 0}
                 />
               </label>
               <label>
@@ -131,51 +134,88 @@ export function QuotesPage() {
         {preview.length === 0 ? (
           <p className="empty">אין הצעות עדיין. צרי הצעת סיכום לאנשים חדשים.</p>
         ) : (
-          preview.map((q) => (
-            <article key={q.id} className="quote-card">
-              <header>
-                <h2>{q.prospect_name}</h2>
-                <span className={`badge badge--${q.status}`}>{statusLabel(q.status)}</span>
-              </header>
-              <p className="quote-card__lead">
-                קרן {formatMoney(q.principal)} · {formatPercent(q.monthly_rate_percent)} לחודש ·{" "}
-                {q.duration_months} חודשים
-              </p>
-              <dl className="quote-dl">
-                <div>
-                  <dt>חודשי למשקיע</dt>
-                  <dd>{formatMoney(q.monthly_investor_payout, true)}</dd>
-                </div>
-                <div>
-                  <dt>סה״כ לאורך המסלול</dt>
-                  <dd>{formatMoney(q.total_investor_payout)}</dd>
-                </div>
-                <div>
-                  <dt>שנתי (×12)</dt>
-                  <dd>{formatMoney(q.annual_investor_payout)}</dd>
-                </div>
-                <div>
-                  <dt>עמלת ניהול חודשית</dt>
-                  <dd>{formatMoney(q.monthly_manager_fee, true)}</dd>
-                </div>
-                <div>
-                  <dt>סה״כ עמלות למסלול</dt>
-                  <dd>{formatMoney(q.total_manager_fee)}</dd>
-                </div>
-              </dl>
-              {q.status !== "converted" ? (
+          preview.map((q) => {
+            const rows = buildMonthSchedule(q);
+            const open = expandedId === q.id;
+            return (
+              <article key={q.id} className="quote-card">
+                <header>
+                  <h2>{q.prospect_name}</h2>
+                  <span className={`badge badge--${q.status}`}>{statusLabel(q.status)}</span>
+                </header>
+                <p className="quote-card__lead">
+                  קרן {formatMoney(q.principal)} · {formatPercent(q.monthly_rate_percent)} לחודש ·{" "}
+                  {q.duration_months} חודשים
+                </p>
+                <dl className="quote-dl">
+                  <div>
+                    <dt>רווח חודשי</dt>
+                    <dd>{formatMoney(q.monthly_investor_payout, true)}</dd>
+                  </div>
+                  <div>
+                    <dt>סה״כ רווח בסיום המסלול</dt>
+                    <dd>{formatMoney(q.total_investor_payout)}</dd>
+                  </div>
+                  <div>
+                    <dt>קרן + רווח בסיום</dt>
+                    <dd>{formatMoney(q.principal + q.total_investor_payout)}</dd>
+                  </div>
+                </dl>
+
                 <button
                   type="button"
-                  className="btn btn--primary"
-                  onClick={() => convert(q.id, q.prospect_name)}
+                  className="btn btn--ghost btn--small"
+                  onClick={() => setExpandedId(open ? null : q.id)}
                 >
-                  הכניסי כמשקיע חדש
+                  {open ? "הסתרת מפרט חודשי" : "הצגת מפרט חודשי"}
                 </button>
-              ) : (
-                <p className="muted">כבר הומר למשקיע #{q.converted_investor_id}</p>
-              )}
-            </article>
-          ))
+
+                {open ? (
+                  <div className="table-wrap quote-months">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>חודש</th>
+                          <th>רווח לחודש</th>
+                          <th>רווח מצטבר</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r) => (
+                          <tr key={r.month}>
+                            <td>{r.month}</td>
+                            <td>{formatMoney(r.profit, true)}</td>
+                            <td>{formatMoney(r.cumulative, true)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="quote-total">
+                      סה״כ רווח בסוף {q.duration_months} חודשים:{" "}
+                      <strong>{formatMoney(q.total_investor_payout)}</strong>
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="page-head__actions">
+                  <button type="button" className="btn btn--ghost" onClick={() => exportPdf(q)}>
+                    הורדת PDF
+                  </button>
+                  {q.status !== "converted" ? (
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={() => convert(q.id, q.prospect_name)}
+                    >
+                      הכניסי כמשקיע חדש
+                    </button>
+                  ) : (
+                    <p className="muted">כבר הומר למשקיע #{q.converted_investor_id}</p>
+                  )}
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
     </div>

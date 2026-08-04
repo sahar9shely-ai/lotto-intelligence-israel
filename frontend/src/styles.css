@@ -601,6 +601,21 @@ textarea {
   font-weight: 600;
 }
 
+.quote-months {
+  margin-top: 8px;
+}
+
+.quote-months .table {
+  min-width: 0;
+}
+
+.quote-total {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(14, 42, 34, 0.06);
+}
+
 .modal {
   position: fixed;
   inset: 0;
