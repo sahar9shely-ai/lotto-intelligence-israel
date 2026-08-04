@@ -1,11 +1,11 @@
-import json
 from datetime import date
 
 from fastapi.testclient import TestClient
 
 from app.db.investment_session import InvestmentSessionLocal
 from app.main import app
-from app.models.auth import EmailOutbox
+from app.models.auth import User
+from app.security.auth import hash_password
 from app.services import investment_service as inv_svc
 
 client = TestClient(app)
@@ -19,28 +19,25 @@ def _ensure_seeded() -> None:
         db.close()
 
 
-def _auth_headers(email: str, password: str = "Password1!") -> dict:
+def _auth_headers(email: str = "sahar9shely@gmail.com", password: str = "Password1!") -> dict:
+    # Backward-compatible helper: map known emails to usernames.
     _ensure_seeded()
-    client.post("/api/v1/auth/forgot-password", json={"email": email})
+    username_map = {
+        "sahar9shely@gmail.com": "sahar",
+        "bar050297@gmail.com": "bar",
+    }
+    username = username_map.get(email, email.split("@")[0].lower())
     db = InvestmentSessionLocal()
     try:
-        mail = (
-            db.query(EmailOutbox)
-            .filter(EmailOutbox.to_email == email)
-            .order_by(EmailOutbox.id.desc())
-            .first()
-        )
-        assert mail is not None, f"missing invite mail for {email}"
-        token = json.loads(mail.meta_json)["token"]
+        user = db.query(User).filter(User.username == username).first()
+        assert user is not None, username
+        user.password_hash = hash_password(password)
+        user.must_reset_password = False
+        db.commit()
     finally:
         db.close()
-    reset = client.post(
-        "/api/v1/auth/reset-password",
-        json={"token": token, "new_password": password},
-    )
-    assert reset.status_code == 200, reset.text
     login = client.post(
-        "/api/v1/auth/login", json={"email": email, "password": password}
+        "/api/v1/auth/login", json={"username": username, "password": password}
     )
     assert login.status_code == 200, login.text
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -118,7 +115,11 @@ def test_plan_payment_and_quote_flow():
     converted = client.post(
         f"/api/v1/investments/quotes/{quote_body['id']}/convert",
         headers=headers,
-        json={"start_date": date.today().isoformat()},
+        json={
+            "start_date": date.today().isoformat(),
+            "username": "noa",
+            "password": "NoaPass12!",
+        },
     )
     assert converted.status_code == 200
     assert converted.json()["investor_name"] == "נועה"

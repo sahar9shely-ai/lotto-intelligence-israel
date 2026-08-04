@@ -1,6 +1,7 @@
 export type AuthUser = {
   id: number;
-  email: string;
+  username: string;
+  email?: string | null;
   role: string;
   investor_id: number;
   investor_name: string;
@@ -8,7 +9,6 @@ export type AuthUser = {
   is_active?: boolean;
   must_reset_password: boolean;
   has_password: boolean;
-  email_needs_update?: boolean;
   last_login_at?: string | null;
   password_set_at?: string | null;
 };
@@ -21,6 +21,18 @@ export type LoginAlert = {
   display_name: string;
   logged_in_at: string;
   read_at?: string | null;
+};
+
+export type PasswordResetRequestItem = {
+  id: number;
+  user_id: number;
+  username: string;
+  display_name: string;
+  status: string;
+  note?: string | null;
+  created_at: string;
+  resolved_at?: string | null;
+  resolved_by_user_id?: number | null;
 };
 
 export type EmailOutboxItem = {

@@ -8,7 +8,6 @@ import { InvestorsPage } from "./pages/InvestorsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PaymentsPage } from "./pages/PaymentsPage";
 import { QuotesPage } from "./pages/QuotesPage";
-import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UsersPage } from "./pages/UsersPage";
 
@@ -18,7 +17,6 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         <Route element={<RequireAuth />}>
           <Route element={<AppShell />}>

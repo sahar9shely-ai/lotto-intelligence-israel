@@ -9,10 +9,10 @@ export type Investor = {
   monthly_payout: number;
   months_in_program: number;
   plans_count: number;
+  access_username?: string | null;
   access_email?: string | null;
   access_role?: string | null;
   has_login?: boolean;
-  email_needs_update?: boolean;
 };
 
 export type Plan = {

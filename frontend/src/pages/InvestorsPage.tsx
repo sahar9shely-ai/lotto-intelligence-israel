@@ -38,12 +38,13 @@ export function InvestorsPage() {
       name: String(fd.get("name") || "").trim(),
       phone: String(fd.get("phone") || "") || undefined,
       notes: String(fd.get("notes") || "") || undefined,
+      username: String(fd.get("username") || "").trim() || undefined,
+      password: String(fd.get("password") || "") || undefined,
       email: String(fd.get("email") || "").trim() || undefined,
       is_manager: String(fd.get("role") || "investor") === "manager",
-      send_invite: fd.get("send_invite") === "on",
     });
     setShowNewInvestor(false);
-    setMessage("משקיע חדש נוסף — עדכני מייל בהרשאות אם צריך");
+    setMessage("משקיע חדש נוסף עם שם משתמש וסיסמה");
     reload();
   }
 
@@ -294,8 +295,12 @@ export function InvestorsPage() {
               <input name="name" required placeholder="שם המשקיע" />
             </label>
             <label>
-              מייל לגישה
-              <input name="email" type="email" required placeholder="name@gmail.com" />
+              שם משתמש לגישה
+              <input name="username" required placeholder="revital" autoComplete="off" />
+            </label>
+            <label>
+              סיסמה התחלתית
+              <input name="password" type="password" required minLength={8} autoComplete="new-password" />
             </label>
             <label>
               הרשאה
@@ -309,12 +314,12 @@ export function InvestorsPage() {
               <input name="phone" placeholder="אופציונלי" />
             </label>
             <label>
+              מייל (אופציונלי)
+              <input name="email" type="email" placeholder="אופציונלי" />
+            </label>
+            <label>
               הערות
               <textarea name="notes" rows={3} />
-            </label>
-            <label className="check-row">
-              <input name="send_invite" type="checkbox" defaultChecked />
-              שלחי הזמנה להגדרת סיסמה למייל
             </label>
             <button type="submit" className="btn btn--primary">
               הוסיפי

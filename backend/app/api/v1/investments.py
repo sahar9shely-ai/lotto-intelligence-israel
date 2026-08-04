@@ -40,6 +40,9 @@ InvestmentBase.metadata.create_all(bind=investment_engine)
 
 def init_investment_db() -> None:
     from app.db.investment_session import InvestmentSessionLocal
+    from app.db.schema_migrate import ensure_schema
+
+    ensure_schema(investment_engine)
 
     db = InvestmentSessionLocal()
     try:
@@ -118,22 +121,23 @@ def create_investor(
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    data = payload.model_dump(exclude={"email", "send_invite"})
+    data = payload.model_dump(exclude={"email", "username", "password"})
     investor = Investor(**data)
     db.add(investor)
-    db.commit()
-    db.refresh(investor)
+    db.flush()
 
-    email = payload.email.strip() if payload.email else None
-    if email:
+    try:
         auth_svc.ensure_user_for_investor(
-            db, investor, email=email, send_invite=payload.send_invite
+            db,
+            investor,
+            username=payload.username,
+            email=payload.email.strip() if payload.email else None,
+            password=payload.password,
         )
-        db.commit()
-    else:
-        auth_svc.ensure_user_for_investor(db, investor, send_invite=False)
-        db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    db.commit()
     investor = (
         db.query(Investor)
         .options(joinedload(Investor.plans), joinedload(Investor.user))
@@ -425,8 +429,9 @@ def convert_quote(
     auth_svc.ensure_user_for_investor(
         db,
         investor,
+        username=payload.username,
         email=payload.email,
-        send_invite=payload.send_invite and bool(payload.email),
+        password=payload.password,
     )
     db.commit()
     db.refresh(plan)

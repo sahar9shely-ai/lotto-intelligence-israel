@@ -2,6 +2,7 @@ import type {
   AuthUser,
   EmailOutboxItem,
   LoginAlert,
+  PasswordResetRequestItem,
 } from "../types/auth";
 import type {
   Dashboard,
@@ -68,39 +69,47 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
 }
 
 export const api = {
-  login: (email: string, password: string) =>
+  login: (username: string, password: string) =>
     request<{ access_token: string; user: AuthUser }>(
       "/api/v1/auth/login",
-      { method: "POST", body: JSON.stringify({ email, password }) },
+      { method: "POST", body: JSON.stringify({ username, password }) },
       false,
     ),
-  forgotPassword: (email: string) =>
-    request<{ message: string; reset_link?: string | null; email_delivered?: boolean }>(
-      "/api/v1/auth/forgot-password",
-      { method: "POST", body: JSON.stringify({ email }) },
-      false,
-    ),
-  resetPassword: (token: string, new_password: string) =>
+  requestPasswordReset: (username: string, note?: string) =>
     request<{ message: string }>(
-      "/api/v1/auth/reset-password",
-      { method: "POST", body: JSON.stringify({ token, new_password }) },
+      "/api/v1/auth/request-password-reset",
+      { method: "POST", body: JSON.stringify({ username, note }) },
       false,
     ),
+  passwordResetRequests: (pendingOnly = true) =>
+    request<PasswordResetRequestItem[]>(
+      `/api/v1/auth/password-reset-requests${pendingOnly ? "?pending_only=true" : ""}`,
+    ),
+  fulfillPasswordReset: (id: number, new_password: string) =>
+    request<PasswordResetRequestItem>(
+      `/api/v1/auth/password-reset-requests/${id}/fulfill`,
+      { method: "POST", body: JSON.stringify({ new_password }) },
+    ),
+  rejectPasswordReset: (id: number) =>
+    request<PasswordResetRequestItem>(
+      `/api/v1/auth/password-reset-requests/${id}/reject`,
+      { method: "POST" },
+    ),
+  setUserPassword: (id: number, new_password: string) =>
+    request<AuthUser>(`/api/v1/auth/users/${id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ new_password }),
+    }),
   me: () => request<AuthUser>("/api/v1/auth/me"),
   users: () => request<AuthUser[]>("/api/v1/auth/users"),
-  updateUserEmail: (id: number, email: string) =>
-    request<AuthUser>(`/api/v1/auth/users/${id}/email`, {
-      method: "PATCH",
-      body: JSON.stringify({ email }),
-    }),
   updateUser: (
     id: number,
     body: Partial<{
-      email: string;
+      username: string;
+      email: string | null;
       role: string;
       is_active: boolean;
       investor_name: string;
-      send_invite: boolean;
     }>,
   ) =>
     request<AuthUser>(`/api/v1/auth/users/${id}`, {
@@ -109,21 +118,17 @@ export const api = {
     }),
   createAccessUser: (body: {
     name: string;
-    email: string;
+    username: string;
+    password: string;
+    email?: string;
     role: string;
     phone?: string;
     notes?: string;
-    send_invite?: boolean;
   }) =>
     request<AuthUser>("/api/v1/auth/users", {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  resendInvite: (id: number) =>
-    request<{ message: string; reset_link?: string | null; email_delivered?: boolean }>(
-      `/api/v1/auth/users/${id}/resend-invite`,
-      { method: "POST" },
-    ),
   loginAlerts: (unreadOnly = false) =>
     request<LoginAlert[]>(
       `/api/v1/auth/login-alerts${unreadOnly ? "?unread_only=true" : ""}`,
@@ -149,8 +154,9 @@ export const api = {
     phone?: string;
     notes?: string;
     is_manager?: boolean;
+    username?: string;
+    password?: string;
     email?: string;
-    send_invite?: boolean;
   }) =>
     request<Investor>("/api/v1/investments/investors", {
       method: "POST",
@@ -268,7 +274,14 @@ export const api = {
     }),
   convertQuote: (
     id: number,
-    body: { start_date: string; phone?: string; notes?: string; email?: string; send_invite?: boolean },
+    body: {
+      start_date: string;
+      phone?: string;
+      notes?: string;
+      username: string;
+      password: string;
+      email?: string;
+    },
   ) =>
     request<Plan>(`/api/v1/investments/quotes/${id}/convert`, {
       method: "POST",

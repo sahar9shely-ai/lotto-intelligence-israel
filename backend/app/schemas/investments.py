@@ -16,8 +16,9 @@ class InvestorCreate(BaseModel):
     is_manager: bool = False
     phone: Optional[str] = None
     notes: Optional[str] = None
+    username: Optional[str] = Field(default=None, min_length=2, max_length=64)
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     email: Optional[str] = None
-    send_invite: bool = True
 
 
 class InvestorUpdate(BaseModel):
@@ -38,10 +39,10 @@ class InvestorOut(BaseModel):
     monthly_payout: float = 0
     months_in_program: int = 0
     plans_count: int = 0
+    access_username: Optional[str] = None
     access_email: Optional[str] = None
     access_role: Optional[str] = None
     has_login: bool = False
-    email_needs_update: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -141,8 +142,9 @@ class QuoteConvert(BaseModel):
     start_date: date
     phone: Optional[str] = None
     notes: Optional[str] = None
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
     email: Optional[str] = None
-    send_invite: bool = True
 
 
 class QuoteOut(BaseModel):

@@ -145,16 +145,16 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
         months_in = months_between(earliest, today)
     else:
         months_in = 0
+    access_username = None
     access_email = None
     access_role = None
     has_login = False
-    email_needs_update = True
     user = getattr(investor, "user", None)
     if user is not None:
+        access_username = user.username
         access_email = user.email
         access_role = user.role
         has_login = bool(user.password_hash) and not user.must_reset_password
-        email_needs_update = (user.email or "").endswith("@tazrim.app") or not user.email
     return {
         "id": investor.id,
         "name": investor.name,
@@ -166,10 +166,10 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
         "monthly_payout": round(monthly_payout, 2),
         "months_in_program": months_in,
         "plans_count": len(investor.plans),
+        "access_username": access_username,
         "access_email": access_email,
         "access_role": access_role,
         "has_login": has_login,
-        "email_needs_update": email_needs_update,
     }
 
 

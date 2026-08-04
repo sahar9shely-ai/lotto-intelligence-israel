@@ -21,7 +21,7 @@ export function AppShell() {
         <div className="brand">
           <span className="brand__mark">תזרים</span>
           <span className="brand__tag">
-            {user ? `${user.investor_name} · ${user.email}` : "מעקב השקעות שותפים"}
+            {user ? `${user.investor_name} · ${user.username}` : "מעקב השקעות שותפים"}
           </span>
         </div>
         <nav className="nav" aria-label="ניווט ראשי">

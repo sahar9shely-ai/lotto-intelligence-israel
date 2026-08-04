@@ -1,110 +1,75 @@
 from __future__ import annotations
 
-import json
-import secrets
-from datetime import datetime, timedelta, timezone
+import re
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.core.config import settings
-from app.models.auth import LoginAlert, PasswordResetToken, User
-from app.models.investments import Investor
-from app.models.investments import utcnow
+from app.models.auth import LoginAlert, PasswordResetRequest, User
+from app.models.investments import Investor, utcnow
 from app.security.auth import create_access_token, hash_password, is_manager, verify_password
 from app.services.email_service import send_email
 
+
+DEFAULT_USERNAMES = {
+    "סהר": "sahar",
+    "מנהלת": "sahar",
+    "בר": "bar",
+    "אופק": "ofek",
+    "אלמוג": "almog",
+    "שושי": "shoshi",
+}
 
 DEFAULT_USER_EMAILS = {
     "סהר": "sahar9shely@gmail.com",
     "מנהלת": "sahar9shely@gmail.com",
     "בר": "bar050297@gmail.com",
-    "אופק": "ofek@tazrim.app",
-    "אלמוג": "almog@tazrim.app",
-    "שושי": "shoshi@tazrim.app",
+    "אופק": None,
+    "אלמוג": None,
+    "שושי": None,
 }
 
 MANAGER_NAME = "סהר"
-MANAGER_EMAIL = "sahar9shely@gmail.com"
+MANAGER_USERNAME = "sahar"
+MANAGER_DEMO_PASSWORD = "Sahar1234!"
+
+_USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{2,64}$")
 
 
-def normalize_email(email: str) -> str:
+def normalize_username(username: str) -> str:
+    return username.strip().lower()
+
+
+def normalize_email(email: Optional[str]) -> Optional[str]:
+    if not email:
+        return None
     return email.strip().lower()
 
 
-def create_reset_token(db: Session, user: User, purpose: str) -> PasswordResetToken:
-    db.query(PasswordResetToken).filter(
-        PasswordResetToken.user_id == user.id,
-        PasswordResetToken.used_at.is_(None),
-        PasswordResetToken.purpose == purpose,
-    ).update({"used_at": utcnow()}, synchronize_session=False)
-
-    token = PasswordResetToken(
-        user_id=user.id,
-        token=secrets.token_urlsafe(32),
-        purpose=purpose,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=settings.reset_token_hours),
-    )
-    db.add(token)
-    db.flush()
-    return token
+def validate_username(username: str) -> str:
+    value = normalize_username(username)
+    if not _USERNAME_RE.match(value):
+        raise ValueError(
+            "שם משתמש חייב להכיל אותיות באנגלית / ספרות / . _ - (2–64 תווים)"
+        )
+    return value
 
 
-def reset_link(token: str) -> str:
-    base = settings.app_public_url.rstrip("/")
-    return f"{base}/reset-password?token={token}"
-
-
-def send_invite_email(db: Session, user: User) -> tuple[PasswordResetToken, str, bool]:
-    token = create_reset_token(db, user, purpose="invite")
-    name = user.investor.name if user.investor else user.email
-    link = reset_link(token.token)
-    _, delivered = send_email(
-        db,
-        to_email=user.email,
-        subject="תזרים — הגדרת סיסמה ראשונה",
-        body=(
-            f"שלום {name},\n\n"
-            "נוצר עבורך חשבון במערכת תזרים.\n"
-            "בכניסה הראשונה עליך להגדיר סיסמה אישית דרך הקישור הבא:\n\n"
-            f"{link}\n\n"
-            f"הקישור בתוקף ל־{settings.reset_token_hours} שעות.\n"
-            "אחרי ההגדרה תוכל/י להתחבר עם המייל והסיסמה החדשה.\n"
-        ),
-        kind="invite",
-        meta={"user_id": user.id, "token": token.token, "link": link},
-    )
-    return token, link, delivered
-
-
-def send_forgot_email(db: Session, user: User) -> tuple[PasswordResetToken, str, bool]:
-    token = create_reset_token(db, user, purpose="forgot")
-    name = user.investor.name if user.investor else user.email
-    link = reset_link(token.token)
-    _, delivered = send_email(
-        db,
-        to_email=user.email,
-        subject="תזרים — שחזור סיסמה",
-        body=(
-            f"שלום {name},\n\n"
-            "התקבלה בקשה לשחזור סיסמה.\n"
-            "אם ביקשת זאת, הגדירי סיסמה חדשה בקישור:\n\n"
-            f"{link}\n\n"
-            f"הקישור בתוקף ל־{settings.reset_token_hours} שעות.\n"
-            "אם לא ביקשת שחזור — אפשר להתעלם מהמייל.\n"
-        ),
-        kind="forgot",
-        meta={"user_id": user.id, "token": token.token, "link": link},
-    )
-    return token, link, delivered
+def username_for_investor(investor: Investor) -> str:
+    mapped = DEFAULT_USERNAMES.get(investor.name)
+    if mapped:
+        return mapped
+    # ASCII fallback from id
+    return f"user{investor.id}"
 
 
 def notify_manager_login(db: Session, user: User) -> LoginAlert:
-    name = user.investor.name if user.investor else user.email
+    name = user.investor.name if user.investor else user.username
     alert = LoginAlert(
         user_id=user.id,
         investor_id=user.investor_id,
-        email=user.email,
+        email=user.email or user.username,
         display_name=name,
         logged_in_at=utcnow(),
     )
@@ -117,7 +82,7 @@ def notify_manager_login(db: Session, user: User) -> LoginAlert:
         .filter(User.role == "manager", User.is_active.is_(True))
         .first()
     )
-    if manager and manager.id != user.id:
+    if manager and manager.id != user.id and manager.email:
         when = alert.logged_in_at.strftime("%d/%m/%Y %H:%M")
         send_email(
             db,
@@ -126,7 +91,7 @@ def notify_manager_login(db: Session, user: User) -> LoginAlert:
             body=(
                 f"התראת כניסה:\n\n"
                 f"משתמש: {name}\n"
-                f"מייל: {user.email}\n"
+                f"שם משתמש: {user.username}\n"
                 f"זמן: {when}\n"
             ),
             kind="login_alert",
@@ -135,33 +100,65 @@ def notify_manager_login(db: Session, user: User) -> LoginAlert:
     return alert
 
 
+def set_user_password(db: Session, user: User, new_password: str) -> User:
+    if len(new_password) < 8:
+        raise ValueError("הסיסמה חייבת להכיל לפחות 8 תווים")
+    user.password_hash = hash_password(new_password)
+    user.must_reset_password = False
+    user.password_set_at = utcnow()
+    # Close open reset requests when manager sets a password.
+    db.query(PasswordResetRequest).filter(
+        PasswordResetRequest.user_id == user.id,
+        PasswordResetRequest.status == "pending",
+    ).update(
+        {
+            "status": "fulfilled",
+            "resolved_at": utcnow(),
+        },
+        synchronize_session=False,
+    )
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def ensure_user_for_investor(
     db: Session,
     investor: Investor,
-    email: Optional[str] = None,
     *,
-    send_invite: bool = True,
+    username: Optional[str] = None,
+    email: Optional[str] = None,
+    password: Optional[str] = None,
 ) -> User:
     existing = db.query(User).filter(User.investor_id == investor.id).first()
     if existing:
         return existing
 
-    chosen = normalize_email(email or DEFAULT_USER_EMAILS.get(investor.name, f"user{investor.id}@tazrim.app"))
-    if db.query(User).filter(User.email == chosen).first():
-        chosen = f"user{investor.id}@tazrim.app"
+    chosen_username = validate_username(username or username_for_investor(investor))
+    if db.query(User).filter(User.username == chosen_username).first():
+        chosen_username = validate_username(f"{chosen_username}{investor.id}")
+
+    chosen_email = normalize_email(email)
+    if chosen_email is None:
+        chosen_email = normalize_email(DEFAULT_USER_EMAILS.get(investor.name))
+    if chosen_email and db.query(User).filter(User.email == chosen_email).first():
+        chosen_email = None
+    # Keep a stable contact placeholder for DBs where email is still NOT NULL.
+    if chosen_email is None:
+        chosen_email = f"{chosen_username}@local.tazrim"
 
     user = User(
-        email=chosen,
+        username=chosen_username,
+        email=chosen_email,
         investor_id=investor.id,
         role="manager" if investor.is_manager else "investor",
-        must_reset_password=True,
-        password_hash=None,
+        must_reset_password=password is None,
+        password_hash=hash_password(password) if password else None,
+        password_set_at=utcnow() if password else None,
         is_active=True,
     )
     db.add(user)
     db.flush()
-    if send_invite:
-        send_invite_email(db, user)
     return user
 
 
@@ -169,10 +166,8 @@ def seed_users(db: Session) -> dict:
     from app.models.investments import AppSettings
 
     created: list[str] = []
-    invited: list[str] = []
     updated: list[str] = []
 
-    # Keep manager identity aligned with the owning account.
     manager = db.query(Investor).filter(Investor.is_manager.is_(True)).first()
     if manager and manager.name in {"מנהלת", "שחר"}:
         manager.name = MANAGER_NAME
@@ -183,47 +178,74 @@ def seed_users(db: Session) -> dict:
         settings.manager_display_name = MANAGER_NAME
 
     for investor in db.query(Investor).order_by(Investor.id).all():
-        before = db.query(User).filter(User.investor_id == investor.id).first()
-        if before is None:
-            email = MANAGER_EMAIL if investor.is_manager else None
-            user = ensure_user_for_investor(db, investor, email=email, send_invite=True)
-            created.append(user.email)
-            invited.append(user.email)
+        user = db.query(User).filter(User.investor_id == investor.id).first()
+        desired_username = username_for_investor(investor)
+        desired_email = normalize_email(
+            DEFAULT_USER_EMAILS.get(investor.name)
+            if not investor.is_manager
+            else DEFAULT_USER_EMAILS.get(MANAGER_NAME)
+        )
+
+        if user is None:
+            password = MANAGER_DEMO_PASSWORD if investor.is_manager else None
+            user = ensure_user_for_investor(
+                db,
+                investor,
+                username=desired_username,
+                email=desired_email,
+                password=password,
+            )
+            created.append(user.username)
             continue
 
-        user = before
-        desired = MANAGER_EMAIL if investor.is_manager else DEFAULT_USER_EMAILS.get(investor.name)
-        # Also migrate known placeholder emails for seeded investors.
-        placeholder_emails = {
-            "bar@tazrim.app": "bar050297@gmail.com",
-            "manager@tazrim.app": MANAGER_EMAIL,
-        }
-        if not investor.is_manager and user.email in placeholder_emails:
-            desired = placeholder_emails[user.email]
         if investor.is_manager:
             user.role = "manager"
-        if desired and user.email != normalize_email(desired):
+
+        # Backfill username for legacy rows migrated without one.
+        if not getattr(user, "username", None):
             clash = (
                 db.query(User)
-                .filter(User.email == normalize_email(desired), User.id != user.id)
+                .filter(User.username == desired_username, User.id != user.id)
+                .first()
+            )
+            user.username = desired_username if not clash else f"{desired_username}{user.id}"
+            updated.append(user.username)
+        elif user.username != desired_username and investor.name in DEFAULT_USERNAMES:
+            clash = (
+                db.query(User)
+                .filter(User.username == desired_username, User.id != user.id)
                 .first()
             )
             if not clash:
-                user.email = normalize_email(desired)
-                user.must_reset_password = True
-                user.password_hash = None
-                send_invite_email(db, user)
-                updated.append(user.email)
-                invited.append(user.email)
+                user.username = desired_username
+                updated.append(user.username)
+
+        if desired_email and user.email != desired_email:
+            clash = (
+                db.query(User)
+                .filter(User.email == desired_email, User.id != user.id)
+                .first()
+            )
+            if not clash:
+                user.email = desired_email
+                updated.append(f"email:{user.username}")
+
+        # Ensure manager always has a usable password in demo/local setups.
+        if investor.is_manager and not user.password_hash:
+            user.password_hash = hash_password(MANAGER_DEMO_PASSWORD)
+            user.must_reset_password = False
+            user.password_set_at = utcnow()
+            updated.append("manager-password")
+
     db.commit()
-    return {"created_users": created, "invited": invited, "updated": updated}
+    return {"created_users": created, "updated": updated}
 
 
 def serialize_user(user: User) -> dict:
-    email = user.email or ""
     return {
         "id": user.id,
-        "email": email,
+        "username": user.username,
+        "email": user.email,
         "role": user.role,
         "investor_id": user.investor_id,
         "investor_name": user.investor.name if user.investor else "",
@@ -231,43 +253,29 @@ def serialize_user(user: User) -> dict:
         "is_active": bool(user.is_active),
         "must_reset_password": user.must_reset_password,
         "has_password": bool(user.password_hash),
-        "email_needs_update": email.endswith("@tazrim.app") or not email,
         "last_login_at": user.last_login_at,
         "password_set_at": user.password_set_at,
     }
 
 
-def login_user(db: Session, email: str, password: str) -> dict:
+def login_user(db: Session, username: str, password: str) -> dict:
+    uname = normalize_username(username)
     user = (
         db.query(User)
         .options(joinedload(User.investor))
-        .filter(User.email == normalize_email(email), User.is_active.is_(True))
+        .filter(User.username == uname, User.is_active.is_(True))
         .first()
     )
     if not user:
-        raise ValueError("מייל או סיסמה שגויים")
+        raise ValueError("שם משתמש או סיסמה שגויים")
 
     if user.must_reset_password or not user.password_hash:
-        # Re-send invite to help first-time users
-        _token, link, delivered = send_invite_email(db, user)
-        db.commit()
         raise PermissionError(
-            json.dumps(
-                {
-                    "message": (
-                        "זו כניסה ראשונה — יש להגדיר סיסמה מהקישור."
-                        if not delivered
-                        else "זו כניסה ראשונה — נשלח אליך מייל להגדרת סיסמה."
-                    ),
-                    "reset_link": link,
-                    "email_delivered": delivered,
-                },
-                ensure_ascii=False,
-            )
+            "אין סיסמה לחשבון זה עדיין. פנה/י למנהל להגדרת סיסמה — אין איפוס עצמי."
         )
 
     if not verify_password(password, user.password_hash):
-        raise ValueError("מייל או סיסמה שגויים")
+        raise ValueError("שם משתמש או סיסמה שגויים")
 
     user.last_login_at = utcnow()
     notify_manager_login(db, user)
@@ -279,65 +287,109 @@ def login_user(db: Session, email: str, password: str) -> dict:
     return {"access_token": token, "token_type": "bearer", "user": serialize_user(user)}
 
 
-def apply_password_reset(db: Session, token_value: str, new_password: str) -> User:
-    if len(new_password) < 8:
-        raise ValueError("הסיסמה חייבת להכיל לפחות 8 תווים")
-
-    token = (
-        db.query(PasswordResetToken)
-        .options(joinedload(PasswordResetToken.user).joinedload(User.investor))
-        .filter(PasswordResetToken.token == token_value)
-        .first()
-    )
-    if not token or token.used_at is not None:
-        raise ValueError("קישור לא תקין או שכבר נוצל")
-
-    expires = token.expires_at
-    if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=timezone.utc)
-    if expires < datetime.now(timezone.utc):
-        raise ValueError("פג תוקף הקישור — בקשי מייל חדש")
-
-    user = token.user
-    user.password_hash = hash_password(new_password)
-    user.must_reset_password = False
-    user.password_set_at = utcnow()
-    token.used_at = utcnow()
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def request_forgot_password(db: Session, email: str) -> dict:
+def request_password_reset(
+    db: Session, username: str, note: Optional[str] = None
+) -> dict:
+    """Client requests a reset — manager must fulfill it. No self-service."""
+    uname = normalize_username(username)
     user = (
         db.query(User)
         .options(joinedload(User.investor))
-        .filter(User.email == normalize_email(email), User.is_active.is_(True))
+        .filter(User.username == uname, User.is_active.is_(True))
         .first()
     )
-    # Always succeed outwardly to avoid email enumeration; still send if found.
-    if not user:
-        return {
-            "message": "אם המייל קיים במערכת — נשלח קישור להגדרת / שחזור סיסמה",
-            "reset_link": None,
-            "email_delivered": False,
-        }
-
-    if not user.password_hash:
-        _token, link, delivered = send_invite_email(db, user)
-    else:
-        _token, link, delivered = send_forgot_email(db, user)
-    db.commit()
-
-    if delivered:
-        message = "נשלח קישור למייל שלך להגדרת / שחזור סיסמה"
-    else:
-        message = (
-            "שירות המייל עדיין לא מחובר. "
-            f"פתחי את הקישור הבא להגדרת סיסמה: {link}"
+    # Always same message to avoid username enumeration.
+    generic = {
+        "message": (
+            "אם שם המשתמש קיים — נשלחה בקשת איפוס למנהל. "
+            "רק המנהל יכול להגדיר סיסמה חדשה."
         )
-    return {
-        "message": message,
-        "reset_link": link,
-        "email_delivered": delivered,
     }
+    if not user:
+        return generic
+
+    existing = (
+        db.query(PasswordResetRequest)
+        .filter(
+            PasswordResetRequest.user_id == user.id,
+            PasswordResetRequest.status == "pending",
+        )
+        .first()
+    )
+    if existing:
+        if note:
+            existing.note = note.strip()[:255]
+            db.commit()
+        return generic
+
+    req = PasswordResetRequest(
+        user_id=user.id,
+        username=user.username,
+        display_name=user.investor.name if user.investor else user.username,
+        status="pending",
+        note=(note or "").strip()[:255] or None,
+    )
+    db.add(req)
+    db.commit()
+    return generic
+
+
+def list_password_reset_requests(
+    db: Session, *, pending_only: bool = True
+) -> list[PasswordResetRequest]:
+    query = db.query(PasswordResetRequest).order_by(PasswordResetRequest.created_at.desc())
+    if pending_only:
+        query = query.filter(PasswordResetRequest.status == "pending")
+    return query.limit(50).all()
+
+
+def fulfill_password_reset(
+    db: Session,
+    request_id: int,
+    *,
+    new_password: str,
+    actor: User,
+) -> PasswordResetRequest:
+    req = db.query(PasswordResetRequest).filter(PasswordResetRequest.id == request_id).first()
+    if not req:
+        raise ValueError("בקשה לא נמצאה")
+    if req.status != "pending":
+        raise ValueError("הבקשה כבר טופלה")
+
+    user = (
+        db.query(User)
+        .options(joinedload(User.investor))
+        .filter(User.id == req.user_id)
+        .first()
+    )
+    if not user:
+        raise ValueError("משתמש לא נמצא")
+
+    if len(new_password) < 8:
+        raise ValueError("הסיסמה חייבת להכיל לפחות 8 תווים")
+
+    user.password_hash = hash_password(new_password)
+    user.must_reset_password = False
+    user.password_set_at = utcnow()
+    req.status = "fulfilled"
+    req.resolved_at = utcnow()
+    req.resolved_by_user_id = actor.id
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+def reject_password_reset(
+    db: Session, request_id: int, *, actor: User
+) -> PasswordResetRequest:
+    req = db.query(PasswordResetRequest).filter(PasswordResetRequest.id == request_id).first()
+    if not req:
+        raise ValueError("בקשה לא נמצאה")
+    if req.status != "pending":
+        raise ValueError("הבקשה כבר טופלה")
+    req.status = "rejected"
+    req.resolved_at = utcnow()
+    req.resolved_by_user_id = actor.id
+    db.commit()
+    db.refresh(req)
+    return req

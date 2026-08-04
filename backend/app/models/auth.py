@@ -14,7 +14,8 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="investor")
@@ -28,9 +29,16 @@ class User(Base):
     reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    password_reset_requests: Mapped[list["PasswordResetRequest"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="PasswordResetRequest.user_id",
+    )
 
 
 class PasswordResetToken(Base):
+    """Legacy invite/forgot tokens — kept for DB compatibility; unused by new auth."""
+
     __tablename__ = "password_reset_tokens"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -42,6 +50,27 @@ class PasswordResetToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     user: Mapped["User"] = relationship(back_populates="reset_tokens")
+
+
+class PasswordResetRequest(Base):
+    """Client asks manager to reset password — no self-service reset."""
+
+    __tablename__ = "password_reset_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    note: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resolved_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    user: Mapped["User"] = relationship(
+        back_populates="password_reset_requests",
+        foreign_keys=[user_id],
+    )
 
 
 class LoginAlert(Base):

@@ -1,13 +1,10 @@
-import json
-
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.db.investment_session import InvestmentSessionLocal
 from app.main import app
-from app.models.auth import EmailOutbox, User
+from app.models.auth import PasswordResetRequest, User
 from app.security.auth import hash_password
-from app.services import auth_service as auth_svc
 from app.services import investment_service as inv_svc
 
 client = TestClient(app)
@@ -21,30 +18,26 @@ def _ensure_seeded() -> None:
         db.close()
 
 
-def _latest_token_for(email: str) -> str:
+def _set_password(username: str, password: str = "Password1!") -> None:
     db: Session = InvestmentSessionLocal()
     try:
-        mail = (
-            db.query(EmailOutbox)
-            .filter(EmailOutbox.to_email == email)
-            .order_by(EmailOutbox.id.desc())
-            .first()
-        )
-        assert mail is not None, f"no email for {email}"
-        assert mail.meta_json
-        return json.loads(mail.meta_json)["token"]
+        user = db.query(User).filter(User.username == username).first()
+        assert user is not None, f"missing user {username}"
+        user.password_hash = hash_password(password)
+        user.must_reset_password = False
+        db.commit()
     finally:
         db.close()
 
 
-def _set_password(email: str, password: str = "Password1!") -> None:
-    client.post("/api/v1/auth/forgot-password", json={"email": email})
-    token = _latest_token_for(email)
-    res = client.post(
-        "/api/v1/auth/reset-password",
-        json={"token": token, "new_password": password},
+def _auth_headers(username: str, password: str = "Password1!") -> dict:
+    _ensure_seeded()
+    _set_password(username, password)
+    login = client.post(
+        "/api/v1/auth/login", json={"username": username, "password": password}
     )
-    assert res.status_code == 200, res.text
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
 def test_auth_required_for_dashboard():
@@ -52,24 +45,25 @@ def test_auth_required_for_dashboard():
     assert res.status_code == 401
 
 
-def test_first_login_requires_email_reset_then_login_alerts_manager():
+def test_username_login_and_investor_scope_alerts_manager():
     _ensure_seeded()
 
     blocked = client.post(
         "/api/v1/auth/login",
-        json={"email": "bar050297@gmail.com", "password": "anything"},
+        json={"username": "bar", "password": "anything"},
     )
     assert blocked.status_code == 403
 
-    _set_password("sahar9shely@gmail.com", "ManagerPass1!")
-    _set_password("bar050297@gmail.com", "BarPass123!")
+    _set_password("sahar", "ManagerPass1!")
+    _set_password("bar", "BarPass123!")
 
     bar_login = client.post(
         "/api/v1/auth/login",
-        json={"email": "bar050297@gmail.com", "password": "BarPass123!"},
+        json={"username": "bar", "password": "BarPass123!"},
     )
     assert bar_login.status_code == 200
     bar_token = bar_login.json()["access_token"]
+    assert bar_login.json()["user"]["username"] == "bar"
 
     dash = client.get(
         "/api/v1/investments/dashboard",
@@ -87,7 +81,7 @@ def test_first_login_requires_email_reset_then_login_alerts_manager():
 
     manager_login = client.post(
         "/api/v1/auth/login",
-        json={"email": "sahar9shely@gmail.com", "password": "ManagerPass1!"},
+        json={"username": "sahar", "password": "ManagerPass1!"},
     )
     assert manager_login.status_code == 200
     m_token = manager_login.json()["access_token"]
@@ -97,34 +91,71 @@ def test_first_login_requires_email_reset_then_login_alerts_manager():
         headers={"Authorization": f"Bearer {m_token}"},
     )
     assert alerts.status_code == 200
-    assert any(a["email"] == "bar050297@gmail.com" for a in alerts.json())
+    assert any(a["display_name"] == "בר" for a in alerts.json())
 
 
-def test_forgot_password_flow():
+def test_password_reset_requires_manager_approval():
     _ensure_seeded()
-    db = InvestmentSessionLocal()
-    try:
-        user = db.query(User).filter(User.email == "ofek@tazrim.app").first()
-        assert user is not None
-        user.password_hash = hash_password("OldPass123!")
-        user.must_reset_password = False
-        db.commit()
-    finally:
-        db.close()
+    _set_password("ofek", "OldPass123!")
 
-    forgot = client.post(
-        "/api/v1/auth/forgot-password", json={"email": "ofek@tazrim.app"}
+    # Client cannot self-reset — only opens a request.
+    req = client.post(
+        "/api/v1/auth/request-password-reset",
+        json={"username": "ofek", "note": "שכחתי"},
     )
-    assert forgot.status_code == 200
-    token = _latest_token_for("ofek@tazrim.app")
-    reset = client.post(
-        "/api/v1/auth/reset-password",
-        json={"token": token, "new_password": "NewPass123!"},
-    )
-    assert reset.status_code == 200
+    assert req.status_code == 200
 
+    # Old password still works until manager fulfills.
+    still = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ofek", "password": "OldPass123!"},
+    )
+    assert still.status_code == 200
+
+    headers = _auth_headers("sahar", "ManagerPass1!")
+    pending = client.get(
+        "/api/v1/auth/password-reset-requests?pending_only=true",
+        headers=headers,
+    )
+    assert pending.status_code == 200
+    items = pending.json()
+    assert any(i["username"] == "ofek" for i in items)
+    request_id = next(i["id"] for i in items if i["username"] == "ofek")
+
+    fulfilled = client.post(
+        f"/api/v1/auth/password-reset-requests/{request_id}/fulfill",
+        headers=headers,
+        json={"new_password": "NewPass999!"},
+    )
+    assert fulfilled.status_code == 200
+    assert fulfilled.json()["status"] == "fulfilled"
+
+    old = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ofek", "password": "OldPass123!"},
+    )
+    assert old.status_code == 401
+
+    new = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ofek", "password": "NewPass999!"},
+    )
+    assert new.status_code == 200
+
+
+def test_manager_can_set_password_directly():
+    headers = _auth_headers("sahar", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    almog = next(u for u in users if u["username"] == "almog")
+    res = client.post(
+        f"/api/v1/auth/users/{almog['id']}/password",
+        headers=headers,
+        json={"new_password": "AlmogPass1!"},
+    )
+    assert res.status_code == 200
+    assert res.json()["has_password"] is True
     login = client.post(
         "/api/v1/auth/login",
-        json={"email": "ofek@tazrim.app", "password": "NewPass123!"},
+        json={"username": "almog", "password": "AlmogPass1!"},
     )
     assert login.status_code == 200

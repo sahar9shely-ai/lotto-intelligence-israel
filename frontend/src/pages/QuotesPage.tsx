@@ -38,13 +38,18 @@ export function QuotesPage() {
   async function convert(id: number, name: string) {
     const start = window.prompt(`תאריך התחלה ל-${name} (YYYY-MM-DD)`, yearStartISO());
     if (!start) return;
-    const email = window.prompt(`מייל לגישה של ${name} (חובה)`, "")?.trim();
-    if (!email) {
-      setMessage("לא ניתן להמיר בלי מייל — אפשר גם ליצור משתמש ממסך משתמשים והרשאות");
+    const username = window.prompt(`שם משתמש לגישה של ${name}`, "")?.trim();
+    if (!username) {
+      setMessage("לא ניתן להמיר בלי שם משתמש — אפשר גם ליצור משתמש ממסך משתמשים והרשאות");
       return;
     }
-    await api.convertQuote(id, { start_date: start, email, send_invite: true });
-    setMessage(`${name} הומר למשקיע חדש — נשלחה הזמנה ל-${email}`);
+    const password = window.prompt(`סיסמה התחלתית ל-${name} (לפחות 8 תווים)`, "")?.trim();
+    if (!password || password.length < 8) {
+      setMessage("סיסמה חייבת להכיל לפחות 8 תווים");
+      return;
+    }
+    await api.convertQuote(id, { start_date: start, username, password });
+    setMessage(`${name} הומר למשקיע חדש — התחברות: ${username}`);
     reload();
   }
 

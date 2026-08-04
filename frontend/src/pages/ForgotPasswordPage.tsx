@@ -1,43 +1,27 @@
 import { FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../services/api";
 
 export function ForgotPasswordPage() {
-  const navigate = useNavigate();
-  const [email, setEmail] = useState("sahar9shely@gmail.com");
+  const [username, setUsername] = useState("");
+  const [note, setNote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const [resetPath, setResetPath] = useState<string | null>(null);
-  const [fullLink, setFullLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function prepareLink(e?: FormEvent) {
-    e?.preventDefault();
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
     setBusy(true);
     setError(null);
     setMessage(null);
-    setResetPath(null);
-    setFullLink(null);
     try {
-      const res = await api.forgotPassword(email.trim());
-      const link = res.reset_link || "";
-      if (!link) {
-        setMessage(res.message);
-        setError("לא התקבל קישור מהשרת. נסי שוב.");
-        return;
-      }
-      const url = new URL(link, window.location.origin);
-      const path = `${url.pathname}${url.search}`;
-      const absolute = `${window.location.origin}${path}`;
-      setResetPath(path);
-      setFullLink(absolute);
-      setMessage(
-        res.email_delivered
-          ? "נשלח גם למייל. אפשר להמשיך מכאן:"
-          : "אין שליחה ל-Gmail כרגע. לחצי על הכפתור הירוק להגדרת סיסמה:",
+      const res = await api.requestPasswordReset(
+        username.trim(),
+        note.trim() || undefined,
       );
+      setMessage(res.message);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "שליחה נכשלה");
+      setError(err instanceof Error ? err.message : "שליחת הבקשה נכשלה");
     } finally {
       setBusy(false);
     }
@@ -47,64 +31,39 @@ export function ForgotPasswordPage() {
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <h1 className="auth-card__brand">הגדרת סיסמה</h1>
+        <p className="hero__eyebrow">איפוס סיסמה</p>
+        <h1 className="auth-card__brand">תזרים</h1>
         <p className="muted">
-          חשוב: המיילים <strong>לא נשלחים ל-Gmail</strong> עד שתחברו SMTP. בינתיים מגדירים
-          סיסמה עם קישור שמופיע כאן במסך.
+          הלקוח לא מאפס סיסמה לבד. שולחים בקשה למנהל — רק הוא מגדיר סיסמה חדשה.
         </p>
 
-        <div className="form">
+        <form className="form" onSubmit={onSubmit}>
           <label>
-            מייל
+            שם משתמש
             <input
-              type="email"
+              type="text"
+              autoComplete="username"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="sahar9shely@gmail.com"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="bar"
             />
           </label>
-
-          <button
-            type="button"
-            className="btn btn--primary"
-            disabled={busy || !email.trim()}
-            onClick={() => void prepareLink()}
-          >
-            {busy ? "מכין קישור..." : "הכיני קישור להגדרת סיסמה"}
-          </button>
-
+          <label>
+            הערה למנהל (אופציונלי)
+            <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="למשל: שכחתי את הסיסמה"
+            />
+          </label>
           {error ? <p className="form-error">{error}</p> : null}
           {message ? <p className="toast">{message}</p> : null}
-
-          {resetPath && fullLink ? (
-            <div className="reset-box">
-              <strong>הקישור מוכן</strong>
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={() => navigate(resetPath)}
-              >
-                המשך להגדרת סיסמה
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(fullLink);
-                    setMessage("הקישור הועתק ללוח");
-                  } catch {
-                    setMessage(fullLink);
-                  }
-                }}
-              >
-                העתקת קישור
-              </button>
-              <code className="reset-link-text">{fullLink}</code>
-            </div>
-          ) : null}
-        </div>
+          <button type="submit" className="btn btn--primary" disabled={busy || !username.trim()}>
+            {busy ? "שולח..." : "שלחי בקשה למנהל"}
+          </button>
+        </form>
 
         <div className="auth-links">
           <Link to="/login">חזרה להתחברות</Link>
