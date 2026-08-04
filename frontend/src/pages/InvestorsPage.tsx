@@ -126,7 +126,7 @@ export function InvestorsPage() {
       {message ? <p className="toast">{message}</p> : null}
 
       <div className="grid-investors">
-        <Panel title="רשימה" subtitle="בר · אופק · אלמוג · שושי + מנהלת">
+        <Panel title="רשימה">
           <ul className="picker">
             {investors.map((inv) => (
               <li key={inv.id}>
