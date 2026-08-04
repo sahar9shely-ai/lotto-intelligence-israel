@@ -216,6 +216,13 @@ export const api = {
     const suffix = qs.toString() ? `?${qs}` : "";
     return request<Payment[]>(`/api/v1/investments/payments${suffix}`);
   },
+  alignCalendarYear: (year?: number) => {
+    const qs = year != null ? `?year=${year}` : "";
+    return request<{ aligned: Array<Record<string, unknown>>; count: number }>(
+      `/api/v1/investments/align-calendar-year${qs}`,
+      { method: "POST" },
+    );
+  },
   updatePayment: (
     id: number,
     body: Partial<{

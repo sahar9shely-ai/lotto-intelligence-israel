@@ -4,7 +4,7 @@ import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Quote } from "../types/investments";
 import { buildMonthSchedule, downloadQuotePdf } from "../utils/quotePdf";
-import { formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
+import { formatMoney, formatPercent, statusLabel, yearStartISO } from "../utils/format";
 
 export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
@@ -36,7 +36,7 @@ export function QuotesPage() {
   }
 
   async function convert(id: number, name: string) {
-    const start = window.prompt(`תאריך התחלה ל-${name} (YYYY-MM-DD)`, todayISO());
+    const start = window.prompt(`תאריך התחלה ל-${name} (YYYY-MM-DD)`, yearStartISO());
     if (!start) return;
     const email = window.prompt(`מייל לגישה של ${name} (חובה)`, "")?.trim();
     if (!email) {

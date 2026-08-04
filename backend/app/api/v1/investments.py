@@ -305,8 +305,20 @@ def list_payments(
             Payment.due_date >= date(year, 1, 1),
             Payment.due_date <= date(year, 12, 31),
         )
-    payments = query.order_by(Payment.due_date.desc(), Payment.id.desc()).all()
+        payments = query.order_by(Payment.due_date.asc(), Payment.id.asc()).all()
+    else:
+        payments = query.order_by(Payment.due_date.desc(), Payment.id.desc()).all()
     return [svc.serialize_payment(p) for p in payments]
+
+
+@router.post("/align-calendar-year")
+def align_calendar_year(
+    year: Optional[int] = Query(default=None),
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Align active plans to 1 Jan–31 Dec of the calendar year."""
+    return svc.align_plans_to_calendar_year(db, year=year)
 
 
 @router.patch("/payments/{payment_id}", response_model=PaymentOut)

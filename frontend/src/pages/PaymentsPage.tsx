@@ -3,7 +3,13 @@ import { Panel } from "../components/Panel";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
-import { formatDate, formatMoney, statusLabel } from "../utils/format";
+import {
+  formatCalendarMonth,
+  formatDate,
+  formatMoney,
+  statusLabel,
+} from "../utils/format";
+import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
 
 export function PaymentsPage() {
   const { user } = useAuth();
@@ -12,6 +18,9 @@ export function PaymentsPage() {
   const [year, setYear] = useState(yearNow);
   const [status, setStatus] = useState<string>("");
   const [investorId, setInvestorId] = useState<string>("");
+  const [message, setMessage] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [alignBusy, setAlignBusy] = useState(false);
 
   const { data: investors } = useAsync(
     () => (isManager ? api.investors() : Promise.resolve([])),
@@ -27,16 +36,22 @@ export function PaymentsPage() {
     [year, status, investorId],
   );
 
+  const payments = useMemo(() => data ?? [], [data]);
+
   const totals = useMemo(() => {
-    const list = data ?? [];
-    const paid = list.filter((p) => p.status === "paid");
+    const paid = payments.filter((p) => p.status === "paid");
     return {
       investor: paid.reduce((s, p) => s + p.investor_amount, 0),
       manager: paid.reduce((s, p) => s + p.manager_amount, 0),
-      scheduled: list.filter((p) => p.status === "scheduled").length,
+      scheduled: payments.filter((p) => p.status === "scheduled").length,
       paidCount: paid.length,
     };
-  }, [data]);
+  }, [payments]);
+
+  const selectedInvestorName = useMemo(() => {
+    if (!investorId) return null;
+    return (investors ?? []).find((i) => String(i.id) === investorId)?.name ?? null;
+  }, [investorId, investors]);
 
   async function markPaid(id: number) {
     await api.updatePayment(id, { status: "paid" });
@@ -46,6 +61,49 @@ export function PaymentsPage() {
   async function markScheduled(id: number) {
     await api.updatePayment(id, { status: "scheduled" });
     reload();
+  }
+
+  async function exportYearPdf() {
+    setPdfBusy(true);
+    setMessage(null);
+    try {
+      await downloadYearlyPaymentsPdf({
+        year,
+        payments,
+        isManager,
+        investorFilterName: selectedInvestorName,
+      });
+      setMessage(`דוח שנתי ${year} ירד בהצלחה`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "ייצוא PDF נכשל");
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
+  async function alignToCalendarYear() {
+    if (
+      !window.confirm(
+        `ליישר את לוחות התשלומים לשנה הקלנדרית ${year}?\nהמסלולים יתחילו ב-1 בינואר ${year} ויכסו את השנה מתחילתה ועד סופה.`,
+      )
+    ) {
+      return;
+    }
+    setAlignBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.alignCalendarYear(year);
+      setMessage(
+        result.count
+          ? `יושרו ${result.count} מסלולים לשנת ${year} (1 בינואר – 31 בדצמבר)`
+          : `כל המסלולים כבר מיושרים לשנה הקלנדרית ${year}`,
+      );
+      reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "יישור שנתי נכשל");
+    } finally {
+      setAlignBusy(false);
+    }
   }
 
   if (loading) return <div className="state">טוען היסטוריית תשלומים...</div>;
@@ -65,10 +123,32 @@ export function PaymentsPage() {
         <div>
           <h1>{isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}</h1>
           <p className="muted">
-            {isManager ? "מי קיבל כל חודש, כמה, ומתי" : "רק התשלומים שלך"}
+            דוח שנתי קלנדרי · 1 בינואר עד 31 בדצמבר {year}
           </p>
         </div>
+        <div className="page-head__actions">
+          {isManager ? (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={alignBusy}
+              onClick={alignToCalendarYear}
+            >
+              {alignBusy ? "מיישרים..." : "יישור לתחילת שנה"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={pdfBusy}
+            onClick={exportYearPdf}
+          >
+            {pdfBusy ? "מכינים PDF..." : `הורדת דוח ${year}`}
+          </button>
+        </div>
       </div>
+
+      {message ? <p className="toast">{message}</p> : null}
 
       <div className="filters">
         <label>
@@ -127,11 +207,13 @@ export function PaymentsPage() {
       </div>
 
       <Panel
-        title={`רשימת ${year}`}
-        subtitle={isManager ? "סמני כששולם בפועל" : "תצוגה בלבד"}
+        title={`שנת ${year}`}
+        subtitle="מתחילת השנה ועד סופה · לפי חודש קלנדרי"
       >
-        {(data ?? []).length === 0 ? (
-          <p className="empty">אין רשומות לשנה זו. צרי מסלול כדי לייצר לוח תשלומים.</p>
+        {payments.length === 0 ? (
+          <p className="empty">
+            אין רשומות לשנה זו. צרי מסלול מתאריך 1 בינואר כדי לייצר לוח שנתי מלא.
+          </p>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -147,10 +229,10 @@ export function PaymentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {(data ?? []).map((p) => (
+                {payments.map((p) => (
                   <tr key={p.id}>
                     {isManager ? <td>{p.investor_name}</td> : null}
-                    <td>{p.month_number}</td>
+                    <td>{formatCalendarMonth(p.due_date)}</td>
                     <td>{formatDate(p.due_date)}</td>
                     <td>{formatMoney(p.investor_amount, true)}</td>
                     {isManager ? <td>{formatMoney(p.manager_amount, true)}</td> : null}

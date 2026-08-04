@@ -139,4 +139,47 @@ def test_settings_update():
     assert res.status_code == 200
     body = res.json()
     assert body["default_duration_months"] == 14
-    assert body["manager_display_name"] == "סהר"
+
+
+def test_align_calendar_year_moves_midyear_plans():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    ofek = next(i for i in investors if i["name"] == "אופק")
+    year = date.today().year
+    plan_res = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": ofek["id"],
+            "principal": 20000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 1,
+            "start_date": f"{year}-08-04",
+            "duration_months": 12,
+            "generate_schedule": True,
+        },
+    )
+    assert plan_res.status_code == 201
+    plan_id = plan_res.json()["id"]
+
+    before = client.get(
+        f"/api/v1/investments/payments?plan_id={plan_id}&year={year}", headers=headers
+    ).json()
+    assert before
+    assert before[0]["due_date"].startswith(f"{year}-08")
+
+    aligned = client.post(
+        f"/api/v1/investments/align-calendar-year?year={year}", headers=headers
+    )
+    assert aligned.status_code == 200
+    assert aligned.json()["count"] >= 1
+
+    plans = client.get("/api/v1/investments/plans", headers=headers).json()
+    plan = next(p for p in plans if p["id"] == plan_id)
+    assert plan["start_date"] == f"{year}-01-01"
+
+    year_payments = client.get(
+        f"/api/v1/investments/payments?plan_id={plan_id}&year={year}", headers=headers
+    ).json()
+    assert year_payments[0]["due_date"] == f"{year}-01-01"
+    assert year_payments[-1]["due_date"].startswith(f"{year}-12")

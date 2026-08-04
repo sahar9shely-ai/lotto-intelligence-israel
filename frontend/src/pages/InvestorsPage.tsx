@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Settings } from "../types/investments";
-import { formatMoney, formatPercent, todayISO } from "../utils/format";
+import { formatMoney, formatPercent, yearStartISO } from "../utils/format";
 
 export function InvestorsPage() {
   const { user } = useAuth();
@@ -56,7 +56,7 @@ export function InvestorsPage() {
       principal: Number(fd.get("principal") || 0),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
       manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
-      start_date: String(fd.get("start_date") || todayISO()),
+      start_date: String(fd.get("start_date") || yearStartISO()),
       duration_months: Number(fd.get("duration_months") || 12),
       notes: String(fd.get("notes") || "") || undefined,
       generate_schedule: true,
@@ -370,7 +370,7 @@ function PlanForm({
         </label>
         <label>
           תאריך התחלה
-          <input name="start_date" type="date" defaultValue={todayISO()} required />
+          <input name="start_date" type="date" defaultValue={yearStartISO()} required />
         </label>
         <label>
           משך (חודשים)
@@ -392,6 +392,7 @@ function PlanForm({
         </label>
       </div>
       <p className="hint">
+        ברירת המחדל היא 1 בינואר של השנה הנוכחית — כדי שהלוח יהיה שנתי מתחילת השנה ועד סופה.
         עמלת הניהול מתווספת מעבר לתשלום למשקיע — לא נגזרת מהאחוזים שלו.
       </p>
       <button type="submit" className="btn btn--primary">

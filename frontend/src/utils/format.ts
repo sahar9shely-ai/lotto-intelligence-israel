@@ -50,3 +50,14 @@ export function statusLabel(status: string): string {
 export function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+/** First day of the given calendar year (defaults to current year). */
+export function yearStartISO(year = new Date().getFullYear()): string {
+  return `${year}-01-01`;
+}
+
+/** Hebrew calendar month name from an ISO date (e.g. ינואר). */
+export function formatCalendarMonth(value?: string | null): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("he-IL", { month: "long" }).format(new Date(value));
+}

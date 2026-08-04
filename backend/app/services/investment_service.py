@@ -236,6 +236,92 @@ def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment
     return created
 
 
+def calendar_year_start(value: date) -> date:
+    return date(value.year, 1, 1)
+
+
+def align_plans_to_calendar_year(
+    db: Session, *, year: Optional[int] = None
+) -> dict:
+    """Move plan start dates to 1 Jan of their year and rebuild schedules.
+
+    Keeps paid rows (by month_number) and rewrites their due dates to the
+    calendar-aligned schedule so yearly reports cover Jan–Dec.
+    """
+    query = db.query(InvestmentPlan).filter(InvestmentPlan.status == "active")
+    plans = query.all()
+    aligned: list[dict] = []
+
+    for plan in plans:
+        target_year = year if year is not None else plan.start_date.year
+        if year is not None and plan.start_date.year != year:
+            # Only touch plans that already belong to the requested calendar year
+            # or currently spill from a mid-year open into that year.
+            has_year_payment = (
+                db.query(Payment)
+                .filter(
+                    Payment.plan_id == plan.id,
+                    Payment.due_date >= date(year, 1, 1),
+                    Payment.due_date <= date(year, 12, 31),
+                )
+                .first()
+                is not None
+            )
+            if plan.start_date.year != year and not has_year_payment:
+                continue
+            target_year = year
+
+        new_start = date(target_year, 1, 1)
+        if plan.start_date == new_start:
+            # Still refresh paid due dates if they drifted.
+            paid = (
+                db.query(Payment)
+                .filter(Payment.plan_id == plan.id, Payment.status == "paid")
+                .all()
+            )
+            changed = False
+            for payment in paid:
+                expected = add_months(new_start, payment.month_number - 1)
+                if payment.due_date != expected:
+                    payment.due_date = expected
+                    changed = True
+            if changed:
+                db.commit()
+                generate_payment_schedule(db, plan)
+                aligned.append(
+                    {
+                        "plan_id": plan.id,
+                        "investor_id": plan.investor_id,
+                        "start_date": new_start.isoformat(),
+                        "action": "refreshed",
+                    }
+                )
+            continue
+
+        old_start = plan.start_date
+        plan.start_date = new_start
+        paid = (
+            db.query(Payment)
+            .filter(Payment.plan_id == plan.id, Payment.status == "paid")
+            .all()
+        )
+        for payment in paid:
+            payment.due_date = add_months(new_start, payment.month_number - 1)
+        db.commit()
+        generate_payment_schedule(db, plan)
+        aligned.append(
+            {
+                "plan_id": plan.id,
+                "investor_id": plan.investor_id,
+                "from": old_start.isoformat(),
+                "start_date": new_start.isoformat(),
+                "action": "aligned",
+            }
+        )
+
+    return {"aligned": aligned, "count": len(aligned)}
+
+
 def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     today = date.today()
     investors_query = db.query(Investor).options(joinedload(Investor.plans)).order_by(Investor.id)
