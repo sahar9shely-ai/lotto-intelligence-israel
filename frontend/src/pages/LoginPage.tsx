@@ -1,100 +1,74 @@
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { GlowButton } from "../components/GlowButton";
-import { Logo } from "../components/Logo";
+import { FormEvent, useState } from "react";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
+  const { user, loading, login } = useAuth();
   const navigate = useNavigate();
-  const { login, register } = useAuth();
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [name, setName] = useState("סהר");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  if (!loading && user) return <Navigate to="/" replace />;
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
     setBusy(true);
+    setError(null);
     try {
-      if (mode === "login") {
-        await login(email.trim(), password);
-      } else {
-        await register(email.trim(), password, name.trim() || "סהר");
-      }
-      navigate("/app/home");
+      await login(email.trim(), password);
+      navigate("/", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "שגיאה בהתחברות");
+      setError(err instanceof Error ? err.message : "התחברות נכשלה");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="screen auth-screen">
-      <Logo size="md" />
-      <h1 className="auth-screen__title">
-        {mode === "login" ? "התחברות" : "יצירת חשבון"}
-      </h1>
-      <p className="auth-screen__sub">
-        אותם נתונים בכל טלפון — התחברו וסנכרנו אוטומטית
-      </p>
+    <div className="auth-screen">
+      <div className="atmosphere" aria-hidden="true" />
+      <div className="auth-card">
+        <p className="hero__eyebrow">גישה למשתמשים רשומים בלבד</p>
+        <h1 className="auth-card__brand">תזרים</h1>
+        <p className="muted">התחברות אישית — כל משתמש רואה רק את הנתונים שלו.</p>
 
-      <form className="auth-form" onSubmit={onSubmit}>
-        {mode === "register" ? (
-          <label className="field">
-            <span>שם</span>
+        <form className="form" onSubmit={onSubmit}>
+          <label>
+            מייל
             <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="השם שלך"
+              type="email"
+              autoComplete="username"
               required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@example.com"
             />
           </label>
-        ) : null}
-        <label className="field">
-          <span>אימייל</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@email.com"
-            autoComplete="email"
-            required
-            dir="ltr"
-          />
-        </label>
-        <label className="field">
-          <span>סיסמה</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="לפחות 4 תווים"
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
-            minLength={4}
-            required
-            dir="ltr"
-          />
-        </label>
-        {error ? <p className="form-error">{error}</p> : null}
-        <GlowButton type="submit" disabled={busy}>
-          {busy ? "רק רגע..." : mode === "login" ? "התחבר" : "הצטרפי עכשיו"}
-        </GlowButton>
-      </form>
+          <label>
+            סיסמה
+            <input
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </label>
+          {error ? <p className="form-error">{error}</p> : null}
+          <button type="submit" className="btn btn--primary" disabled={busy}>
+            {busy ? "מתחבר..." : "התחברות"}
+          </button>
+        </form>
 
-      <button
-        type="button"
-        className="text-link"
-        onClick={() => setMode(mode === "login" ? "register" : "login")}
-      >
-        {mode === "login" ? "אין חשבון? הירשמו" : "כבר יש חשבון? התחברו"}
-      </button>
-      <Link to="/" className="text-link">
-        › חזרה
-      </Link>
+        <div className="auth-links">
+          <Link to="/forgot-password">שכחתי סיסמה / כניסה ראשונה</Link>
+        </div>
+        <p className="hint">
+          בכניסה הראשונה יש להגדיר סיסמה דרך המייל. אין כניסת אורחים.
+        </p>
+      </div>
     </div>
   );
 }

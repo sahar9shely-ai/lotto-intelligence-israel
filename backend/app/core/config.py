@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    project_name: str = "Lotto Intelligence Israel"
+    project_name: str = "תזרים — מעקב השקעות"
     environment: str = "development"
     log_level: str = "INFO"
 
@@ -11,6 +11,18 @@ class Settings(BaseSettings):
     postgres_password: str = "lotto_password"
     postgres_host: str = "db"
     postgres_port: int = 5432
+
+    jwt_secret: str = "tazrim-dev-secret-change-me-32chars!"
+    jwt_expire_hours: int = 72
+    app_public_url: str = "http://localhost:5173"
+    reset_token_hours: int = 48
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
 
     @property
     def database_url(self) -> str:
