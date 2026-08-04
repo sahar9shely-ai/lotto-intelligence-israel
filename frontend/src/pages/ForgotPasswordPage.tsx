@@ -1,36 +1,41 @@
 import { FormEvent, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../services/api";
 
-function toAppLink(link: string): string {
-  try {
-    const url = new URL(link, window.location.origin);
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return link;
-  }
-}
-
 export function ForgotPasswordPage() {
-  const [email, setEmail] = useState("");
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("sahar9shely@gmail.com");
   const [message, setMessage] = useState<string | null>(null);
-  const [resetLink, setResetLink] = useState<string | null>(null);
-  const [delivered, setDelivered] = useState<boolean | null>(null);
+  const [resetPath, setResetPath] = useState<string | null>(null);
+  const [fullLink, setFullLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function prepareLink(e?: FormEvent) {
+    e?.preventDefault();
     setBusy(true);
     setError(null);
     setMessage(null);
-    setResetLink(null);
-    setDelivered(null);
+    setResetPath(null);
+    setFullLink(null);
     try {
       const res = await api.forgotPassword(email.trim());
-      setMessage(res.message);
-      setDelivered(res.email_delivered ?? null);
-      if (res.reset_link) setResetLink(toAppLink(res.reset_link));
+      const link = res.reset_link || "";
+      if (!link) {
+        setMessage(res.message);
+        setError("לא התקבל קישור מהשרת. נסי שוב.");
+        return;
+      }
+      const url = new URL(link, window.location.origin);
+      const path = `${url.pathname}${url.search}`;
+      const absolute = `${window.location.origin}${path}`;
+      setResetPath(path);
+      setFullLink(absolute);
+      setMessage(
+        res.email_delivered
+          ? "נשלח גם למייל. אפשר להמשיך מכאן:"
+          : "אין שליחה ל-Gmail כרגע. לחצי על הכפתור הירוק להגדרת סיסמה:",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "שליחה נכשלה");
     } finally {
@@ -42,11 +47,13 @@ export function ForgotPasswordPage() {
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <h1 className="auth-card__brand">שחזור סיסמה</h1>
+        <h1 className="auth-card__brand">הגדרת סיסמה</h1>
         <p className="muted">
-          הזיני את המייל שלך. אם שירות המייל לא מחובר — יופיע כאן קישור ישיר להגדרת סיסמה.
+          חשוב: המיילים <strong>לא נשלחים ל-Gmail</strong> עד שתחברו SMTP. בינתיים מגדירים
+          סיסמה עם קישור שמופיע כאן במסך.
         </p>
-        <form className="form" onSubmit={onSubmit}>
+
+        <div className="form">
           <label>
             מייל
             <input
@@ -57,25 +64,48 @@ export function ForgotPasswordPage() {
               placeholder="sahar9shely@gmail.com"
             />
           </label>
+
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={busy || !email.trim()}
+            onClick={() => void prepareLink()}
+          >
+            {busy ? "מכין קישור..." : "הכיני קישור להגדרת סיסמה"}
+          </button>
+
           {error ? <p className="form-error">{error}</p> : null}
           {message ? <p className="toast">{message}</p> : null}
-          {resetLink ? (
+
+          {resetPath && fullLink ? (
             <div className="reset-box">
-              <p className="hint">
-                {delivered
-                  ? "נשלח גם למייל. אפשר גם לפתוח ישירות:"
-                  : "לחצי על הקישור כדי להגדיר סיסמה עכשיו:"}
-              </p>
-              <a className="btn btn--primary" href={resetLink}>
-                הגדרת סיסמה
-              </a>
-              <code className="reset-link-text">{window.location.origin + resetLink}</code>
+              <strong>הקישור מוכן</strong>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => navigate(resetPath)}
+              >
+                המשך להגדרת סיסמה
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(fullLink);
+                    setMessage("הקישור הועתק ללוח");
+                  } catch {
+                    setMessage(fullLink);
+                  }
+                }}
+              >
+                העתקת קישור
+              </button>
+              <code className="reset-link-text">{fullLink}</code>
             </div>
           ) : null}
-          <button type="submit" className="btn btn--primary" disabled={busy}>
-            {busy ? "שולח..." : "שלחי קישור"}
-          </button>
-        </form>
+        </div>
+
         <div className="auth-links">
           <Link to="/login">חזרה להתחברות</Link>
         </div>
