@@ -19,55 +19,47 @@
 
 איפוס סיסמה ללקוח — רק דרך המנהל (מסך משתמשים). אין איפוס עצמי במייל.
 
-## גישה מכל טלפון / מחשב
+## גישה מכל מקום ומכל מכשיר
 
-אחרי הרצה במצב ייצור יש **כתובת אחת** (אותו שרת מגיש גם את האתר וגם את ה־API).
+### אפשרות מומלצת כרגע — קישור ציבורי מיידי
 
-### אפשרות א׳ — הרצה מקומית נגישה ברשת הבית
+מריצים מנהרה מאובטחת (Cloudflare) ומקבלים קישור `https://...trycloudflare.com`
+שנפתח מכל טלפון / מחשב / רשת:
 
 ```bash
-chmod +x scripts/start-production.sh
-./scripts/start-production.sh
+chmod +x scripts/share-public.sh
+./scripts/share-public.sh
 ```
 
-- במחשב: http://localhost:8000  
-- בטלפון **באותה רשת Wi‑Fi**: `http://<כתובת-IP-של-המחשב>:8000`  
-  (למשל `http://192.168.1.20:8000`)
+בטרמינל יופיע קישור HTTPS — מעתיקים ופותחים בדפדפן.
+התחברות מנהל: `sahar` / `Sahar1234!`
 
-### אפשרות ב׳ — Docker (מומלץ לשרת / ענן)
+> הקישור חי כל עוד הסקריפט רץ. לעצירה: `Ctrl+C`.
+
+### אפשרות קבועה — העלאה לענן (כתובת קבועה)
+
+להרצה 24/7 עם כתובת קבועה:
 
 ```bash
 docker compose -f docker/docker-compose.prod.yml up --build -d
 ```
 
-האפליקציה תעלה ב־http://localhost:8000  
-הנתונים נשמרים ב־volume בשם `tazrim_data`.
+ואז מעלים את ה־`Dockerfile` שבשורש הפרויקט ל־Render / Railway / VPS.
+מגדירים:
 
-להעלות לאינטרנט (גישה מכל מקום):
+- `JWT_SECRET` — מחרוזת סודית ארוכה
+- `APP_PUBLIC_URL` — הכתובת הציבורית (למשל `https://tazrim.onrender.com`)
 
-1. העלי את הפרויקט ל־VPS / Railway / Render עם ה־`Dockerfile` שבשורש.
-2. הגדירי משתני סביבה:
-   - `JWT_SECRET` — מחרוזת סודית ארוכה
-   - `APP_PUBLIC_URL` — הכתובת הציבורית, למשל `https://tazrim.example.com`
-   - `PORT` — בדרך כלל מספק הענן מגדיר אוטומטית
-3. פתחי את הכתובת הציבורית מהטלפון או מכל מחשב.
+יש גם `render.yaml` מוכן לפריסה ב־Render.
 
-### אפשרות ג׳ — פיתוח (שני שרתים)
+### באותה רשת Wi‑Fi בלבד
 
 ```bash
-# Backend
-cd backend
-pip install -r requirements.txt
-PYTHONPATH=. uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Frontend
-cd frontend
-npm install
-npm run dev
+./scripts/start-production.sh
 ```
 
-- מחשב: http://localhost:5173  
-- טלפון באותה רשת: `http://<IP>:5173`
+- מחשב: http://localhost:8000  
+- טלפון באותה רשת: `http://<IP-של-המחשב>:8000`
 
 ## מה יש באפליקציה
 
