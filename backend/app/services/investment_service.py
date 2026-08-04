@@ -444,6 +444,37 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
     }
 
 
+def remove_investor_from_calendar_year(
+    db: Session, *, year: int, investor_id: int
+) -> dict:
+    """Delete plans that belong to a calendar reporting year for one investor.
+
+    Removes the Jan–Dec plan(s) for that year and their payments so the investor
+    no longer appears in the yearly report.
+    """
+    year_start = date(year, 1, 1)
+    year_end = date(year, 12, 31)
+    plans = (
+        db.query(InvestmentPlan)
+        .filter(
+            InvestmentPlan.investor_id == investor_id,
+            InvestmentPlan.start_date >= year_start,
+            InvestmentPlan.start_date <= year_end,
+        )
+        .all()
+    )
+    deleted_ids = [p.id for p in plans]
+    for plan in plans:
+        db.delete(plan)
+    db.commit()
+    return {
+        "year": year,
+        "investor_id": investor_id,
+        "deleted_plan_ids": deleted_ids,
+        "deleted_count": len(deleted_ids),
+    }
+
+
 def mark_year_payments_paid(
     db: Session, *, year: int, investor_id: Optional[int] = None
 ) -> dict:

@@ -23,6 +23,7 @@ export function PaymentsPage() {
   const [alignBusy, setAlignBusy] = useState(false);
   const [openBusy, setOpenBusy] = useState(false);
   const [markBusy, setMarkBusy] = useState(false);
+  const [removeBusyId, setRemoveBusyId] = useState<number | null>(null);
 
   const investorFilter = investorId ? Number(investorId) : undefined;
 
@@ -46,10 +47,27 @@ export function PaymentsPage() {
     () => api.paymentReport(year, investorFilter),
     [year, investorFilter],
   );
+  const {
+    data: yearAll,
+    reload: reloadYearAll,
+  } = useAsync(
+    () => (isManager ? api.payments({ year }) : Promise.resolve([])),
+    [year, isManager],
+  );
 
   const payments = useMemo(() => data ?? [], [data]);
   const yearly = report?.yearly;
   const lifetime = report?.lifetime;
+
+  const yearInvestors = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const p of yearAll ?? []) {
+      map.set(p.investor_id, p.investor_name);
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "he"));
+  }, [yearAll]);
 
   const yearOptions = useMemo(() => {
     const fromApi = report?.available_years ?? [];
@@ -65,6 +83,7 @@ export function PaymentsPage() {
   function refreshAll() {
     reload();
     reloadReport();
+    reloadYearAll();
   }
 
   async function markPaid(id: number) {
@@ -148,6 +167,32 @@ export function PaymentsPage() {
       setMessage(err instanceof Error ? err.message : "סימון שנתי נכשל");
     } finally {
       setMarkBusy(false);
+    }
+  }
+
+  async function removeInvestorFromYear(inv: { id: number; name: string }) {
+    if (
+      !window.confirm(
+        `להסיר את ${inv.name} מלוח שנת ${year}?\nהמסלול של ${year} והתשלומים שלו יימחקו, והוא לא יופיע בדוח השנתי.`,
+      )
+    ) {
+      return;
+    }
+    setRemoveBusyId(inv.id);
+    setMessage(null);
+    try {
+      const result = await api.removeFromCalendarYear(year, inv.id);
+      setMessage(
+        result.deleted_count
+          ? `${inv.name} הוסר/ה מלוח ${year} ולא יופיע/ו בדוח`
+          : `לא נמצא מסלול של ${inv.name} לשנת ${year}`,
+      );
+      if (investorId === String(inv.id)) setInvestorId("");
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "הסרה מהשנה נכשלה");
+    } finally {
+      setRemoveBusyId(null);
     }
   }
 
@@ -326,6 +371,32 @@ export function PaymentsPage() {
           </div>
         </Panel>
       </div>
+
+      {isManager && yearInvestors.length > 0 ? (
+        <Panel
+          title={`מי בלוח ${year}`}
+          subtitle="אם מישהו לא היה במסלול בשנה זו — הסירי אותו מהלוח"
+        >
+          <ul className="list">
+            {yearInvestors.map((inv) => (
+              <li key={inv.id} className="list__row">
+                <div>
+                  <strong>{inv.name}</strong>
+                  <span className="muted">מופיע בדוח {year}</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--small btn--ghost btn--danger"
+                  disabled={removeBusyId === inv.id}
+                  onClick={() => removeInvestorFromYear(inv)}
+                >
+                  {removeBusyId === inv.id ? "מסירים..." : "הסירי מהשנה"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       <Panel
         title={`שנת ${year}`}

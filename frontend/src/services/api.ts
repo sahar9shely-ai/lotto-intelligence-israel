@@ -209,6 +209,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  deletePlan: (id: number) =>
+    request<void>(`/api/v1/investments/plans/${id}`, {
+      method: "DELETE",
+    }),
+  removeFromCalendarYear: (year: number, investor_id: number) =>
+    request<{
+      year: number;
+      investor_id: number;
+      deleted_plan_ids: number[];
+      deleted_count: number;
+    }>(
+      `/api/v1/investments/remove-from-calendar-year?year=${year}&investor_id=${investor_id}`,
+      { method: "POST" },
+    ),
   payments: (params?: {
     investor_id?: number;
     plan_id?: number;

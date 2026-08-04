@@ -86,6 +86,34 @@ export function InvestorsPage() {
     reloadPlans();
   }
 
+  async function onDeletePlan(plan: {
+    id: number;
+    start_date: string;
+    investor_name: string;
+    paid_count: number;
+  }) {
+    const year = plan.start_date.slice(0, 4);
+    const paidNote =
+      plan.paid_count > 0
+        ? `\nשימי לב: יש ${plan.paid_count} תשלומים שסומנו כשולמו — גם הם יימחקו.`
+        : "";
+    if (
+      !window.confirm(
+        `למחוק את מסלול #${plan.id} של ${plan.investor_name} (שנת ${year})?\nאחרי המחיקה המשקיע לא יופיע בדוח של ${year}.${paidNote}`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.deletePlan(plan.id);
+      setMessage(`מסלול #${plan.id} נמחק — ${plan.investor_name} לא יופיע בדוח ${year}`);
+      reload();
+      reloadPlans();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "מחיקת המסלול נכשלה");
+    }
+  }
+
   if (loading) return <div className="state">טוען משקיעים...</div>;
   if (error || !investors)
     return (
@@ -190,6 +218,17 @@ export function InvestorsPage() {
                         ? `${plan.duration_months} חודשים · ${formatPercent(plan.monthly_rate_percent)} חודשי · עמלה ${formatPercent(plan.manager_fee_percent)}`
                         : `${plan.duration_months} חודשים · ${formatPercent(plan.monthly_rate_percent)} חודשי`
                     }
+                    action={
+                      isManager ? (
+                        <button
+                          type="button"
+                          className="btn btn--small btn--ghost btn--danger"
+                          onClick={() => onDeletePlan(plan)}
+                        >
+                          מחקי מסלול
+                        </button>
+                      ) : null
+                    }
                   >
                     <div className="kv kv--dense">
                       <div>
@@ -275,9 +314,18 @@ export function InvestorsPage() {
                           </select>
                         </label>
                       </div>
-                      <button type="submit" className="btn btn--primary">
-                        שמרי שינויים
-                      </button>
+                      <div className="page-head__actions">
+                        <button type="submit" className="btn btn--primary">
+                          שמרי שינויים
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--danger"
+                          onClick={() => onDeletePlan(plan)}
+                        >
+                          מחקי מסלול
+                        </button>
+                      </div>
                     </form>
                     ) : null}
                   </Panel>

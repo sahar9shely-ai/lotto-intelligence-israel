@@ -231,3 +231,48 @@ def test_open_calendar_year_and_payment_report():
         f"/api/v1/investments/open-calendar-year?year={report_year}", headers=headers
     ).json()
     assert again["created_count"] == 0
+
+
+def test_delete_plan_and_remove_from_year():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    bar = next(i for i in investors if i["name"] == "בר")
+    year = 2024
+
+    opened = client.post(
+        f"/api/v1/investments/open-calendar-year?year={year}", headers=headers
+    )
+    assert opened.status_code == 200
+    assert opened.json()["created_count"] >= 1
+
+    before = client.get(
+        f"/api/v1/investments/payments?year={year}&investor_id={bar['id']}",
+        headers=headers,
+    ).json()
+    assert len(before) == 12
+
+    removed = client.post(
+        f"/api/v1/investments/remove-from-calendar-year?year={year}&investor_id={bar['id']}",
+        headers=headers,
+    )
+    assert removed.status_code == 200
+    assert removed.json()["deleted_count"] >= 1
+
+    after = client.get(
+        f"/api/v1/investments/payments?year={year}&investor_id={bar['id']}",
+        headers=headers,
+    ).json()
+    assert after == []
+
+    # Remaining investors still in year; delete one plan by id
+    leftover = client.get(
+        f"/api/v1/investments/payments?year={year}", headers=headers
+    ).json()
+    assert leftover
+    plan_id = leftover[0]["plan_id"]
+    deleted = client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
+    assert deleted.status_code == 204
+    gone = client.get(
+        f"/api/v1/investments/payments?plan_id={plan_id}", headers=headers
+    ).json()
+    assert gone == []

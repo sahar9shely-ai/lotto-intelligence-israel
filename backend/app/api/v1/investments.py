@@ -268,6 +268,31 @@ def update_plan(
     return svc.serialize_plan(plan)
 
 
+@router.delete("/plans/{plan_id}", status_code=204)
+def delete_plan(
+    plan_id: int,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    db.delete(plan)
+    db.commit()
+    return None
+
+
+@router.post("/remove-from-calendar-year")
+def remove_from_calendar_year(
+    year: int = Query(...),
+    investor_id: int = Query(...),
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Remove an investor from a reporting year so they no longer appear in that year's report."""
+    return svc.remove_investor_from_calendar_year(db, year=year, investor_id=investor_id)
+
+
 @router.post("/plans/{plan_id}/regenerate-schedule", response_model=list[PaymentOut])
 def regenerate_schedule(
     plan_id: int,
