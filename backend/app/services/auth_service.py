@@ -219,15 +219,18 @@ def seed_users(db: Session) -> dict:
 
 
 def serialize_user(user: User) -> dict:
+    email = user.email or ""
     return {
         "id": user.id,
-        "email": user.email,
+        "email": email,
         "role": user.role,
         "investor_id": user.investor_id,
         "investor_name": user.investor.name if user.investor else "",
         "is_manager": is_manager(user),
+        "is_active": bool(user.is_active),
         "must_reset_password": user.must_reset_password,
         "has_password": bool(user.password_hash),
+        "email_needs_update": email.endswith("@tazrim.app") or not email,
         "last_login_at": user.last_login_at,
         "password_set_at": user.password_set_at,
     }

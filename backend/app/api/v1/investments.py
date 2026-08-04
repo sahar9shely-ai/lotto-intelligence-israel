@@ -105,7 +105,7 @@ def list_investors(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
-    query = db.query(Investor).options(joinedload(Investor.plans))
+    query = db.query(Investor).options(joinedload(Investor.plans), joinedload(Investor.user))
     if not is_manager(user):
         query = query.filter(Investor.id == user.investor_id)
     investors = query.order_by(Investor.is_manager.desc(), Investor.name).all()
@@ -118,15 +118,25 @@ def create_investor(
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    investor = Investor(**payload.model_dump())
+    data = payload.model_dump(exclude={"email", "send_invite"})
+    investor = Investor(**data)
     db.add(investor)
     db.commit()
     db.refresh(investor)
-    auth_svc.ensure_user_for_investor(db, investor, send_invite=True)
-    db.commit()
+
+    email = payload.email.strip() if payload.email else None
+    if email:
+        auth_svc.ensure_user_for_investor(
+            db, investor, email=email, send_invite=payload.send_invite
+        )
+        db.commit()
+    else:
+        auth_svc.ensure_user_for_investor(db, investor, send_invite=False)
+        db.commit()
+
     investor = (
         db.query(Investor)
-        .options(joinedload(Investor.plans))
+        .options(joinedload(Investor.plans), joinedload(Investor.user))
         .filter(Investor.id == investor.id)
         .one()
     )
@@ -150,7 +160,7 @@ def update_investor(
 
     investor = (
         db.query(Investor)
-        .options(joinedload(Investor.plans))
+        .options(joinedload(Investor.plans), joinedload(Investor.user))
         .filter(Investor.id == investor_id)
         .first()
     )
@@ -400,7 +410,12 @@ def convert_quote(
     db.add(plan)
     quote.status = "converted"
     quote.converted_investor_id = investor.id
-    auth_svc.ensure_user_for_investor(db, investor, send_invite=True)
+    auth_svc.ensure_user_for_investor(
+        db,
+        investor,
+        email=payload.email,
+        send_invite=payload.send_invite and bool(payload.email),
+    )
     db.commit()
     db.refresh(plan)
 

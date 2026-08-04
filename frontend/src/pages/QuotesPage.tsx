@@ -31,8 +31,13 @@ export function QuotesPage() {
   async function convert(id: number, name: string) {
     const start = window.prompt(`תאריך התחלה ל-${name} (YYYY-MM-DD)`, todayISO());
     if (!start) return;
-    await api.convertQuote(id, { start_date: start });
-    setMessage(`${name} הומר למשקיע חדש עם מסלול ולוח תשלומים`);
+    const email = window.prompt(`מייל לגישה של ${name} (חובה)`, "")?.trim();
+    if (!email) {
+      setMessage("לא ניתן להמיר בלי מייל — אפשר גם ליצור משתמש ממסך משתמשים והרשאות");
+      return;
+    }
+    await api.convertQuote(id, { start_date: start, email, send_invite: true });
+    setMessage(`${name} הומר למשקיע חדש — נשלחה הזמנה ל-${email}`);
     reload();
   }
 

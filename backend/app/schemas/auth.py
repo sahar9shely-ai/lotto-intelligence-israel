@@ -27,8 +27,10 @@ class UserOut(BaseModel):
     investor_id: int
     investor_name: str
     is_manager: bool
+    is_active: bool = True
     must_reset_password: bool
     has_password: bool
+    email_needs_update: bool = False
     last_login_at: Optional[datetime] = None
     password_set_at: Optional[datetime] = None
 
@@ -57,6 +59,23 @@ class LoginAlertOut(BaseModel):
 
 class UpdateUserEmailRequest(BaseModel):
     email: EmailStr
+
+
+class UpdateUserRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    role: Optional[str] = Field(default=None, pattern="^(manager|investor)$")
+    is_active: Optional[bool] = None
+    investor_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    send_invite: bool = True
+
+
+class CreateAccessUserRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    role: str = Field(default="investor", pattern="^(manager|investor)$")
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+    send_invite: bool = True
 
 
 class EmailOutboxOut(BaseModel):

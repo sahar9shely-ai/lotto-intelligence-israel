@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, backref
 
 from app.db.investment_base import InvestmentBase as Base
 from app.models.investments import utcnow
@@ -24,7 +24,7 @@ class User(Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     password_set_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    investor = relationship("Investor", backref="user", uselist=False)
+    investor = relationship("Investor", backref=backref("user", uselist=False))
     reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )

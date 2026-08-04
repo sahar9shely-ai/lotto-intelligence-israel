@@ -10,6 +10,7 @@ export function AppShell() {
     { to: "/investors", label: isManager ? "משקיעים" : "המסלול שלי", managerOnly: false },
     { to: "/payments", label: "תשלומים", managerOnly: false },
     { to: "/quotes", label: "הצעות", managerOnly: true },
+    { to: "/users", label: "משתמשים", managerOnly: true },
     { to: "/settings", label: "הגדרות", managerOnly: true },
   ].filter((l) => !l.managerOnly || isManager);
 

@@ -7,6 +7,7 @@ from app.db.investment_session import get_investment_db
 from app.models.auth import EmailOutbox, LoginAlert, User
 from app.models.investments import Investor, utcnow
 from app.schemas.auth import (
+    CreateAccessUserRequest,
     EmailOutboxOut,
     ForgotPasswordRequest,
     LoginAlertOut,
@@ -15,6 +16,7 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     TokenResponse,
     UpdateUserEmailRequest,
+    UpdateUserRequest,
     UserOut,
 )
 from app.security.auth import get_current_user, is_manager, require_manager
@@ -76,6 +78,62 @@ def update_user_email(
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
+    return _apply_user_update(
+        db,
+        user_id,
+        UpdateUserRequest(email=payload.email, send_invite=True),
+    )
+
+
+@router.patch("/users/{user_id}", response_model=UserOut)
+def update_user(
+    user_id: int,
+    payload: UpdateUserRequest,
+    current: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    return _apply_user_update(db, user_id, payload, actor=current)
+
+
+@router.post("/users", response_model=UserOut, status_code=201)
+def create_access_user(
+    payload: CreateAccessUserRequest,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    email = auth_svc.normalize_email(payload.email)
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=400, detail="המייל כבר בשימוש")
+
+    investor = Investor(
+        name=payload.name.strip(),
+        is_manager=payload.role == "manager",
+        phone=payload.phone,
+        notes=payload.notes,
+    )
+    db.add(investor)
+    db.flush()
+    user = auth_svc.ensure_user_for_investor(
+        db, investor, email=email, send_invite=payload.send_invite
+    )
+    user.role = payload.role
+    investor.is_manager = payload.role == "manager"
+    db.commit()
+    user = (
+        db.query(User)
+        .options(joinedload(User.investor))
+        .filter(User.id == user.id)
+        .one()
+    )
+    return auth_svc.serialize_user(user)
+
+
+def _apply_user_update(
+    db: Session,
+    user_id: int,
+    payload: UpdateUserRequest,
+    actor: User | None = None,
+) -> dict:
     user = (
         db.query(User)
         .options(joinedload(User.investor))
@@ -84,14 +142,63 @@ def update_user_email(
     )
     if not user:
         raise HTTPException(status_code=404, detail="משתמש לא נמצא")
-    email = auth_svc.normalize_email(payload.email)
-    clash = db.query(User).filter(User.email == email, User.id != user_id).first()
-    if clash:
-        raise HTTPException(status_code=400, detail="המייל כבר בשימוש")
-    user.email = email
-    user.must_reset_password = True
-    user.password_hash = None
-    auth_svc.send_invite_email(db, user)
+
+    data = payload.model_dump(exclude_unset=True, exclude={"send_invite"})
+    email_changed = False
+
+    if "email" in data and data["email"]:
+        email = auth_svc.normalize_email(str(data["email"]))
+        clash = db.query(User).filter(User.email == email, User.id != user_id).first()
+        if clash:
+            raise HTTPException(status_code=400, detail="המייל כבר בשימוש")
+        if email != user.email:
+            user.email = email
+            user.must_reset_password = True
+            user.password_hash = None
+            email_changed = True
+
+    if "role" in data and data["role"]:
+        role = data["role"]
+        # Keep at least one manager active.
+        if user.role == "manager" and role != "manager":
+            other_managers = (
+                db.query(User)
+                .filter(User.role == "manager", User.id != user.id, User.is_active.is_(True))
+                .count()
+            )
+            if other_managers == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="חייבים להשאיר לפחות מנהל אחד פעיל במערכת",
+                )
+        user.role = role
+        if user.investor:
+            user.investor.is_manager = role == "manager"
+
+    if "is_active" in data and data["is_active"] is not None:
+        if user.is_active and data["is_active"] is False:
+            if actor and actor.id == user.id:
+                raise HTTPException(status_code=400, detail="לא ניתן לבטל את עצמך")
+            if user.role == "manager":
+                other_managers = (
+                    db.query(User)
+                    .filter(User.role == "manager", User.id != user.id, User.is_active.is_(True))
+                    .count()
+                )
+                if other_managers == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="חייבים להשאיר לפחות מנהל אחד פעיל במערכת",
+                    )
+        user.is_active = bool(data["is_active"])
+
+    if "investor_name" in data and data["investor_name"] and user.investor:
+        user.investor.name = str(data["investor_name"]).strip()
+
+    should_invite = bool(payload.send_invite) and email_changed
+    if should_invite:
+        auth_svc.send_invite_email(db, user)
+
     db.commit()
     db.refresh(user)
     return auth_svc.serialize_user(user)
@@ -111,6 +218,11 @@ def resend_invite(
     )
     if not user:
         raise HTTPException(status_code=404, detail="משתמש לא נמצא")
+    if (user.email or "").endswith("@tazrim.app"):
+        raise HTTPException(
+            status_code=400,
+            detail="עדכני מייל אמיתי לפני שליחת הזמנה",
+        )
     auth_svc.send_invite_email(db, user)
     db.commit()
     return {"message": f"נשלח מייל הזמנה אל {user.email}"}

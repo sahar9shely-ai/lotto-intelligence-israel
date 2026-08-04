@@ -90,6 +90,32 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ email }),
     }),
+  updateUser: (
+    id: number,
+    body: Partial<{
+      email: string;
+      role: string;
+      is_active: boolean;
+      investor_name: string;
+      send_invite: boolean;
+    }>,
+  ) =>
+    request<AuthUser>(`/api/v1/auth/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  createAccessUser: (body: {
+    name: string;
+    email: string;
+    role: string;
+    phone?: string;
+    notes?: string;
+    send_invite?: boolean;
+  }) =>
+    request<AuthUser>("/api/v1/auth/users", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   resendInvite: (id: number) =>
     request<{ message: string }>(`/api/v1/auth/users/${id}/resend-invite`, {
       method: "POST",
@@ -119,6 +145,8 @@ export const api = {
     phone?: string;
     notes?: string;
     is_manager?: boolean;
+    email?: string;
+    send_invite?: boolean;
   }) =>
     request<Investor>("/api/v1/investments/investors", {
       method: "POST",
@@ -227,7 +255,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  convertQuote: (id: number, body: { start_date: string; phone?: string; notes?: string }) =>
+  convertQuote: (
+    id: number,
+    body: { start_date: string; phone?: string; notes?: string; email?: string; send_invite?: boolean },
+  ) =>
     request<Plan>(`/api/v1/investments/quotes/${id}/convert`, {
       method: "POST",
       body: JSON.stringify(body),

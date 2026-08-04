@@ -10,6 +10,7 @@ import { PaymentsPage } from "./pages/PaymentsPage";
 import { QuotesPage } from "./pages/QuotesPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { UsersPage } from "./pages/UsersPage";
 
 export function App() {
   return (
@@ -26,6 +27,7 @@ export function App() {
             <Route path="payments" element={<PaymentsPage />} />
             <Route element={<RequireManager />}>
               <Route path="quotes" element={<QuotesPage />} />
+              <Route path="users" element={<UsersPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Route>

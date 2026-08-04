@@ -38,9 +38,12 @@ export function InvestorsPage() {
       name: String(fd.get("name") || "").trim(),
       phone: String(fd.get("phone") || "") || undefined,
       notes: String(fd.get("notes") || "") || undefined,
+      email: String(fd.get("email") || "").trim() || undefined,
+      is_manager: String(fd.get("role") || "investor") === "manager",
+      send_invite: fd.get("send_invite") === "on",
     });
     setShowNewInvestor(false);
-    setMessage("משקיע חדש נוסף");
+    setMessage("משקיע חדש נוסף — עדכני מייל בהרשאות אם צריך");
     reload();
   }
 
@@ -291,12 +294,27 @@ export function InvestorsPage() {
               <input name="name" required placeholder="שם המשקיע" />
             </label>
             <label>
+              מייל לגישה
+              <input name="email" type="email" required placeholder="name@gmail.com" />
+            </label>
+            <label>
+              הרשאה
+              <select name="role" defaultValue="investor">
+                <option value="investor">משקיע — רואה רק את שלו</option>
+                <option value="manager">מנהל — גישה מלאה</option>
+              </select>
+            </label>
+            <label>
               טלפון
               <input name="phone" placeholder="אופציונלי" />
             </label>
             <label>
               הערות
               <textarea name="notes" rows={3} />
+            </label>
+            <label className="check-row">
+              <input name="send_invite" type="checkbox" defaultChecked />
+              שלחי הזמנה להגדרת סיסמה למייל
             </label>
             <button type="submit" className="btn btn--primary">
               הוסיפי

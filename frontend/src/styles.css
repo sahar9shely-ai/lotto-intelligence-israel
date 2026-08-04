@@ -833,3 +833,14 @@ textarea {
 .email-row {
   align-items: start;
 }
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+
+.check-row input {
+  width: auto;
+}

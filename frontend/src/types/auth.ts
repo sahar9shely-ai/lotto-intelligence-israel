@@ -5,8 +5,10 @@ export type AuthUser = {
   investor_id: number;
   investor_name: string;
   is_manager: boolean;
+  is_active?: boolean;
   must_reset_password: boolean;
   has_password: boolean;
+  email_needs_update?: boolean;
   last_login_at?: string | null;
   password_set_at?: string | null;
 };
