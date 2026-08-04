@@ -1,13 +1,13 @@
 {
-  "name": "GOT URS",
-  "short_name": "GOT URS",
-  "description": "חדרים בהפתעה — האפליקציה שלך להרגיש בלתי נשכחת",
+  "name": "תזרים",
+  "short_name": "תזרים",
+  "description": "מעקב השקעות שותפים ותשלומים חודשיים",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0612",
-  "theme_color": "#0a0612",
-  "lang": "he",
+  "background_color": "#E7F0EA",
+  "theme_color": "#0E2A22",
   "dir": "rtl",
+  "lang": "he",
   "icons": [
     {
       "src": "/icon.svg",

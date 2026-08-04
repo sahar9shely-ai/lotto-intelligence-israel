@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    project_name: str = "Lotto Intelligence Israel"
+    project_name: str = "תזרים — מעקב השקעות"
     environment: str = "development"
     log_level: str = "INFO"
 

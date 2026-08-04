@@ -1,67 +1,38 @@
-import { Link } from "react-router-dom";
-import { BottomNav } from "./BottomNav";
-import { Logo } from "./Logo";
+import { NavLink, Outlet } from "react-router-dom";
 
-interface AppShellProps {
-  children: React.ReactNode;
-  title?: string;
-  showBack?: boolean;
-  backTo?: string;
-  showBell?: boolean;
-  showMenu?: boolean;
-  hideNav?: boolean;
-  onBack?: () => void;
-}
+const links = [
+  { to: "/", label: "לוח בקרה", end: true },
+  { to: "/investors", label: "משקיעים" },
+  { to: "/payments", label: "תשלומים" },
+  { to: "/quotes", label: "הצעות" },
+  { to: "/settings", label: "הגדרות" },
+];
 
-export function AppShell({
-  children,
-  title,
-  showBack = false,
-  backTo = "/app/home",
-  showBell = true,
-  showMenu = false,
-  hideNav = false,
-  onBack,
-}: AppShellProps) {
+export function AppShell() {
   return (
-    <div className={`app-phone${hideNav ? " app-phone--no-nav" : ""}`}>
-      <header className="app-header">
-        <div className="app-header__side">
-          {showBack ? (
-            onBack ? (
-              <button type="button" className="icon-btn" onClick={onBack} aria-label="חזרה">
-                ›
-              </button>
-            ) : (
-              <Link to={backTo} className="icon-btn" aria-label="חזרה">
-                ›
-              </Link>
-            )
-          ) : showMenu ? (
-            <Link to="/app/settings" className="icon-btn" aria-label="תפריט">
-              ☰
-            </Link>
-          ) : (
-            <span className="icon-btn icon-btn--spacer" />
-          )}
+    <div className="app">
+      <div className="atmosphere" aria-hidden="true" />
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand__mark">תזרים</span>
+          <span className="brand__tag">מעקב השקעות שותפים</span>
         </div>
-        <div className="app-header__center">
-          <Logo size="sm" />
-          {title ? <p className="app-header__title">{title}</p> : null}
-        </div>
-        <div className="app-header__side app-header__side--end">
-          {showBell ? (
-            <Link to="/app/invite" className="icon-btn icon-btn--bell" aria-label="התראות">
-              ⌐
-              <span className="icon-btn__dot" />
-            </Link>
-          ) : (
-            <span className="icon-btn icon-btn--spacer" />
-          )}
-        </div>
+        <nav className="nav" aria-label="ניווט ראשי">
+          {links.map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              end={link.end}
+              className={({ isActive }) => (isActive ? "nav__link is-active" : "nav__link")}
+            >
+              {link.label}
+            </NavLink>
+          ))}
+        </nav>
       </header>
-      <main className="app-main">{children}</main>
-      {!hideNav ? <BottomNav /> : null}
+      <main className="main">
+        <Outlet />
+      </main>
     </div>
   );
 }

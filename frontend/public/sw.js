@@ -1,5 +1,5 @@
-const CACHE = "goturs-v1";
-const ASSETS = ["/", "/manifest.webmanifest", "/icon.svg"];
+const CACHE = "tazrim-v1";
+const ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
@@ -18,16 +18,16 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("/api/")) return;
+
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const fetched = fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          void caches.open(CACHE).then((cache) => cache.put(request, copy));
-          return response;
-        })
-        .catch(() => cached);
-      return cached || fetched;
-    }),
+    fetch(request)
+      .then((response) => {
+        const copy = response.clone();
+        void caches.open(CACHE).then((cache) => cache.put(request, copy));
+        return response;
+      })
+      .catch(() => caches.match(request).then((cached) => cached || caches.match("/"))),
   );
 });
