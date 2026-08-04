@@ -489,6 +489,35 @@ textarea {
   background: #fff;
 }
 
+.password-field {
+  position: relative;
+  display: block;
+}
+
+.password-field__input {
+  padding-left: 4.5rem;
+}
+
+.password-field__toggle {
+  position: absolute;
+  inset-inline-start: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.password-field__toggle:hover {
+  background: rgba(31, 107, 85, 0.08);
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

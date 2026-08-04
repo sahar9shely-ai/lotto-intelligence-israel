@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { Panel } from "../components/Panel";
+import { PasswordField } from "../components/PasswordField";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { AuthUser, PasswordResetRequestItem } from "../types/auth";
@@ -14,6 +15,8 @@ export function UsersPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [fulfillTarget, setFulfillTarget] = useState<PasswordResetRequestItem | null>(null);
+  const [fulfillPassword, setFulfillPassword] = useState("");
 
   async function saveUser(user: AuthUser, e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -64,15 +67,18 @@ export function UsersPage() {
     }
   }
 
-  async function fulfillRequest(req: PasswordResetRequestItem) {
-    const password = window.prompt(
-      `הגדירי סיסמה חדשה עבור ${req.display_name} (${req.username}) — לפחות 8 תווים`,
-      "",
-    );
-    if (!password) return;
+  async function confirmFulfill(e: FormEvent) {
+    e.preventDefault();
+    if (!fulfillTarget) return;
+    if (fulfillPassword.length < 8) {
+      setErrorMsg("הסיסמה חייבת להכיל לפחות 8 תווים");
+      return;
+    }
     try {
-      await api.fulfillPasswordReset(req.id, password);
-      setMessage(`הסיסמה של ${req.display_name} עודכנה.`);
+      await api.fulfillPasswordReset(fulfillTarget.id, fulfillPassword);
+      setMessage(`הסיסמה של ${fulfillTarget.display_name} עודכנה.`);
+      setFulfillTarget(null);
+      setFulfillPassword("");
       reload();
       reloadRequests();
     } catch (err) {
@@ -140,7 +146,14 @@ export function UsersPage() {
                   </span>
                 </div>
                 <div className="page-head__actions">
-                  <button type="button" className="btn btn--small btn--primary" onClick={() => fulfillRequest(req)}>
+                  <button
+                    type="button"
+                    className="btn btn--small btn--primary"
+                    onClick={() => {
+                      setFulfillPassword("");
+                      setFulfillTarget(req);
+                    }}
+                  >
                     אשרי והגדירי סיסמה
                   </button>
                   <button type="button" className="btn btn--small btn--ghost" onClick={() => rejectRequest(req)}>
@@ -219,15 +232,13 @@ export function UsersPage() {
                   <option value="false">מושבת</option>
                 </select>
               </label>
-              <label>
-                סיסמה חדשה (רק את מגדירה)
-                <input
-                  name="new_password"
-                  type="password"
-                  minLength={8}
-                  placeholder={u.has_password ? "השאירי ריק כדי לא לשנות" : "חובה להגדיר"}
-                />
-              </label>
+              <PasswordField
+                label="סיסמה חדשה (רק את מגדירה)"
+                name="new_password"
+                minLength={8}
+                autoComplete="new-password"
+                placeholder={u.has_password ? "השאירי ריק כדי לא לשנות" : "חובה להגדיר"}
+              />
             </div>
             <div className="page-head__actions">
               <button type="submit" className="btn btn--primary">
@@ -265,10 +276,13 @@ export function UsersPage() {
                 שם משתמש
                 <input name="username" required placeholder="revital" autoComplete="off" />
               </label>
-              <label>
-                סיסמה התחלתית
-                <input name="password" type="password" required minLength={8} autoComplete="new-password" />
-              </label>
+              <PasswordField
+                label="סיסמה התחלתית"
+                name="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+              />
               <label>
                 מייל (אופציונלי)
                 <input name="email" type="email" placeholder="אופציונלי" />
@@ -286,6 +300,50 @@ export function UsersPage() {
               </label>
               <button type="submit" className="btn btn--primary">
                 צרי משתמש
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {fulfillTarget ? (
+        <div className="modal" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="modal__backdrop"
+            aria-label="סגירה"
+            onClick={() => {
+              setFulfillTarget(null);
+              setFulfillPassword("");
+            }}
+          />
+          <div className="modal__sheet">
+            <header className="modal__head">
+              <h2>סיסמה חדשה ל-{fulfillTarget.display_name}</h2>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => {
+                  setFulfillTarget(null);
+                  setFulfillPassword("");
+                }}
+              >
+                סגרי
+              </button>
+            </header>
+            <form className="form" onSubmit={confirmFulfill}>
+              <p className="muted">שם משתמש: {fulfillTarget.username}</p>
+              <PasswordField
+                label="סיסמה חדשה"
+                name="fulfill_password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                value={fulfillPassword}
+                onChange={(e) => setFulfillPassword(e.target.value)}
+              />
+              <button type="submit" className="btn btn--primary">
+                אשרי ושמרי סיסמה
               </button>
             </form>
           </div>

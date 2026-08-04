@@ -1,6 +1,7 @@
 import { FormEvent, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
+import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
@@ -298,10 +299,13 @@ export function InvestorsPage() {
               שם משתמש לגישה
               <input name="username" required placeholder="revital" autoComplete="off" />
             </label>
-            <label>
-              סיסמה התחלתית
-              <input name="password" type="password" required minLength={8} autoComplete="new-password" />
-            </label>
+            <PasswordField
+              label="סיסמה התחלתית"
+              name="password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+            />
             <label>
               הרשאה
               <select name="role" defaultValue="investor">
