@@ -33,7 +33,6 @@ export function LoginPage() {
       <div className="auth-card">
         <p className="hero__eyebrow">גישה למשתמשים רשומים בלבד</p>
         <h1 className="auth-card__brand">התחברות</h1>
-        <p className="muted">התחברות עם שם משתמש וסיסמה — בלי תלות במייל.</p>
 
         <form className="form" onSubmit={onSubmit} autoComplete="off">
           <label>
