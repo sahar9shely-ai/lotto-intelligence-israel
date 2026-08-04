@@ -16,12 +16,26 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.main import app
+from app.services import investment_service as inv_svc
+from app.db.investment_session import InvestmentSessionLocal
 
 
 @pytest.fixture(scope="session")
 def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _seed_investments() -> None:
+    # Ensure tables + default investors/users exist for the whole suite.
+    with TestClient(app):
+        pass
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+    finally:
+        db.close()
 
 
 @pytest.fixture()

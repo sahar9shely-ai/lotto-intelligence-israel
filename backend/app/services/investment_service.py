@@ -59,7 +59,15 @@ def seed_defaults(db: Session) -> dict:
             db.add(Investor(name=name, is_manager=is_manager))
             created.append(name)
     db.commit()
-    return {"created": created, "already_existed": sorted(existing)}
+
+    from app.services import auth_service as auth_svc
+
+    users = auth_svc.seed_users(db)
+    return {
+        "created": created,
+        "already_existed": sorted(existing),
+        "users": users,
+    }
 
 
 def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
@@ -207,17 +215,21 @@ def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment
     return created
 
 
-def get_dashboard(db: Session) -> dict:
+def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     today = date.today()
-    investors = (
-        db.query(Investor).options(joinedload(Investor.plans)).order_by(Investor.id).all()
-    )
-    plans = (
+    investors_query = db.query(Investor).options(joinedload(Investor.plans)).order_by(Investor.id)
+    if investor_id is not None:
+        investors_query = investors_query.filter(Investor.id == investor_id)
+    investors = investors_query.all()
+
+    plans_query = (
         db.query(InvestmentPlan)
         .options(joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments))
         .filter(InvestmentPlan.status == "active")
-        .all()
     )
+    if investor_id is not None:
+        plans_query = plans_query.filter(InvestmentPlan.investor_id == investor_id)
+    plans = plans_query.all()
 
     total_principal = 0.0
     monthly_investor = 0.0
@@ -234,30 +246,32 @@ def get_dashboard(db: Session) -> dict:
             monthly_manager_own += payout
 
     year_start = date(today.year, 1, 1)
-    paid_year = (
-        db.query(Payment)
-        .filter(Payment.status == "paid", Payment.paid_at >= year_start)
-        .all()
+    paid_query = db.query(Payment).filter(
+        Payment.status == "paid", Payment.paid_at >= year_start
     )
+    if investor_id is not None:
+        paid_query = paid_query.filter(Payment.investor_id == investor_id)
+    paid_year = paid_query.all()
     ytd_investor = sum(p.investor_amount for p in paid_year)
     ytd_manager = sum(p.manager_amount for p in paid_year)
 
-    upcoming = (
+    upcoming_query = (
         db.query(Payment)
         .options(joinedload(Payment.investor))
         .filter(Payment.status == "scheduled")
-        .order_by(Payment.due_date.asc())
-        .limit(8)
-        .all()
     )
-    recent = (
+    if investor_id is not None:
+        upcoming_query = upcoming_query.filter(Payment.investor_id == investor_id)
+    upcoming = upcoming_query.order_by(Payment.due_date.asc()).limit(8).all()
+
+    recent_query = (
         db.query(Payment)
         .options(joinedload(Payment.investor))
         .filter(Payment.status == "paid")
-        .order_by(Payment.paid_at.desc(), Payment.id.desc())
-        .limit(8)
-        .all()
     )
+    if investor_id is not None:
+        recent_query = recent_query.filter(Payment.investor_id == investor_id)
+    recent = recent_query.order_by(Payment.paid_at.desc(), Payment.id.desc()).limit(8).all()
 
     return {
         "total_principal": round(total_principal, 2),

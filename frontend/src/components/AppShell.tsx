@@ -1,21 +1,27 @@
 import { NavLink, Outlet } from "react-router-dom";
-
-const links = [
-  { to: "/", label: "לוח בקרה", end: true },
-  { to: "/investors", label: "משקיעים" },
-  { to: "/payments", label: "תשלומים" },
-  { to: "/quotes", label: "הצעות" },
-  { to: "/settings", label: "הגדרות" },
-];
+import { useAuth } from "../context/AuthContext";
 
 export function AppShell() {
+  const { user, logout } = useAuth();
+  const isManager = Boolean(user?.is_manager);
+
+  const links = [
+    { to: "/", label: "לוח בקרה", end: true, managerOnly: false },
+    { to: "/investors", label: isManager ? "משקיעים" : "המסלול שלי", managerOnly: false },
+    { to: "/payments", label: "תשלומים", managerOnly: false },
+    { to: "/quotes", label: "הצעות", managerOnly: true },
+    { to: "/settings", label: "הגדרות", managerOnly: true },
+  ].filter((l) => !l.managerOnly || isManager);
+
   return (
     <div className="app">
       <div className="atmosphere" aria-hidden="true" />
       <header className="topbar">
         <div className="brand">
           <span className="brand__mark">תזרים</span>
-          <span className="brand__tag">מעקב השקעות שותפים</span>
+          <span className="brand__tag">
+            {user ? `${user.investor_name} · ${user.email}` : "מעקב השקעות שותפים"}
+          </span>
         </div>
         <nav className="nav" aria-label="ניווט ראשי">
           {links.map((link) => (
@@ -28,6 +34,9 @@ export function AppShell() {
               {link.label}
             </NavLink>
           ))}
+          <button type="button" className="nav__link nav__logout" onClick={logout}>
+            יציאה
+          </button>
         </nav>
       </header>
       <main className="main">

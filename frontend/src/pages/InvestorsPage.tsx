@@ -1,14 +1,20 @@
 import { FormEvent, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
+import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Settings } from "../types/investments";
 import { formatMoney, formatPercent, todayISO } from "../utils/format";
 
 export function InvestorsPage() {
+  const { user } = useAuth();
+  const isManager = Boolean(user?.is_manager);
   const { data: investors, error, loading, reload } = useAsync(() => api.investors(), []);
-  const { data: settings } = useAsync(() => api.settings(), []);
+  const { data: settings } = useAsync(
+    () => (isManager ? api.settings() : Promise.resolve(null)),
+    [isManager],
+  );
   const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showNewInvestor, setShowNewInvestor] = useState(false);
@@ -90,22 +96,26 @@ export function InvestorsPage() {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>משקיעים ומסלולים</h1>
-          <p className="muted">אחוזים קבועים לפי חוזה · משך מסלול גמיש</p>
+          <h1>{isManager ? "משקיעים ומסלולים" : "המסלול שלי"}</h1>
+          <p className="muted">
+            {isManager ? "אחוזים קבועים לפי חוזה · משך מסלול גמיש" : "צפייה בנתונים שלך בלבד"}
+          </p>
         </div>
-        <div className="page-head__actions">
-          <button type="button" className="btn btn--ghost" onClick={() => setShowNewInvestor(true)}>
-            משקיע חדש
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => setShowNewPlan(true)}
-            disabled={!selected}
-          >
-            מסלול חדש
-          </button>
-        </div>
+        {isManager ? (
+          <div className="page-head__actions">
+            <button type="button" className="btn btn--ghost" onClick={() => setShowNewInvestor(true)}>
+              משקיע חדש
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setShowNewPlan(true)}
+              disabled={!selected}
+            >
+              מסלול חדש
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {message ? <p className="toast">{message}</p> : null}
@@ -170,17 +180,23 @@ export function InvestorsPage() {
                   <Panel
                     key={plan.id}
                     title={`מסלול #${plan.id}`}
-                    subtitle={`${plan.duration_months} חודשים · ${formatPercent(plan.monthly_rate_percent)} חודשי · עמלה ${formatPercent(plan.manager_fee_percent)}`}
+                    subtitle={
+                      isManager
+                        ? `${plan.duration_months} חודשים · ${formatPercent(plan.monthly_rate_percent)} חודשי · עמלה ${formatPercent(plan.manager_fee_percent)}`
+                        : `${plan.duration_months} חודשים · ${formatPercent(plan.monthly_rate_percent)} חודשי`
+                    }
                   >
                     <div className="kv kv--dense">
                       <div>
                         <span>חודשי למשקיע</span>
                         <strong>{formatMoney(plan.monthly_investor_payout, true)}</strong>
                       </div>
-                      <div>
-                        <span>עמלה חודשית</span>
-                        <strong>{formatMoney(plan.monthly_manager_fee, true)}</strong>
-                      </div>
+                      {isManager ? (
+                        <div>
+                          <span>עמלה חודשית</span>
+                          <strong>{formatMoney(plan.monthly_manager_fee, true)}</strong>
+                        </div>
+                      ) : null}
                       <div>
                         <span>סה״כ למסלול</span>
                         <strong>{formatMoney(plan.total_investor_payout)}</strong>
@@ -204,7 +220,8 @@ export function InvestorsPage() {
                       </div>
                     </div>
 
-                    <form className="form" onSubmit={(e) => onUpdatePlan(e, plan.id)}>
+                    {isManager ? (
+                      <form className="form" onSubmit={(e) => onUpdatePlan(e, plan.id)}>
                       <div className="form__grid">
                         <label>
                           קרן (₪)
@@ -257,6 +274,7 @@ export function InvestorsPage() {
                         שמרי שינויים
                       </button>
                     </form>
+                    ) : null}
                   </Panel>
                 ))
               )}

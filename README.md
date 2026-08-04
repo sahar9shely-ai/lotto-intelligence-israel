@@ -2,44 +2,52 @@
 
 דשבורד בעברית (RTL) למעקב אחרי משקיעים, מסלולים עם אחוז חודשי קבוע, תשלומים, עמלת ניהול נפרדת והצעות למשקיעים חדשים.
 
+## התחברות (חובה)
+
+אין כניסת אורחים. לכל משקיע יש משתמש משלו:
+
+| משתמש | מייל ברירת מחדל |
+| --- | --- |
+| מנהלת | `manager@tazrim.app` |
+| בר | `bar@tazrim.app` |
+| אופק | `ofek@tazrim.app` |
+| אלמוג | `almog@tazrim.app` |
+| שושי | `shoshi@tazrim.app` |
+
+1. בכניסה ראשונה — «שכחתי סיסמה / כניסה ראשונה» לפי המייל → קישור להגדרת סיסמה.
+2. בלי SMTP המיילים נשמרים בתיבת outbox בהגדרות (למנהלת) ובלוג השרת.
+3. כל התחברות יוצרת **התראת כניסה** למנהלת (בדשבורד + מייל).
+4. משקיע רואה רק את הנתונים שלו; מנהלת רואה הכל.
+
 ## מה יש באפליקציה
 
-- **לוח בקרה** — סך קרן, תשלומים חודשיים, עמלות ניהול, סיכום שנתי
-- **משקיעים ומסלולים** — בר, אופק, אלמוג, שושי + מנהלת; עריכת קרן / אחוזים / משך
-- **תשלומים** — היסטוריה, סימון «שולם», סינון לפי שנה/משקיע
-- **הצעות** — סיכום ל־12+ חודשים והמרה למשקיע חדש
-- **הגדרות** — ברירות מחדל גלובליות לאחוזים ולמשך
-
-עמלת הניהול מתווספת **בנוסף** לתשואה של המשקיע — לא נגזרת ממנו.
+- **לוח בקרה** — סך קרן, תשלומים חודשיים, עמלות ניהול, סיכום שנתי, התראות כניסה
+- **משקיעים ומסלולים** — בר, אופק, אלמוג, שושי + מנהלת
+- **תשלומים** — היסטוריה, סימון «שולם»
+- **הצעות** — סיכום ל־12+ חודשים והמרה למשקיע חדש (+ משתמש והזמנה במייל)
+- **הגדרות** — אחוזים, ניהול מיילים למשתמשים, שליחת הזמנה מחדש
 
 ## הרצה
 
 ```bash
 # Backend
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+PYTHONPATH=. uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Frontend (טרמינל שני)
+# Frontend
 cd frontend
 npm install
 npm run dev
 ```
 
-פתחו בדפדפן:
-
 - מחשב: http://localhost:5173
-- טלפון באותה רשת: `http://<IP-של-המחשב>:5173`
+- טלפון באותה רשת: `http://<IP>:5173`
 
-הנתונים נשמרים ב־SQLite (`backend/app/data/investments.db`) ומסונכרנים דרך ה־API — אותו מצב מכל מכשיר שמחובר לשרת.
+הגדרת SMTP ב־`.env` (אופציונלי). בלי SMTP — outbox בפיתוח.
 
 ## API עיקרי
 
-- `GET /api/v1/investments/dashboard`
-- `GET|POST /api/v1/investments/investors`
-- `GET|POST|PATCH /api/v1/investments/plans`
-- `GET|PATCH /api/v1/investments/payments`
-- `GET|POST /api/v1/investments/quotes` + `POST .../convert`
-- `GET|PATCH /api/v1/investments/settings`
+- `POST /api/v1/auth/login|forgot-password|reset-password`
+- `GET /api/v1/auth/me` · `GET /api/v1/auth/login-alerts`
+- `GET /api/v1/investments/dashboard` (JWT חובה)

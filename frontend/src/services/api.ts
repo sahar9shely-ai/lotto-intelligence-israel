@@ -1,42 +1,126 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+import type {
+  AuthUser,
+  EmailOutboxItem,
+  LoginAlert,
+} from "../types/auth";
+import type {
+  Dashboard,
+  Investor,
+  Payment,
+  Plan,
+  Quote,
+  Settings,
+} from "../types/investments";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const TOKEN_KEY = "tazrim_token";
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string | null) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+async function request<T>(path: string, init?: RequestInit, auth = true): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (auth) {
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
     ...init,
+    headers,
   });
 
+  if (response.status === 401) {
+    setToken(null);
+  }
+
   if (!response.ok) {
-    let detail = response.statusText;
+    let detail: unknown = response.statusText;
     try {
       const body = await response.json();
-      detail = body.detail ?? JSON.stringify(body);
+      detail = body.detail ?? body;
     } catch {
       /* ignore */
     }
-    throw new Error(typeof detail === "string" ? detail : "בקשה נכשלה");
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d) => d.msg || JSON.stringify(d)).join(", ")
+          : "בקשה נכשלה";
+    throw new Error(message);
   }
 
-  if (response.status === 204) {
-    return undefined as T;
-  }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
 export const api = {
-  dashboard: () => request<import("./../types/investments").Dashboard>("/api/v1/investments/dashboard"),
-  settings: () => request<import("./../types/investments").Settings>("/api/v1/investments/settings"),
-  updateSettings: (body: Partial<import("./../types/investments").Settings>) =>
-    request<import("./../types/investments").Settings>("/api/v1/investments/settings", {
+  login: (email: string, password: string) =>
+    request<{ access_token: string; user: AuthUser }>(
+      "/api/v1/auth/login",
+      { method: "POST", body: JSON.stringify({ email, password }) },
+      false,
+    ),
+  forgotPassword: (email: string) =>
+    request<{ message: string }>(
+      "/api/v1/auth/forgot-password",
+      { method: "POST", body: JSON.stringify({ email }) },
+      false,
+    ),
+  resetPassword: (token: string, new_password: string) =>
+    request<{ message: string }>(
+      "/api/v1/auth/reset-password",
+      { method: "POST", body: JSON.stringify({ token, new_password }) },
+      false,
+    ),
+  me: () => request<AuthUser>("/api/v1/auth/me"),
+  users: () => request<AuthUser[]>("/api/v1/auth/users"),
+  updateUserEmail: (id: number, email: string) =>
+    request<AuthUser>(`/api/v1/auth/users/${id}/email`, {
+      method: "PATCH",
+      body: JSON.stringify({ email }),
+    }),
+  resendInvite: (id: number) =>
+    request<{ message: string }>(`/api/v1/auth/users/${id}/resend-invite`, {
+      method: "POST",
+    }),
+  loginAlerts: (unreadOnly = false) =>
+    request<LoginAlert[]>(
+      `/api/v1/auth/login-alerts${unreadOnly ? "?unread_only=true" : ""}`,
+    ),
+  markAlertRead: (id: number) =>
+    request<LoginAlert>(`/api/v1/auth/login-alerts/${id}/read`, { method: "POST" }),
+  markAllAlertsRead: () =>
+    request<{ message: string }>("/api/v1/auth/login-alerts/read-all", {
+      method: "POST",
+    }),
+  emailOutbox: () => request<EmailOutboxItem[]>("/api/v1/auth/email-outbox"),
+
+  dashboard: () => request<Dashboard>("/api/v1/investments/dashboard"),
+  settings: () => request<Settings>("/api/v1/investments/settings"),
+  updateSettings: (body: Partial<Settings>) =>
+    request<Settings>("/api/v1/investments/settings", {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  investors: () => request<import("./../types/investments").Investor[]>("/api/v1/investments/investors"),
-  createInvestor: (body: { name: string; phone?: string; notes?: string; is_manager?: boolean }) =>
-    request<import("./../types/investments").Investor>("/api/v1/investments/investors", {
+  investors: () => request<Investor[]>("/api/v1/investments/investors"),
+  createInvestor: (body: {
+    name: string;
+    phone?: string;
+    notes?: string;
+    is_manager?: boolean;
+  }) =>
+    request<Investor>("/api/v1/investments/investors", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -44,7 +128,7 @@ export const api = {
     id: number,
     body: Partial<{ name: string; phone: string; notes: string; is_manager: boolean }>,
   ) =>
-    request<import("./../types/investments").Investor>(`/api/v1/investments/investors/${id}`, {
+    request<Investor>(`/api/v1/investments/investors/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
@@ -53,7 +137,7 @@ export const api = {
     if (params?.investor_id != null) qs.set("investor_id", String(params.investor_id));
     if (params?.status) qs.set("status", params.status);
     const suffix = qs.toString() ? `?${qs}` : "";
-    return request<import("./../types/investments").Plan[]>(`/api/v1/investments/plans${suffix}`);
+    return request<Plan[]>(`/api/v1/investments/plans${suffix}`);
   },
   createPlan: (body: {
     investor_id: number;
@@ -65,7 +149,7 @@ export const api = {
     notes?: string;
     generate_schedule?: boolean;
   }) =>
-    request<import("./../types/investments").Plan>("/api/v1/investments/plans", {
+    request<Plan>("/api/v1/investments/plans", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -82,7 +166,7 @@ export const api = {
       regenerate_schedule: boolean;
     }>,
   ) =>
-    request<import("./../types/investments").Plan>(`/api/v1/investments/plans/${id}`, {
+    request<Plan>(`/api/v1/investments/plans/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
@@ -98,9 +182,7 @@ export const api = {
     if (params?.status) qs.set("status", params.status);
     if (params?.year != null) qs.set("year", String(params.year));
     const suffix = qs.toString() ? `?${qs}` : "";
-    return request<import("./../types/investments").Payment[]>(
-      `/api/v1/investments/payments${suffix}`,
-    );
+    return request<Payment[]>(`/api/v1/investments/payments${suffix}`);
   },
   updatePayment: (
     id: number,
@@ -112,11 +194,11 @@ export const api = {
       notes: string;
     }>,
   ) =>
-    request<import("./../types/investments").Payment>(`/api/v1/investments/payments/${id}`, {
+    request<Payment>(`/api/v1/investments/payments/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  quotes: () => request<import("./../types/investments").Quote[]>("/api/v1/investments/quotes"),
+  quotes: () => request<Quote[]>("/api/v1/investments/quotes"),
   createQuote: (body: {
     prospect_name: string;
     principal: number;
@@ -125,7 +207,7 @@ export const api = {
     duration_months: number;
     notes?: string;
   }) =>
-    request<import("./../types/investments").Quote>("/api/v1/investments/quotes", {
+    request<Quote>("/api/v1/investments/quotes", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -141,12 +223,12 @@ export const api = {
       status: string;
     }>,
   ) =>
-    request<import("./../types/investments").Quote>(`/api/v1/investments/quotes/${id}`, {
+    request<Quote>(`/api/v1/investments/quotes/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
   convertQuote: (id: number, body: { start_date: string; phone?: string; notes?: string }) =>
-    request<import("./../types/investments").Plan>(`/api/v1/investments/quotes/${id}/convert`, {
+    request<Plan>(`/api/v1/investments/quotes/${id}/convert`, {
       method: "POST",
       body: JSON.stringify(body),
     }),

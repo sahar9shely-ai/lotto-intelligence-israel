@@ -6,9 +6,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.investment_session import get_investment_db, investment_engine
 from app.db.investment_base import InvestmentBase
+from app.db.investment_session import get_investment_db, investment_engine
+from app.models import auth as auth_models  # noqa: F401
 from app.models import investments as investment_models  # noqa: F401
+from app.models.auth import User
 from app.models.investments import Investor, InvestmentPlan, Payment, Quote
 from app.schemas.investments import (
     DashboardOut,
@@ -27,6 +29,8 @@ from app.schemas.investments import (
     SettingsOut,
     SettingsUpdate,
 )
+from app.security.auth import get_current_user, is_manager, require_manager
+from app.services import auth_service as auth_svc
 from app.services import investment_service as svc
 
 router = APIRouter(prefix="/api/v1/investments", tags=["investments"])
@@ -44,23 +48,45 @@ def init_investment_db() -> None:
         db.close()
 
 
+def _scope_investor_id(user: User, requested: Optional[int] = None) -> Optional[int]:
+    if is_manager(user):
+        return requested
+    if requested is not None and requested != user.investor_id:
+        raise HTTPException(status_code=403, detail="אין גישה לנתונים של משקיע אחר")
+    return user.investor_id
+
+
 @router.post("/seed")
-def seed(db: Session = Depends(get_investment_db)):
+def seed(
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
     return svc.seed_defaults(db)
 
 
 @router.get("/dashboard", response_model=DashboardOut)
-def dashboard(db: Session = Depends(get_investment_db)):
-    return svc.get_dashboard(db)
+def dashboard(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    scoped = None if is_manager(user) else user.investor_id
+    return svc.get_dashboard(db, investor_id=scoped)
 
 
 @router.get("/settings", response_model=SettingsOut)
-def get_settings(db: Session = Depends(get_investment_db)):
+def get_settings(
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
     return svc.ensure_settings(db)
 
 
 @router.patch("/settings", response_model=SettingsOut)
-def update_settings(payload: SettingsUpdate, db: Session = Depends(get_investment_db)):
+def update_settings(
+    payload: SettingsUpdate,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
     settings = svc.ensure_settings(db)
     data = payload.model_dump(exclude_unset=True)
     for key, value in data.items():
@@ -75,22 +101,29 @@ def update_settings(payload: SettingsUpdate, db: Session = Depends(get_investmen
 
 
 @router.get("/investors", response_model=list[InvestorOut])
-def list_investors(db: Session = Depends(get_investment_db)):
-    investors = (
-        db.query(Investor)
-        .options(joinedload(Investor.plans))
-        .order_by(Investor.is_manager.desc(), Investor.name)
-        .all()
-    )
+def list_investors(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    query = db.query(Investor).options(joinedload(Investor.plans))
+    if not is_manager(user):
+        query = query.filter(Investor.id == user.investor_id)
+    investors = query.order_by(Investor.is_manager.desc(), Investor.name).all()
     return [svc.serialize_investor(i) for i in investors]
 
 
 @router.post("/investors", response_model=InvestorOut, status_code=201)
-def create_investor(payload: InvestorCreate, db: Session = Depends(get_investment_db)):
+def create_investor(
+    payload: InvestorCreate,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
     investor = Investor(**payload.model_dump())
     db.add(investor)
     db.commit()
     db.refresh(investor)
+    auth_svc.ensure_user_for_investor(db, investor, send_invite=True)
+    db.commit()
     investor = (
         db.query(Investor)
         .options(joinedload(Investor.plans))
@@ -102,8 +135,19 @@ def create_investor(payload: InvestorCreate, db: Session = Depends(get_investmen
 
 @router.patch("/investors/{investor_id}", response_model=InvestorOut)
 def update_investor(
-    investor_id: int, payload: InvestorUpdate, db: Session = Depends(get_investment_db)
+    investor_id: int,
+    payload: InvestorUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
 ):
+    if not is_manager(user) and investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="אין הרשאה")
+    # Investors may only update phone/notes on themselves
+    if not is_manager(user):
+        allowed = payload.model_dump(exclude_unset=True)
+        if any(k not in {"phone", "notes"} for k in allowed):
+            raise HTTPException(status_code=403, detail="ניתן לעדכן רק טלפון והערות")
+
     investor = (
         db.query(Investor)
         .options(joinedload(Investor.plans))
@@ -123,13 +167,15 @@ def update_investor(
 def list_plans(
     investor_id: Optional[int] = None,
     status: Optional[str] = None,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
+    scoped = _scope_investor_id(user, investor_id)
     query = db.query(InvestmentPlan).options(
         joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments)
     )
-    if investor_id is not None:
-        query = query.filter(InvestmentPlan.investor_id == investor_id)
+    if scoped is not None:
+        query = query.filter(InvestmentPlan.investor_id == scoped)
     if status:
         query = query.filter(InvestmentPlan.status == status)
     plans = query.order_by(InvestmentPlan.start_date.desc()).all()
@@ -137,7 +183,11 @@ def list_plans(
 
 
 @router.post("/plans", response_model=PlanOut, status_code=201)
-def create_plan(payload: PlanCreate, db: Session = Depends(get_investment_db)):
+def create_plan(
+    payload: PlanCreate,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
     investor = db.query(Investor).filter(Investor.id == payload.investor_id).first()
     if not investor:
         raise HTTPException(status_code=404, detail="Investor not found")
@@ -162,7 +212,10 @@ def create_plan(payload: PlanCreate, db: Session = Depends(get_investment_db)):
 
 @router.patch("/plans/{plan_id}", response_model=PlanOut)
 def update_plan(
-    plan_id: int, payload: PlanUpdate, db: Session = Depends(get_investment_db)
+    plan_id: int,
+    payload: PlanUpdate,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
 ):
     plan = (
         db.query(InvestmentPlan)
@@ -201,7 +254,11 @@ def update_plan(
 
 
 @router.post("/plans/{plan_id}/regenerate-schedule", response_model=list[PaymentOut])
-def regenerate_schedule(plan_id: int, db: Session = Depends(get_investment_db)):
+def regenerate_schedule(
+    plan_id: int,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
     plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
@@ -222,11 +279,13 @@ def list_payments(
     plan_id: Optional[int] = None,
     status: Optional[str] = None,
     year: Optional[int] = Query(default=None),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
+    scoped = _scope_investor_id(user, investor_id)
     query = db.query(Payment).options(joinedload(Payment.investor))
-    if investor_id is not None:
-        query = query.filter(Payment.investor_id == investor_id)
+    if scoped is not None:
+        query = query.filter(Payment.investor_id == scoped)
     if plan_id is not None:
         query = query.filter(Payment.plan_id == plan_id)
     if status:
@@ -242,7 +301,10 @@ def list_payments(
 
 @router.patch("/payments/{payment_id}", response_model=PaymentOut)
 def update_payment(
-    payment_id: int, payload: PaymentUpdate, db: Session = Depends(get_investment_db)
+    payment_id: int,
+    payload: PaymentUpdate,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
 ):
     payment = (
         db.query(Payment)
@@ -266,13 +328,20 @@ def update_payment(
 
 
 @router.get("/quotes", response_model=list[QuoteOut])
-def list_quotes(db: Session = Depends(get_investment_db)):
+def list_quotes(
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
     quotes = db.query(Quote).order_by(Quote.created_at.desc()).all()
     return [svc.serialize_quote(q) for q in quotes]
 
 
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
-def create_quote(payload: QuoteCreate, db: Session = Depends(get_investment_db)):
+def create_quote(
+    payload: QuoteCreate,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
     quote = Quote(**payload.model_dump())
     db.add(quote)
     db.commit()
@@ -282,7 +351,10 @@ def create_quote(payload: QuoteCreate, db: Session = Depends(get_investment_db))
 
 @router.patch("/quotes/{quote_id}", response_model=QuoteOut)
 def update_quote(
-    quote_id: int, payload: QuoteUpdate, db: Session = Depends(get_investment_db)
+    quote_id: int,
+    payload: QuoteUpdate,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
 ):
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
@@ -296,7 +368,10 @@ def update_quote(
 
 @router.post("/quotes/{quote_id}/convert", response_model=PlanOut)
 def convert_quote(
-    quote_id: int, payload: QuoteConvert, db: Session = Depends(get_investment_db)
+    quote_id: int,
+    payload: QuoteConvert,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
 ):
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
@@ -325,6 +400,7 @@ def convert_quote(
     db.add(plan)
     quote.status = "converted"
     quote.converted_investor_id = investor.id
+    auth_svc.ensure_user_for_investor(db, investor, send_invite=True)
     db.commit()
     db.refresh(plan)
 

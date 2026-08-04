@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.admin_stats import router as admin_stats_router
+from app.api.v1.auth import router as auth_router
 from app.api.v1.draws import router as draws_router
 from app.api.v1.goturs import router as goturs_router
 from app.api.v1.health import router as health_router
@@ -16,7 +17,7 @@ configure_logging(settings.log_level)
 
 app = FastAPI(
     title="תזרים — מעקב השקעות",
-    version="0.2.0",
+    version="0.3.0",
 )
 register_error_handlers(app)
 
@@ -34,6 +35,7 @@ app.include_router(draws_router)
 app.include_router(stats_router)
 app.include_router(admin_stats_router)
 app.include_router(goturs_router)
+app.include_router(auth_router)
 app.include_router(investments_router)
 
 
