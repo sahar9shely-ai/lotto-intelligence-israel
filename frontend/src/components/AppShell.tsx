@@ -35,7 +35,7 @@ export function AppShell() {
               {link.label}
             </NavLink>
           ))}
-          <button type="button" className="nav__link nav__logout" onClick={logout}>
+          <button type="button" className="nav__link nav__logout" onClick={() => { logout(); window.location.assign("/login"); }}>
             יציאה
           </button>
         </nav>
