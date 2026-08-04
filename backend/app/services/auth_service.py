@@ -14,7 +14,8 @@ from app.services.email_service import send_email
 
 DEFAULT_USERNAMES = {
     "סהר": "sahar",
-    "מנהלת": "sahar",
+    "מנהל": "sahar",
+    "מנהלת": "sahar",  # legacy display name
     "בר": "bar",
     "אופק": "ofek",
     "אלמוג": "almog",
@@ -23,7 +24,8 @@ DEFAULT_USERNAMES = {
 
 DEFAULT_USER_EMAILS = {
     "סהר": "sahar9shely@gmail.com",
-    "מנהלת": "sahar9shely@gmail.com",
+    "מנהל": "sahar9shely@gmail.com",
+    "מנהלת": "sahar9shely@gmail.com",  # legacy
     "בר": "bar050297@gmail.com",
     "אופק": None,
     "אלמוג": None,
@@ -87,7 +89,7 @@ def notify_manager_login(db: Session, user: User) -> LoginAlert:
         send_email(
             db,
             to_email=manager.email,
-            subject=f"תזרים — {name} התחבר/ה למערכת",
+            subject=f"תזרים — {name} התחבר למערכת",
             body=(
                 f"התראת כניסה:\n\n"
                 f"משתמש: {name}\n"
@@ -169,12 +171,12 @@ def seed_users(db: Session) -> dict:
     updated: list[str] = []
 
     manager = db.query(Investor).filter(Investor.is_manager.is_(True)).first()
-    if manager and manager.name in {"מנהלת", "שחר"}:
+    if manager and manager.name in {"מנהל", "מנהלת", "שחר"}:
         manager.name = MANAGER_NAME
         updated.append(f"investor:{MANAGER_NAME}")
 
     settings = db.query(AppSettings).first()
-    if settings and settings.manager_display_name in {"מנהלת", "שחר", ""}:
+    if settings and settings.manager_display_name in {"מנהל", "מנהלת", "שחר", ""}:
         settings.manager_display_name = MANAGER_NAME
 
     for investor in db.query(Investor).order_by(Investor.id).all():
@@ -271,7 +273,7 @@ def login_user(db: Session, username: str, password: str) -> dict:
 
     if user.must_reset_password or not user.password_hash:
         raise PermissionError(
-            "אין סיסמה לחשבון זה עדיין. פנה/י למנהל להגדרת סיסמה — אין איפוס עצמי."
+            "אין סיסמה לחשבון זה עדיין. פנה למנהל להגדרת סיסמה — אין איפוס עצמי."
         )
 
     if not verify_password(password, user.password_hash):

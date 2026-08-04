@@ -21,7 +21,7 @@ export function DashboardPage() {
       <div className="state state--error">
         <p>{error ?? "לא ניתן לטעון"}</p>
         <button type="button" className="btn" onClick={reload}>
-          נסי שוב
+          נסה שוב
         </button>
       </div>
     );
@@ -67,7 +67,7 @@ export function DashboardPage() {
                 reloadAlerts();
               }}
             >
-              סמני הכל כנקרא
+              סמן הכל כנקרא
             </button>
           }
         >
@@ -75,7 +75,7 @@ export function DashboardPage() {
             {(alerts ?? []).map((a) => (
               <li key={a.id} className="list__row">
                 <div>
-                  <strong>{a.display_name} התחבר/ה</strong>
+                  <strong>{a.display_name} התחבר</strong>
                   <span className="muted">
                     {a.email} · {formatDate(a.logged_in_at)}
                   </span>
@@ -115,7 +115,7 @@ export function DashboardPage() {
               tone="manager"
             />
             <Stat
-              label="סה״כ חודשי למנהלת"
+              label="סה״כ חודשי למנהל"
               value={formatMoney(data.monthly_manager_total)}
               hint={`השקעה עצמית ${formatMoney(data.monthly_manager_own_payout)} + עמלה`}
               tone="manager"
@@ -147,7 +147,7 @@ export function DashboardPage() {
                   <div>
                     <strong>
                       {inv.name}
-                      {inv.is_manager ? <span className="chip">מנהלת</span> : null}
+                      {inv.is_manager ? <span className="chip">מנהל</span> : null}
                     </strong>
                     <span className="muted">
                       {inv.months_in_program} חודשים בתוכנית · {inv.plans_count} מסלולים

@@ -95,7 +95,7 @@ export function InvestorsPage() {
     const year = plan.start_date.slice(0, 4);
     const paidNote =
       plan.paid_count > 0
-        ? `\nשימי לב: יש ${plan.paid_count} תשלומים שסומנו כשולמו — גם הם יימחקו.`
+        ? `\nשים לב: יש ${plan.paid_count} תשלומים שסומנו כשולמו — גם הם יימחקו.`
         : "";
     if (
       !window.confirm(
@@ -120,7 +120,7 @@ export function InvestorsPage() {
       <div className="state state--error">
         <p>{error}</p>
         <button type="button" className="btn" onClick={reload}>
-          נסי שוב
+          נסה שוב
         </button>
       </div>
     );
@@ -167,7 +167,7 @@ export function InvestorsPage() {
                 >
                   <span>
                     {inv.name}
-                    {inv.is_manager ? " · מנהלת" : ""}
+                    {inv.is_manager ? " · מנהל" : ""}
                   </span>
                   <span className="muted">{formatMoney(inv.active_principal)}</span>
                 </button>
@@ -205,7 +205,7 @@ export function InvestorsPage() {
               </Panel>
 
               {selectedPlans.length === 0 ? (
-                <Panel title="אין מסלול עדיין" subtitle="כשתמלאי את הסכומים — פתחי מסלול כאן">
+                <Panel title="אין מסלול עדיין" subtitle="כשתמלא את הסכומים — פתח מסלול כאן">
                   <p className="empty">המספרים יוגדרו בהמשך. בינתיים אפשר לפתוח מסלול עם ערכים זמניים.</p>
                 </Panel>
               ) : (
@@ -225,7 +225,7 @@ export function InvestorsPage() {
                           className="btn btn--small btn--ghost btn--danger"
                           onClick={() => onDeletePlan(plan)}
                         >
-                          מחקי מסלול
+                          מחק מסלול
                         </button>
                       ) : null
                     }
@@ -316,14 +316,14 @@ export function InvestorsPage() {
                       </div>
                       <div className="page-head__actions">
                         <button type="submit" className="btn btn--primary">
-                          שמרי שינויים
+                          שמור שינויים
                         </button>
                         <button
                           type="button"
                           className="btn btn--ghost btn--danger"
                           onClick={() => onDeletePlan(plan)}
                         >
-                          מחקי מסלול
+                          מחק מסלול
                         </button>
                       </div>
                     </form>
@@ -374,7 +374,7 @@ export function InvestorsPage() {
               <textarea name="notes" rows={3} />
             </label>
             <button type="submit" className="btn btn--primary">
-              הוסיפי
+              הוסף
             </button>
           </form>
         </Modal>
@@ -453,7 +453,7 @@ function PlanForm({
         עמלת הניהול מתווספת מעבר לתשלום למשקיע — לא נגזרת מהאחוזים שלו.
       </p>
       <button type="submit" className="btn btn--primary">
-        צרי מסלול + לוח תשלומים
+        צור מסלול + לוח תשלומים
       </button>
     </form>
   );

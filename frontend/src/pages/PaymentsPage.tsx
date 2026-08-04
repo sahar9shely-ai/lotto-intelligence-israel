@@ -280,7 +280,7 @@ export function PaymentsPage() {
       <div className="state state--error">
         <p>{error}</p>
         <button type="button" className="btn" onClick={refreshAll}>
-          נסי שוב
+          נסה שוב
         </button>
       </div>
     );
@@ -293,7 +293,7 @@ export function PaymentsPage() {
           <p className="muted">
             {isManager
               ? `דוח שנתי · שליחה לאישור משקיע · 1 בינואר עד 31 בדצמבר ${year}`
-              : `התשלומים שלך · אשרי קבלה כשמגיעה בקשה · שנת ${year}`}
+              : `התשלומים שלך · אשר קבלה כשמגיעה בקשה · שנת ${year}`}
           </p>
         </div>
         <div className="page-head__actions">
@@ -305,7 +305,7 @@ export function PaymentsPage() {
                 disabled={openBusy}
                 onClick={openReportingYear}
               >
-                {openBusy ? "פותחים..." : `פתחי לוח ${year}`}
+                {openBusy ? "פותחים..." : `פתח לוח ${year}`}
               </button>
               <button
                 type="button"
@@ -334,7 +334,7 @@ export function PaymentsPage() {
       payments.some((p) => p.status === "awaiting_confirmation") ? (
         <Panel
           title="ממתין לאישור שלך"
-          subtitle="המנהלת סימנה תשלום — אשרי או דחי כדי לעדכן את הסטטוס"
+          subtitle="המנהל סימן תשלום — אשר או דחה כדי לעדכן את הסטטוס"
         >
           <ul className="list">
             {payments
@@ -353,14 +353,14 @@ export function PaymentsPage() {
                       className="btn btn--small btn--primary"
                       onClick={() => confirmPayment(p.id)}
                     >
-                      אשרי קבלה
+                      אשר קבלה
                     </button>
                     <button
                       type="button"
                       className="btn btn--small btn--ghost btn--danger"
                       onClick={() => rejectPayment(p.id)}
                     >
-                      דחי
+                      דחה
                     </button>
                   </div>
                 </li>
@@ -474,7 +474,7 @@ export function PaymentsPage() {
       {isManager && yearInvestors.length > 0 ? (
         <Panel
           title={`מי בלוח ${year}`}
-          subtitle="אם מישהו לא היה במסלול בשנה זו — הסירי אותו מהלוח"
+          subtitle="אם מישהו לא היה במסלול בשנה זו — הסר אותו מהלוח"
         >
           <ul className="list">
             {yearInvestors.map((inv) => (
@@ -489,7 +489,7 @@ export function PaymentsPage() {
                   disabled={removeBusyId === inv.id}
                   onClick={() => removeInvestorFromYear(inv)}
                 >
-                  {removeBusyId === inv.id ? "מסירים..." : "הסירי מהשנה"}
+                  {removeBusyId === inv.id ? "מסירים..." : "הסר מהשנה"}
                 </button>
               </li>
             ))}
@@ -508,7 +508,7 @@ export function PaymentsPage() {
               disabled={markBusy}
               onClick={markEntireYearPaid}
             >
-              {markBusy ? "שולחים..." : "שלחי בקשת אישור לכל השנה"}
+              {markBusy ? "שולחים..." : "שלח בקשת אישור לכל השנה"}
             </button>
           ) : null
         }
@@ -518,8 +518,8 @@ export function PaymentsPage() {
             <p className="empty">
               אין רשומות לשנת {year}.{" "}
               {isManager
-                ? `לחצי על «פתחי לוח ${year}» כדי ליצור לוח דיווח מלא לפי תנאי המסלולים הקיימים.`
-                : "פנו למנהלת לפתיחת לוח הדיווח לשנה זו."}
+                ? `לחץ על «פתח לוח ${year}» כדי ליצור לוח דיווח מלא לפי תנאי המסלולים הקיימים.`
+                : "פנו למנהל לפתיחת לוח הדיווח לשנה זו."}
             </p>
             {isManager ? (
               <button
@@ -528,7 +528,7 @@ export function PaymentsPage() {
                 disabled={openBusy}
                 onClick={openReportingYear}
               >
-                {openBusy ? "פותחים..." : `פתחי לוח תשלומים ל-${year}`}
+                {openBusy ? "פותחים..." : `פתח לוח תשלומים ל-${year}`}
               </button>
             ) : null}
           </div>
@@ -565,7 +565,7 @@ export function PaymentsPage() {
                             className="btn btn--small"
                             onClick={() => markPaid(p.id)}
                           >
-                            שלחי לאישור
+                            שלח לאישור
                           </button>
                         ) : p.status === "awaiting_confirmation" ? (
                           <button
@@ -573,7 +573,7 @@ export function PaymentsPage() {
                             className="btn btn--small btn--ghost"
                             onClick={() => markScheduled(p.id)}
                           >
-                            בטלי בקשה
+                            בטל בקשה
                           </button>
                         ) : p.status === "paid" ? (
                           <button
@@ -581,7 +581,7 @@ export function PaymentsPage() {
                             className="btn btn--small btn--ghost"
                             onClick={() => markScheduled(p.id)}
                           >
-                            החזירי למתוכנן
+                            החזר למתוכנן
                           </button>
                         ) : null
                       ) : p.status === "awaiting_confirmation" ? (
@@ -591,14 +591,14 @@ export function PaymentsPage() {
                             className="btn btn--small btn--primary"
                             onClick={() => confirmPayment(p.id)}
                           >
-                            אשרי קבלה
+                            אשר קבלה
                           </button>
                           <button
                             type="button"
                             className="btn btn--small btn--ghost btn--danger"
                             onClick={() => rejectPayment(p.id)}
                           >
-                            דחי
+                            דחה
                           </button>
                         </>
                       ) : null}

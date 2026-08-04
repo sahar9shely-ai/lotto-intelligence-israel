@@ -57,11 +57,19 @@ def seed_defaults(db: Session) -> dict:
     for name, is_manager_flag in defaults:
         if name not in existing:
             # Migrate legacy manager placeholder name if present.
-            if is_manager_flag and "מנהלת" in existing:
-                legacy = db.query(Investor).filter(Investor.name == "מנהלת", Investor.is_manager.is_(True)).first()
+            if is_manager_flag and ("מנהל" in existing or "מנהלת" in existing):
+                legacy = (
+                    db.query(Investor)
+                    .filter(
+                        Investor.name.in_(("מנהל", "מנהלת")),
+                        Investor.is_manager.is_(True),
+                    )
+                    .first()
+                )
                 if legacy:
+                    old_name = legacy.name
                     legacy.name = name
-                    created.append(f"renamed:מנהלת->{name}")
+                    created.append(f"renamed:{old_name}->{name}")
                     continue
             db.add(Investor(name=name, is_manager=is_manager_flag))
             created.append(name)
@@ -745,7 +753,7 @@ def _notify_payment_confirmation_request(db: Session, payment: Payment) -> None:
         subject=f"תזרים — נדרש אישור תשלום ל-{name}",
         body=(
             f"שלום {name},\n\n"
-            f"המנהלת סימנה תשלום לחודש {month} בסך {payment.investor_amount:,.2f} ₪.\n"
+            f"המנהל סימן תשלום לחודש {month} בסך {payment.investor_amount:,.2f} ₪.\n"
             "יש להיכנס לתזרים → תשלומים ולאשר או לדחות את קבלת התשלום.\n"
             "רק אחרי אישור הסטטוס ישתנה לבוצע.\n"
         ),
@@ -767,9 +775,9 @@ def _notify_payment_confirmed(db: Session, payment: Payment) -> None:
         send_email(
             db,
             to_email=manager.email,
-            subject=f"תזרים — {name} אישר/ה תשלום",
+            subject=f"תזרים — {name} אישר תשלום",
             body=(
-                f"{name} אישר/ה קבלת תשלום לחודש {month} "
+                f"{name} אישר קבלת תשלום לחודש {month} "
                 f"בסך {payment.investor_amount:,.2f} ₪.\n"
                 "הסטטוס עודכן לבוצע.\n"
             ),
@@ -825,7 +833,7 @@ def confirm_payment(db: Session, *, payment: Payment, actor) -> dict:
     if payment.investor_id != actor.investor_id:
         raise PermissionError("ניתן לאשר רק תשלומים שלך")
     if payment.status != "awaiting_confirmation":
-        raise ValueError("אין בקשת אישור ממתינה לתשלום זה")
+        raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "paid"
     payment.paid_at = date.today()
     _notify_payment_confirmed(db, payment)
@@ -842,7 +850,7 @@ def reject_payment_confirmation(db: Session, *, payment: Payment, actor) -> dict
     if not is_owner and not actor_is_manager:
         raise PermissionError("אין הרשאה")
     if payment.status != "awaiting_confirmation":
-        raise ValueError("אין בקשת אישור ממתינה לתשלום זה")
+        raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "scheduled"
     payment.paid_at = None
     db.commit()

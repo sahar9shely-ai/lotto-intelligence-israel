@@ -110,7 +110,7 @@ export function QuotesPage() {
       <div className="state state--error">
         <p>{error}</p>
         <button type="button" className="btn" onClick={reload}>
-          נסי שוב
+          נסה שוב
         </button>
       </div>
     );
@@ -199,7 +199,7 @@ export function QuotesPage() {
                 ביטול
               </button>
               <button type="submit" className="btn btn--primary" disabled={busy}>
-                {busy ? "שומרת..." : editing ? "שמרי שינויים" : "שמרי הצעה"}
+                {busy ? "שומר..." : editing ? "שמור שינויים" : "שמור הצעה"}
               </button>
             </div>
           </form>
@@ -208,7 +208,7 @@ export function QuotesPage() {
 
       <div className="quotes-grid">
         {preview.length === 0 ? (
-          <p className="empty">אין הצעות עדיין. צרי הצעת סיכום לאנשים חדשים.</p>
+          <p className="empty">אין הצעות עדיין. צור הצעת סיכום לאנשים חדשים.</p>
         ) : (
           preview.map((q) => {
             const rows = buildMonthSchedule(q);
@@ -308,7 +308,7 @@ export function QuotesPage() {
                         className="btn btn--primary"
                         onClick={() => convert(q.id, q.prospect_name)}
                       >
-                        הכניסי כמשקיע חדש
+                        הכנס כמשקיע חדש
                       </button>
                     </>
                   ) : (

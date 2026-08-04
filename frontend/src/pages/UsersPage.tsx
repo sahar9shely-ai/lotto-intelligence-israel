@@ -103,7 +103,7 @@ export function UsersPage() {
       <div className="state state--error">
         <p>{error}</p>
         <button type="button" className="btn" onClick={reload}>
-          נסי שוב
+          נסה שוב
         </button>
       </div>
     );
@@ -117,7 +117,7 @@ export function UsersPage() {
         <div>
           <h1>משתמשים והרשאות</h1>
           <p className="muted">
-            התחברות בשם משתמש וסיסמה · רק את מגדירה/מאשרת איפוס סיסמה
+            התחברות בשם משתמש וסיסמה · רק אתה מגדיר/מאשר איפוס סיסמה
           </p>
         </div>
         <button type="button" className="btn btn--primary" onClick={() => setShowCreate(true)}>
@@ -154,10 +154,10 @@ export function UsersPage() {
                       setFulfillTarget(req);
                     }}
                   >
-                    אשרי והגדירי סיסמה
+                    אשר והגדר סיסמה
                   </button>
                   <button type="button" className="btn btn--small btn--ghost" onClick={() => rejectRequest(req)}>
-                    דחי
+                    דחה
                   </button>
                 </div>
               </li>
@@ -178,7 +178,7 @@ export function UsersPage() {
                   <strong>
                     {u.investor_name} · {u.username}
                   </strong>
-                  <span className="muted">הגדירי סיסמה בטופס למטה</span>
+                  <span className="muted">הגדר סיסמה בטופס למטה</span>
                 </div>
                 <span className="badge badge--scheduled">
                   {u.role === "manager" ? "מנהל" : "משקיע"}
@@ -233,20 +233,20 @@ export function UsersPage() {
                 </select>
               </label>
               <PasswordField
-                label="סיסמה חדשה (רק את מגדירה)"
+                label="סיסמה חדשה (רק אתה מגדיר)"
                 name="new_password"
                 minLength={8}
                 autoComplete="new-password"
-                placeholder={u.has_password ? "השאירי ריק כדי לא לשנות" : "חובה להגדיר"}
+                placeholder={u.has_password ? "השאר ריק כדי לא לשנות" : "חובה להגדיר"}
               />
             </div>
             <div className="page-head__actions">
               <button type="submit" className="btn btn--primary">
-                שמרי
+                שמור
               </button>
             </div>
             <p className="hint">
-              כניסה אחרונה: {u.last_login_at ? formatDate(u.last_login_at) : "עדיין לא התחבר/ה"}
+              כניסה אחרונה: {u.last_login_at ? formatDate(u.last_login_at) : "עדיין לא התחבר"}
             </p>
           </form>
         </Panel>
@@ -299,7 +299,7 @@ export function UsersPage() {
                 <input name="phone" />
               </label>
               <button type="submit" className="btn btn--primary">
-                צרי משתמש
+                צור משתמש
               </button>
             </form>
           </div>
@@ -343,7 +343,7 @@ export function UsersPage() {
                 onChange={(e) => setFulfillPassword(e.target.value)}
               />
               <button type="submit" className="btn btn--primary">
-                אשרי ושמרי סיסמה
+                אשר ושמור סיסמה
               </button>
             </form>
           </div>

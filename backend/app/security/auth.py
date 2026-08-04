@@ -83,7 +83,7 @@ def get_current_user(
 
 def require_manager(user: User = Depends(get_current_user)) -> User:
     if user.role != "manager" and not (user.investor and user.investor.is_manager):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="למנהלת בלבד")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="למנהל בלבד")
     return user
 
 

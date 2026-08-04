@@ -28,7 +28,7 @@ export function SettingsPage() {
       <div className="state state--error">
         <p>{error}</p>
         <button type="button" className="btn" onClick={reload}>
-          נסי שוב
+          נסה שוב
         </button>
       </div>
     );
@@ -104,7 +104,7 @@ export function SettingsPage() {
             </label>
           </div>
           <button type="submit" className="btn btn--primary">
-            שמרי הגדרות
+            שמור הגדרות
           </button>
         </form>
       </Panel>
