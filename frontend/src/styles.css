@@ -495,7 +495,7 @@ textarea {
 }
 
 .password-field__input {
-  padding-left: 4.5rem;
+  padding-inline-start: 4.75rem;
 }
 
 .password-field__toggle {
@@ -504,7 +504,7 @@ textarea {
   top: 50%;
   transform: translateY(-50%);
   border: 0;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.92);
   color: var(--accent);
   font: inherit;
   font-size: 0.85rem;
@@ -512,10 +512,12 @@ textarea {
   padding: 6px 10px;
   cursor: pointer;
   border-radius: 8px;
+  line-height: 1;
+  z-index: 1;
 }
 
 .password-field__toggle:hover {
-  background: rgba(31, 107, 85, 0.08);
+  background: rgba(31, 107, 85, 0.1);
 }
 
 .filters {
