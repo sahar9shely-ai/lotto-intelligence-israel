@@ -57,16 +57,16 @@ def test_first_login_requires_email_reset_then_login_alerts_manager():
 
     blocked = client.post(
         "/api/v1/auth/login",
-        json={"email": "bar@tazrim.app", "password": "anything"},
+        json={"email": "bar050297@gmail.com", "password": "anything"},
     )
     assert blocked.status_code == 403
 
     _set_password("sahar9shely@gmail.com", "ManagerPass1!")
-    _set_password("bar@tazrim.app", "BarPass123!")
+    _set_password("bar050297@gmail.com", "BarPass123!")
 
     bar_login = client.post(
         "/api/v1/auth/login",
-        json={"email": "bar@tazrim.app", "password": "BarPass123!"},
+        json={"email": "bar050297@gmail.com", "password": "BarPass123!"},
     )
     assert bar_login.status_code == 200
     bar_token = bar_login.json()["access_token"]
@@ -97,7 +97,7 @@ def test_first_login_requires_email_reset_then_login_alerts_manager():
         headers={"Authorization": f"Bearer {m_token}"},
     )
     assert alerts.status_code == 200
-    assert any(a["email"] == "bar@tazrim.app" for a in alerts.json())
+    assert any(a["email"] == "bar050297@gmail.com" for a in alerts.json())
 
 
 def test_forgot_password_flow():

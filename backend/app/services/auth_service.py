@@ -17,7 +17,7 @@ from app.services.email_service import send_email
 DEFAULT_USER_EMAILS = {
     "סהר": "sahar9shely@gmail.com",
     "מנהלת": "sahar9shely@gmail.com",
-    "בר": "bar@tazrim.app",
+    "בר": "bar050297@gmail.com",
     "אופק": "ofek@tazrim.app",
     "אלמוג": "almog@tazrim.app",
     "שושי": "shoshi@tazrim.app",
@@ -192,6 +192,13 @@ def seed_users(db: Session) -> dict:
 
         user = before
         desired = MANAGER_EMAIL if investor.is_manager else DEFAULT_USER_EMAILS.get(investor.name)
+        # Also migrate known placeholder emails for seeded investors.
+        placeholder_emails = {
+            "bar@tazrim.app": "bar050297@gmail.com",
+            "manager@tazrim.app": MANAGER_EMAIL,
+        }
+        if not investor.is_manager and user.email in placeholder_emails:
+            desired = placeholder_emails[user.email]
         if investor.is_manager:
             user.role = "manager"
         if desired and user.email != normalize_email(desired):
