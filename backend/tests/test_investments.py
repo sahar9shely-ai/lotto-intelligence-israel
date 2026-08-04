@@ -47,12 +47,12 @@ def _auth_headers(email: str, password: str = "Password1!") -> dict:
 
 
 def test_seed_and_dashboard():
-    headers = _auth_headers("manager@tazrim.app", "ManagerPass1!")
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     investors = client.get("/api/v1/investments/investors", headers=headers)
     assert investors.status_code == 200
     names = {i["name"] for i in investors.json()}
-    assert {"מנהלת", "בר", "אופק", "אלמוג", "שושי"} <= names or {
-        "שחר",
+    assert {"סהר", "בר", "אופק", "אלמוג", "שושי"} <= names or {
+        "מנהלת",
         "בר",
         "אופק",
         "אלמוג",
@@ -67,7 +67,7 @@ def test_seed_and_dashboard():
 
 
 def test_plan_payment_and_quote_flow():
-    headers = _auth_headers("manager@tazrim.app", "ManagerPass1!")
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     bar = next(i for i in investors if i["name"] == "בר")
 
@@ -125,7 +125,7 @@ def test_plan_payment_and_quote_flow():
 
 
 def test_settings_update():
-    headers = _auth_headers("manager@tazrim.app", "ManagerPass1!")
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     res = client.patch(
         "/api/v1/investments/settings",
         headers=headers,
@@ -133,10 +133,10 @@ def test_settings_update():
             "default_monthly_rate_percent": 2.5,
             "default_manager_fee_percent": 0.75,
             "default_duration_months": 14,
-            "manager_display_name": "שחר",
+            "manager_display_name": "סהר",
         },
     )
     assert res.status_code == 200
     body = res.json()
     assert body["default_duration_months"] == 14
-    assert body["manager_display_name"] == "שחר"
+    assert body["manager_display_name"] == "סהר"

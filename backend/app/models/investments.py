@@ -90,4 +90,4 @@ class AppSettings(Base):
     default_manager_fee_percent: Mapped[float] = mapped_column(Float, default=0.0)
     default_duration_months: Mapped[int] = mapped_column(Integer, default=12)
     currency_symbol: Mapped[str] = mapped_column(String(8), default="₪")
-    manager_display_name: Mapped[str] = mapped_column(String(120), default="מנהלת")
+    manager_display_name: Mapped[str] = mapped_column(String(120), default="סהר")

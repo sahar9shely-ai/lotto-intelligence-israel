@@ -48,15 +48,22 @@ def seed_defaults(db: Session) -> dict:
     created: list[str] = []
 
     defaults = [
-        ("מנהלת", True),
+        ("סהר", True),
         ("בר", False),
         ("אופק", False),
         ("אלמוג", False),
         ("שושי", False),
     ]
-    for name, is_manager in defaults:
+    for name, is_manager_flag in defaults:
         if name not in existing:
-            db.add(Investor(name=name, is_manager=is_manager))
+            # Migrate legacy manager placeholder name if present.
+            if is_manager_flag and "מנהלת" in existing:
+                legacy = db.query(Investor).filter(Investor.name == "מנהלת", Investor.is_manager.is_(True)).first()
+                if legacy:
+                    legacy.name = name
+                    created.append(f"renamed:מנהלת->{name}")
+                    continue
+            db.add(Investor(name=name, is_manager=is_manager_flag))
             created.append(name)
     db.commit()
 

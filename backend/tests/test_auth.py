@@ -61,7 +61,7 @@ def test_first_login_requires_email_reset_then_login_alerts_manager():
     )
     assert blocked.status_code == 403
 
-    _set_password("manager@tazrim.app", "ManagerPass1!")
+    _set_password("sahar9shely@gmail.com", "ManagerPass1!")
     _set_password("bar@tazrim.app", "BarPass123!")
 
     bar_login = client.post(
@@ -87,7 +87,7 @@ def test_first_login_requires_email_reset_then_login_alerts_manager():
 
     manager_login = client.post(
         "/api/v1/auth/login",
-        json={"email": "manager@tazrim.app", "password": "ManagerPass1!"},
+        json={"email": "sahar9shely@gmail.com", "password": "ManagerPass1!"},
     )
     assert manager_login.status_code == 200
     m_token = manager_login.json()["access_token"]

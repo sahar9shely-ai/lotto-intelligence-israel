@@ -8,7 +8,7 @@
 
 | משתמש | מייל ברירת מחדל |
 | --- | --- |
-| מנהלת | `manager@tazrim.app` |
+| סהר (מנהל) | `sahar9shely@gmail.com` |
 | בר | `bar@tazrim.app` |
 | אופק | `ofek@tazrim.app` |
 | אלמוג | `almog@tazrim.app` |

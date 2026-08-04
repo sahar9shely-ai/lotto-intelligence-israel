@@ -15,12 +15,16 @@ from app.services.email_service import send_email
 
 
 DEFAULT_USER_EMAILS = {
-    "מנהלת": "manager@tazrim.app",
+    "סהר": "sahar9shely@gmail.com",
+    "מנהלת": "sahar9shely@gmail.com",
     "בר": "bar@tazrim.app",
     "אופק": "ofek@tazrim.app",
     "אלמוג": "almog@tazrim.app",
     "שושי": "shoshi@tazrim.app",
 }
+
+MANAGER_NAME = "סהר"
+MANAGER_EMAIL = "sahar9shely@gmail.com"
 
 
 def normalize_email(email: str) -> str:
@@ -161,16 +165,50 @@ def ensure_user_for_investor(
 
 
 def seed_users(db: Session) -> dict:
+    from app.models.investments import AppSettings
+
     created: list[str] = []
     invited: list[str] = []
+    updated: list[str] = []
+
+    # Keep manager identity aligned with the owning account.
+    manager = db.query(Investor).filter(Investor.is_manager.is_(True)).first()
+    if manager and manager.name in {"מנהלת", "שחר"}:
+        manager.name = MANAGER_NAME
+        updated.append(f"investor:{MANAGER_NAME}")
+
+    settings = db.query(AppSettings).first()
+    if settings and settings.manager_display_name in {"מנהלת", "שחר", ""}:
+        settings.manager_display_name = MANAGER_NAME
+
     for investor in db.query(Investor).order_by(Investor.id).all():
         before = db.query(User).filter(User.investor_id == investor.id).first()
-        user = ensure_user_for_investor(db, investor, send_invite=before is None)
         if before is None:
+            email = MANAGER_EMAIL if investor.is_manager else None
+            user = ensure_user_for_investor(db, investor, email=email, send_invite=True)
             created.append(user.email)
             invited.append(user.email)
+            continue
+
+        user = before
+        desired = MANAGER_EMAIL if investor.is_manager else DEFAULT_USER_EMAILS.get(investor.name)
+        if investor.is_manager:
+            user.role = "manager"
+        if desired and user.email != normalize_email(desired):
+            clash = (
+                db.query(User)
+                .filter(User.email == normalize_email(desired), User.id != user.id)
+                .first()
+            )
+            if not clash:
+                user.email = normalize_email(desired)
+                user.must_reset_password = True
+                user.password_hash = None
+                send_invite_email(db, user)
+                updated.append(user.email)
+                invited.append(user.email)
     db.commit()
-    return {"created_users": created, "invited": invited}
+    return {"created_users": created, "invited": invited, "updated": updated}
 
 
 def serialize_user(user: User) -> dict:
