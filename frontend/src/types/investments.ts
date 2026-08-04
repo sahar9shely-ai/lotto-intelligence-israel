@@ -103,6 +103,7 @@ export type PaymentTotals = {
   paid_manager: number;
   paid_count: number;
   scheduled_count: number;
+  awaiting_count: number;
   skipped_count: number;
   total_count: number;
 };

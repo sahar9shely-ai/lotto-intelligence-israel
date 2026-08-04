@@ -605,6 +605,11 @@ textarea {
   color: var(--accent);
 }
 
+.badge--awaiting_confirmation {
+  background: rgba(21, 94, 117, 0.14);
+  color: #155e75;
+}
+
 .badge--scheduled,
 .badge--draft,
 .badge--sent {

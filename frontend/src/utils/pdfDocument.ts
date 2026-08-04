@@ -262,6 +262,7 @@ export const PDF_BASE_STYLES = `
     font-weight: 600;
   }
   .pdf-status--paid { background: #d8f0e4; color: #1f6b55; }
+  .pdf-status--awaiting { background: #d9eef5; color: #155e75; }
   .pdf-status--scheduled { background: #f0e6d4; color: #8a6a2f; }
   .pdf-status--skipped { background: #eceff1; color: #546e7a; }
 `;

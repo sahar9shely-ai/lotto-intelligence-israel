@@ -370,11 +370,13 @@ def open_calendar_year(
 def mark_year_paid(
     year: int = Query(...),
     investor_id: Optional[int] = None,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    """Mark all scheduled payments in a calendar year as paid (for filling a year report)."""
-    return svc.mark_year_payments_paid(db, year=year, investor_id=investor_id)
+    """Send confirmation requests for all scheduled payments in a calendar year."""
+    return svc.mark_year_payments_paid(
+        db, year=year, investor_id=investor_id, actor=user
+    )
 
 
 @router.post("/align-calendar-year")
@@ -391,7 +393,7 @@ def align_calendar_year(
 def update_payment(
     payment_id: int,
     payload: PaymentUpdate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     payment = (
@@ -404,13 +406,66 @@ def update_payment(
         raise HTTPException(status_code=404, detail="Payment not found")
 
     data = payload.model_dump(exclude_unset=True)
-    if data.get("status") == "paid" and "paid_at" not in data:
-        data["paid_at"] = date.today()
+
+    # Manager "mark paid" becomes a confirmation request to the investor.
+    if data.get("status") == "paid":
+        svc.request_payment_confirmation(db, payment=payment, actor=user)
+        db.refresh(payment)
+        return svc.serialize_payment(payment)
+
     if data.get("status") in {"scheduled", "skipped"}:
         data["paid_at"] = None
     for key, value in data.items():
         setattr(payment, key, value)
     db.commit()
+    db.refresh(payment)
+    return svc.serialize_payment(payment)
+
+
+@router.post("/payments/{payment_id}/confirm", response_model=PaymentOut)
+def confirm_payment(
+    payment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    payment = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.id == payment_id)
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    try:
+        svc.confirm_payment(db, payment=payment, actor=user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.refresh(payment)
+    return svc.serialize_payment(payment)
+
+
+@router.post("/payments/{payment_id}/reject", response_model=PaymentOut)
+def reject_payment(
+    payment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    payment = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.id == payment_id)
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    try:
+        svc.reject_payment_confirmation(db, payment=payment, actor=user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.refresh(payment)
     return svc.serialize_payment(payment)
 

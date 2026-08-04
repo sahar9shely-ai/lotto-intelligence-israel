@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 PlanStatus = Literal["active", "completed", "paused"]
-PaymentStatus = Literal["scheduled", "paid", "skipped"]
+PaymentStatus = Literal["scheduled", "paid", "skipped", "awaiting_confirmation"]
 QuoteStatus = Literal["draft", "sent", "converted", "archived"]
 
 
@@ -209,6 +209,7 @@ class PaymentTotalsOut(BaseModel):
     paid_manager: float
     paid_count: int
     scheduled_count: int
+    awaiting_count: int = 0
     skipped_count: int
     total_count: int
 

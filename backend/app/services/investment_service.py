@@ -243,7 +243,7 @@ def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment
         if payment is not None:
             payment.due_date = due
             payment.investor_id = plan.investor_id
-            if payment.status != "paid":
+            if payment.status in {"scheduled", "skipped"}:
                 payment.investor_amount = monthly_investor
                 payment.manager_amount = monthly_manager
             continue
@@ -264,13 +264,13 @@ def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment
     # Remove unpaid months outside the plan length.
     for month, payment in list(by_month.items()):
         if month < 1 or month > plan.duration_months:
-            if payment.status != "paid":
+            if payment.status not in {"paid", "awaiting_confirmation"}:
                 db.delete(payment)
                 by_month.pop(month, None)
 
     db.flush()
 
-    # Final safety: one payment per due_date on the plan (prefer paid).
+    # Final safety: one payment per due_date on the plan (prefer paid, then awaiting).
     remaining = (
         db.query(Payment)
         .filter(Payment.plan_id == plan.id)
@@ -278,12 +278,17 @@ def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment
         .all()
     )
     seen_due: dict[date, Payment] = {}
+    priority = {"paid": 3, "awaiting_confirmation": 2, "scheduled": 1, "skipped": 0}
+
+    def _rank(p: Payment) -> int:
+        return priority.get(p.status, 0)
+
     for payment in remaining:
         prior = seen_due.get(payment.due_date)
         if prior is None:
             seen_due[payment.due_date] = payment
             continue
-        if payment.status == "paid" and prior.status != "paid":
+        if _rank(payment) > _rank(prior):
             db.delete(prior)
             seen_due[payment.due_date] = payment
         else:
@@ -435,6 +440,7 @@ def align_plans_to_calendar_year(
 def _payment_totals(payments: list[Payment]) -> dict:
     paid = [p for p in payments if p.status == "paid"]
     scheduled = [p for p in payments if p.status == "scheduled"]
+    awaiting = [p for p in payments if p.status == "awaiting_confirmation"]
     skipped = [p for p in payments if p.status == "skipped"]
     return {
         "planned_investor": round(sum(p.investor_amount for p in payments), 2),
@@ -443,6 +449,7 @@ def _payment_totals(payments: list[Payment]) -> dict:
         "paid_manager": round(sum(p.manager_amount for p in paid), 2),
         "paid_count": len(paid),
         "scheduled_count": len(scheduled),
+        "awaiting_count": len(awaiting),
         "skipped_count": len(skipped),
         "total_count": len(payments),
     }
@@ -586,9 +593,14 @@ def remove_investor_from_calendar_year(
 
 
 def mark_year_payments_paid(
-    db: Session, *, year: int, investor_id: Optional[int] = None
+    db: Session,
+    *,
+    year: int,
+    investor_id: Optional[int] = None,
+    actor=None,
 ) -> dict:
-    query = db.query(Payment).filter(
+    """Ask for investor confirmation on all scheduled payments in a calendar year."""
+    query = db.query(Payment).options(joinedload(Payment.investor)).filter(
         Payment.due_date >= date(year, 1, 1),
         Payment.due_date <= date(year, 12, 31),
         Payment.status == "scheduled",
@@ -596,11 +608,147 @@ def mark_year_payments_paid(
     if investor_id is not None:
         query = query.filter(Payment.investor_id == investor_id)
     payments = query.all()
+    requested = 0
+    auto_paid = 0
     for payment in payments:
-        payment.status = "paid"
-        payment.paid_at = payment.due_date
+        result = request_payment_confirmation(
+            db, payment=payment, actor=actor, commit=False
+        )
+        if result["status"] == "paid":
+            auto_paid += 1
+        else:
+            requested += 1
     db.commit()
-    return {"year": year, "marked_count": len(payments)}
+    return {
+        "year": year,
+        "marked_count": requested + auto_paid,
+        "awaiting_count": requested,
+        "auto_paid_count": auto_paid,
+    }
+
+
+def _investor_user(db: Session, investor_id: int):
+    from app.models.auth import User
+
+    return db.query(User).filter(User.investor_id == investor_id).first()
+
+
+def _notify_payment_confirmation_request(db: Session, payment: Payment) -> None:
+    from app.services.email_service import send_email
+
+    user = _investor_user(db, payment.investor_id)
+    if not user or not user.email:
+        return
+    name = payment.investor.name if payment.investor else user.username
+    month = payment.due_date.strftime("%m/%Y") if payment.due_date else ""
+    send_email(
+        db,
+        to_email=user.email,
+        subject=f"תזרים — נדרש אישור תשלום ל-{name}",
+        body=(
+            f"שלום {name},\n\n"
+            f"המנהלת סימנה תשלום לחודש {month} בסך {payment.investor_amount:,.2f} ₪.\n"
+            "יש להיכנס לתזרים → תשלומים ולאשר או לדחות את קבלת התשלום.\n"
+            "רק אחרי אישור הסטטוס ישתנה לבוצע.\n"
+        ),
+        kind="payment_awaiting_confirmation",
+        meta={"payment_id": payment.id, "investor_id": payment.investor_id},
+    )
+
+
+def _notify_payment_confirmed(db: Session, payment: Payment) -> None:
+    from app.models.auth import User
+    from app.services.email_service import send_email
+
+    managers = db.query(User).filter(User.role == "manager", User.is_active.is_(True)).all()
+    name = payment.investor.name if payment.investor else ""
+    month = payment.due_date.strftime("%m/%Y") if payment.due_date else ""
+    for manager in managers:
+        if not manager.email:
+            continue
+        send_email(
+            db,
+            to_email=manager.email,
+            subject=f"תזרים — {name} אישר/ה תשלום",
+            body=(
+                f"{name} אישר/ה קבלת תשלום לחודש {month} "
+                f"בסך {payment.investor_amount:,.2f} ₪.\n"
+                "הסטטוס עודכן לבוצע.\n"
+            ),
+            kind="payment_confirmed",
+            meta={"payment_id": payment.id, "investor_id": payment.investor_id},
+        )
+
+
+def request_payment_confirmation(
+    db: Session,
+    *,
+    payment: Payment,
+    actor=None,
+    commit: bool = True,
+) -> dict:
+    """Manager asserts a payment was sent — investor must confirm before it is paid.
+
+    If the actor is marking their own investor row, auto-confirm to בוצע.
+    """
+    if payment.status == "paid":
+        return {"status": "paid", "payment_id": payment.id, "notified": False}
+
+    same_person = (
+        actor is not None
+        and getattr(actor, "investor_id", None) is not None
+        and actor.investor_id == payment.investor_id
+    )
+    if same_person:
+        payment.status = "paid"
+        payment.paid_at = date.today()
+        if commit:
+            db.commit()
+        return {
+            "status": "paid",
+            "payment_id": payment.id,
+            "notified": False,
+            "auto": True,
+        }
+
+    payment.status = "awaiting_confirmation"
+    payment.paid_at = None
+    _notify_payment_confirmation_request(db, payment)
+    if commit:
+        db.commit()
+    return {
+        "status": "awaiting_confirmation",
+        "payment_id": payment.id,
+        "notified": True,
+    }
+
+
+def confirm_payment(db: Session, *, payment: Payment, actor) -> dict:
+    if payment.investor_id != actor.investor_id:
+        raise PermissionError("ניתן לאשר רק תשלומים שלך")
+    if payment.status != "awaiting_confirmation":
+        raise ValueError("אין בקשת אישור ממתינה לתשלום זה")
+    payment.status = "paid"
+    payment.paid_at = date.today()
+    _notify_payment_confirmed(db, payment)
+    db.commit()
+    return {"status": "paid", "payment_id": payment.id}
+
+
+def reject_payment_confirmation(db: Session, *, payment: Payment, actor) -> dict:
+    is_owner = payment.investor_id == actor.investor_id
+    actor_is_manager = getattr(actor, "role", None) == "manager"
+    if not actor_is_manager:
+        inv = getattr(actor, "investor", None)
+        actor_is_manager = bool(inv and getattr(inv, "is_manager", False))
+    if not is_owner and not actor_is_manager:
+        raise PermissionError("אין הרשאה")
+    if payment.status != "awaiting_confirmation":
+        raise ValueError("אין בקשת אישור ממתינה לתשלום זה")
+    payment.status = "scheduled"
+    payment.paid_at = None
+    db.commit()
+    return {"status": "scheduled", "payment_id": payment.id}
 
 
 def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:

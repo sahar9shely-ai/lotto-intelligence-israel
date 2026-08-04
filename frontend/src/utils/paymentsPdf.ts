@@ -51,9 +51,11 @@ export async function downloadYearlyPaymentsPdf(
       const statusClass =
         p.status === "paid"
           ? "pdf-status--paid"
-          : p.status === "scheduled"
-            ? "pdf-status--scheduled"
-            : "pdf-status--skipped";
+          : p.status === "awaiting_confirmation"
+            ? "pdf-status--awaiting"
+            : p.status === "scheduled"
+              ? "pdf-status--scheduled"
+              : "pdf-status--skipped";
       return `
       <tr class="${i % 2 === 0 ? "even" : "odd"}">
         ${isManager ? `<td>${escapeHtml(p.investor_name || "—")}</td>` : ""}

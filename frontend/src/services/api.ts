@@ -253,10 +253,12 @@ export const api = {
   markYearPaid: (year: number, investor_id?: number) => {
     const qs = new URLSearchParams({ year: String(year) });
     if (investor_id != null) qs.set("investor_id", String(investor_id));
-    return request<{ year: number; marked_count: number }>(
-      `/api/v1/investments/payments/mark-year-paid?${qs}`,
-      { method: "POST" },
-    );
+    return request<{
+      year: number;
+      marked_count: number;
+      awaiting_count: number;
+      auto_paid_count: number;
+    }>(`/api/v1/investments/payments/mark-year-paid?${qs}`, { method: "POST" });
   },
   alignCalendarYear: (year?: number) => {
     const qs = year != null ? `?year=${year}` : "";
@@ -278,6 +280,14 @@ export const api = {
     request<Payment>(`/api/v1/investments/payments/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
+    }),
+  confirmPayment: (id: number) =>
+    request<Payment>(`/api/v1/investments/payments/${id}/confirm`, {
+      method: "POST",
+    }),
+  rejectPayment: (id: number) =>
+    request<Payment>(`/api/v1/investments/payments/${id}/reject`, {
+      method: "POST",
     }),
   quotes: () => request<Quote[]>("/api/v1/investments/quotes"),
   createQuote: (body: {

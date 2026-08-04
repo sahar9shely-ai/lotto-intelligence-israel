@@ -87,13 +87,45 @@ export function PaymentsPage() {
   }
 
   async function markPaid(id: number) {
-    await api.updatePayment(id, { status: "paid" });
-    refreshAll();
+    try {
+      const updated = await api.updatePayment(id, { status: "paid" });
+      setMessage(
+        updated.status === "awaiting_confirmation"
+          ? "נשלחה בקשת אישור למשקיע — הסטטוס ממתין עד שיאשר"
+          : updated.status === "paid"
+            ? "התשלום עודכן לבוצע"
+            : "הבקשה נשלחה",
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "שליחת בקשת אישור נכשלה");
+    }
   }
 
   async function markScheduled(id: number) {
     await api.updatePayment(id, { status: "scheduled" });
+    setMessage("הבקשה בוטלה — חזר לסטטוס מתוכנן");
     refreshAll();
+  }
+
+  async function confirmPayment(id: number) {
+    try {
+      await api.confirmPayment(id);
+      setMessage("אישרת את התשלום — הסטטוס עודכן לבוצע");
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "אישור התשלום נכשל");
+    }
+  }
+
+  async function rejectPayment(id: number) {
+    try {
+      await api.rejectPayment(id);
+      setMessage("התשלום נדחה — חזר לסטטוס מתוכנן");
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "דחיית התשלום נכשלה");
+    }
   }
 
   async function exportYearPdf() {
@@ -148,7 +180,7 @@ export function PaymentsPage() {
   async function markEntireYearPaid() {
     if (
       !window.confirm(
-        `לסמן את כל התשלומים המתוכננים בשנת ${year} כשולמו?\nמתאים למילוי דוח שנתי היסטורי.`,
+        `לשלוח בקשת אישור לכל התשלומים המתוכננים בשנת ${year}?\nכל משקיע יצטרך לאשר לפני שהסטטוס יהפוך לבוצע.`,
       )
     ) {
       return;
@@ -158,13 +190,15 @@ export function PaymentsPage() {
     try {
       const result = await api.markYearPaid(year, investorFilter);
       setMessage(
-        result.marked_count
-          ? `סומנו ${result.marked_count} תשלומים כשולמו לשנת ${year}`
-          : `אין תשלומים ממתינים לשנת ${year}`,
+        result.awaiting_count
+          ? `נשלחו ${result.awaiting_count} בקשות אישור לשנת ${year}`
+          : result.marked_count
+            ? `עודכנו ${result.marked_count} תשלומים לשנת ${year}`
+            : `אין תשלומים ממתינים לשנת ${year}`,
       );
       refreshAll();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "סימון שנתי נכשל");
+      setMessage(err instanceof Error ? err.message : "שליחת בקשות אישור נכשלה");
     } finally {
       setMarkBusy(false);
     }
@@ -238,7 +272,9 @@ export function PaymentsPage() {
         <div>
           <h1>{isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}</h1>
           <p className="muted">
-            דוח שנתי קלנדרי · 1 בינואר עד 31 בדצמבר {year}
+            {isManager
+              ? `דוח שנתי · שליחה לאישור משקיע · 1 בינואר עד 31 בדצמבר ${year}`
+              : `התשלומים שלך · אשרי קבלה כשמגיעה בקשה · שנת ${year}`}
           </p>
         </div>
         <div className="page-head__actions">
@@ -275,6 +311,45 @@ export function PaymentsPage() {
 
       {message ? <p className="toast">{message}</p> : null}
 
+      {!isManager &&
+      payments.some((p) => p.status === "awaiting_confirmation") ? (
+        <Panel
+          title="ממתין לאישור שלך"
+          subtitle="המנהלת סימנה תשלום — אשרי או דחי כדי לעדכן את הסטטוס"
+        >
+          <ul className="list">
+            {payments
+              .filter((p) => p.status === "awaiting_confirmation")
+              .map((p) => (
+                <li key={p.id} className="list__row">
+                  <div>
+                    <strong>{formatCalendarMonth(p.due_date)}</strong>
+                    <span className="muted">
+                      {formatDate(p.due_date)} · {formatMoney(p.investor_amount, true)}
+                    </span>
+                  </div>
+                  <div className="page-head__actions">
+                    <button
+                      type="button"
+                      className="btn btn--small btn--primary"
+                      onClick={() => confirmPayment(p.id)}
+                    >
+                      אשרי קבלה
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--small btn--ghost btn--danger"
+                      onClick={() => rejectPayment(p.id)}
+                    >
+                      דחי
+                    </button>
+                  </div>
+                </li>
+              ))}
+          </ul>
+        </Panel>
+      ) : null}
+
       <div className="filters">
         <label>
           שנה
@@ -291,7 +366,8 @@ export function PaymentsPage() {
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">הכל</option>
             <option value="scheduled">מתוכנן</option>
-            <option value="paid">שולם</option>
+            <option value="awaiting_confirmation">ממתין לאישור</option>
+            <option value="paid">בוצע</option>
             <option value="skipped">דולג</option>
           </select>
         </label>
@@ -334,10 +410,14 @@ export function PaymentsPage() {
               </div>
             ) : null}
             <div className="stat">
-              <span className="stat__label">שולמו / ממתינים</span>
+              <span className="stat__label">שולמו / ממתינים לאישור</span>
               <strong className="stat__value">
-                {yearly?.paid_count ?? 0} / {yearly?.scheduled_count ?? 0}
+                {yearly?.paid_count ?? 0} / {yearly?.awaiting_count ?? 0}
               </strong>
+            </div>
+            <div className="stat">
+              <span className="stat__label">מתוכננים</span>
+              <strong className="stat__value">{yearly?.scheduled_count ?? 0}</strong>
             </div>
           </div>
         </Panel>
@@ -409,7 +489,7 @@ export function PaymentsPage() {
               disabled={markBusy}
               onClick={markEntireYearPaid}
             >
-              {markBusy ? "מסמנים..." : "סמני את כל השנה כשולמה"}
+              {markBusy ? "שולחים..." : "שלחי בקשת אישור לכל השנה"}
             </button>
           ) : null
         }
@@ -444,7 +524,7 @@ export function PaymentsPage() {
                   <th>סכום</th>
                   {isManager ? <th>עמלה</th> : null}
                   <th>סטטוס</th>
-                  {isManager ? <th></th> : null}
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -458,27 +538,52 @@ export function PaymentsPage() {
                     <td>
                       <span className={`badge badge--${p.status}`}>{statusLabel(p.status)}</span>
                     </td>
-                    {isManager ? (
-                      <td className="table__actions">
-                        {p.status !== "paid" ? (
+                    <td className="table__actions">
+                      {isManager ? (
+                        p.status === "scheduled" ? (
                           <button
                             type="button"
                             className="btn btn--small"
                             onClick={() => markPaid(p.id)}
                           >
-                            סמני שולם
+                            שלחי לאישור
                           </button>
-                        ) : (
+                        ) : p.status === "awaiting_confirmation" ? (
                           <button
                             type="button"
                             className="btn btn--small btn--ghost"
                             onClick={() => markScheduled(p.id)}
                           >
-                            בטלי
+                            בטלי בקשה
                           </button>
-                        )}
-                      </td>
-                    ) : null}
+                        ) : p.status === "paid" ? (
+                          <button
+                            type="button"
+                            className="btn btn--small btn--ghost"
+                            onClick={() => markScheduled(p.id)}
+                          >
+                            החזירי למתוכנן
+                          </button>
+                        ) : null
+                      ) : p.status === "awaiting_confirmation" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn--small btn--primary"
+                            onClick={() => confirmPayment(p.id)}
+                          >
+                            אשרי קבלה
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--small btn--ghost btn--danger"
+                            onClick={() => rejectPayment(p.id)}
+                          >
+                            דחי
+                          </button>
+                        </>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

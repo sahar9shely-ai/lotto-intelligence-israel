@@ -218,12 +218,14 @@ def test_open_calendar_year_and_payment_report():
         headers=headers,
     )
     assert marked.status_code == 200
-    assert marked.json()["marked_count"] >= 1
+    body = marked.json()
+    assert body["marked_count"] >= 1
+    assert body["awaiting_count"] + body["auto_paid_count"] == body["marked_count"]
 
     after = client.get(
         f"/api/v1/investments/payment-report?year={report_year}", headers=headers
     ).json()
-    assert after["yearly"]["paid_count"] >= 1
+    assert after["yearly"]["awaiting_count"] + after["yearly"]["paid_count"] >= 1
     assert after["lifetime"]["paid_investor"] >= after["yearly"]["paid_investor"]
 
     # Opening again should not duplicate plans.
@@ -276,6 +278,62 @@ def test_delete_plan_and_remove_from_year():
         f"/api/v1/investments/payments?plan_id={plan_id}", headers=headers
     ).json()
     assert gone == []
+
+
+def test_payment_requires_investor_confirmation():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    bar = next(i for i in investors if i["name"] == "בר")
+    year = date.today().year
+
+    plan_res = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": bar["id"],
+            "principal": 12000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "start_date": f"{year}-01-01",
+            "duration_months": 12,
+            "generate_schedule": True,
+            "notes": "בדיקת אישור תשלום",
+        },
+    )
+    assert plan_res.status_code == 201
+    plan_id = plan_res.json()["id"]
+    payments = client.get(
+        f"/api/v1/investments/payments?plan_id={plan_id}", headers=headers
+    ).json()
+    payment_id = payments[0]["id"]
+
+    marked = client.patch(
+        f"/api/v1/investments/payments/{payment_id}",
+        headers=headers,
+        json={"status": "paid"},
+    )
+    assert marked.status_code == 200
+    assert marked.json()["status"] == "awaiting_confirmation"
+    assert marked.json()["paid_at"] is None
+
+    # Investor cannot mark via manager endpoint; must confirm.
+    bar_headers = _auth_headers("bar050297@gmail.com", "InvestorPass1!")
+    forbidden = client.patch(
+        f"/api/v1/investments/payments/{payment_id}",
+        headers=bar_headers,
+        json={"status": "paid"},
+    )
+    assert forbidden.status_code == 403
+
+    confirmed = client.post(
+        f"/api/v1/investments/payments/{payment_id}/confirm",
+        headers=bar_headers,
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "paid"
+    assert confirmed.json()["paid_at"] is not None
+
+    client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
 
 
 def test_regenerate_after_start_change_does_not_duplicate_due_dates():
