@@ -392,6 +392,25 @@ def update_quote(
     return svc.serialize_quote(quote)
 
 
+@router.delete("/quotes/{quote_id}", status_code=204)
+def delete_quote(
+    quote_id: int,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    if quote.status == "converted":
+        raise HTTPException(
+            status_code=400,
+            detail="לא ניתן למחוק הצעה שכבר הומרה למשקיע",
+        )
+    db.delete(quote)
+    db.commit()
+    return None
+
+
 @router.post("/quotes/{quote_id}/convert", response_model=PlanOut)
 def convert_quote(
     quote_id: int,

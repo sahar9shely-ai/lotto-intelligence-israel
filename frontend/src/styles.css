@@ -396,6 +396,16 @@ a {
   background: transparent;
 }
 
+.btn--danger {
+  color: #9b2c2c;
+  border-color: rgba(155, 44, 44, 0.35);
+}
+
+.btn--danger:hover {
+  background: rgba(155, 44, 44, 0.08);
+  color: #742a2a;
+}
+
 .btn--small {
   padding: 7px 12px;
   font-size: 0.85rem;

@@ -10,29 +10,67 @@ export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
   const { data, error, loading, reload } = useAsync(() => api.quotes(), []);
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Quote | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const preview = useMemo(() => data ?? [], [data]);
+  const formOpen = showForm || editing != null;
 
-  async function onCreate(e: FormEvent<HTMLFormElement>) {
+  function closeForm() {
+    setShowForm(false);
+    setEditing(null);
+  }
+
+  async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setBusy(true);
+    setMessage(null);
     const fd = new FormData(e.currentTarget);
-    await api.createQuote({
+    const body = {
       prospect_name: String(fd.get("prospect_name") || "").trim(),
       principal: Number(fd.get("principal") || 0),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
-      // Management fee stays internal/default — not shown on investor-facing quote.
       manager_fee_percent: Number(
-        settings?.default_manager_fee_percent ?? 0,
+        editing?.manager_fee_percent ?? settings?.default_manager_fee_percent ?? 0,
       ),
       duration_months: Number(fd.get("duration_months") || 12),
       notes: String(fd.get("notes") || "") || undefined,
-    });
-    setShowForm(false);
-    setMessage("הצעת סיכום נוצרה");
-    reload();
+    };
+    try {
+      if (editing) {
+        await api.updateQuote(editing.id, body);
+        setMessage(`ההצעה ל-${body.prospect_name} עודכנה`);
+      } else {
+        await api.createQuote(body);
+        setMessage("הצעת סיכום נוצרה");
+      }
+      closeForm();
+      reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "שמירת ההצעה נכשלה");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeQuote(quote: Quote) {
+    if (quote.status === "converted") {
+      setMessage("לא ניתן למחוק הצעה שכבר הומרה למשקיע");
+      return;
+    }
+    if (!window.confirm(`למחוק את ההצעה ל-${quote.prospect_name}?`)) return;
+    try {
+      await api.deleteQuote(quote.id);
+      if (editing?.id === quote.id) closeForm();
+      if (expandedId === quote.id) setExpandedId(null);
+      setMessage(`ההצעה ל-${quote.prospect_name} נמחקה`);
+      reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "מחיקה נכשלה");
+    }
   }
 
   async function convert(id: number, name: string) {
@@ -84,24 +122,46 @@ export function QuotesPage() {
           <h1>הצעות למשקיעים חדשים</h1>
           <p className="muted">מפרט חודשי + סה״כ רווח · אפשרות להורדת PDF</p>
         </div>
-        <button type="button" className="btn btn--primary" onClick={() => setShowForm(true)}>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setEditing(null);
+            setShowForm(true);
+          }}
+        >
           הצעה חדשה
         </button>
       </div>
 
       {message ? <p className="toast">{message}</p> : null}
 
-      {showForm ? (
-        <Panel title="סיכום הצעה" subtitle="לחישוב לפי קרן ואחוז קבוע למשקיע">
-          <form className="form" onSubmit={onCreate}>
+      {formOpen ? (
+        <Panel
+          title={editing ? `עריכת הצעה — ${editing.prospect_name}` : "סיכום הצעה"}
+          subtitle="לחישוב לפי קרן ואחוז קבוע למשקיע"
+        >
+          <form className="form" onSubmit={onSave} key={editing?.id ?? "new"}>
             <div className="form__grid">
               <label>
                 שם המועמד/ת
-                <input name="prospect_name" required placeholder="שם" />
+                <input
+                  name="prospect_name"
+                  required
+                  placeholder="שם"
+                  defaultValue={editing?.prospect_name ?? ""}
+                />
               </label>
               <label>
                 קרן מוצעת (₪)
-                <input name="principal" type="number" min="0" step="0.01" required defaultValue={0} />
+                <input
+                  name="principal"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  defaultValue={editing?.principal ?? 0}
+                />
               </label>
               <label>
                 אחוז חודשי
@@ -111,12 +171,17 @@ export function QuotesPage() {
                   min="0"
                   step="0.01"
                   required
-                  defaultValue={settings?.default_monthly_rate_percent ?? 0}
+                  defaultValue={
+                    editing?.monthly_rate_percent ?? settings?.default_monthly_rate_percent ?? 0
+                  }
                 />
               </label>
               <label>
                 משך
-                <select name="duration_months" defaultValue={12}>
+                <select
+                  name="duration_months"
+                  defaultValue={editing?.duration_months ?? 12}
+                >
                   {[12, 14, 18, 24].map((m) => (
                     <option key={m} value={m}>
                       {m} חודשים
@@ -126,15 +191,15 @@ export function QuotesPage() {
               </label>
               <label>
                 הערות
-                <input name="notes" />
+                <input name="notes" defaultValue={editing?.notes ?? ""} />
               </label>
             </div>
             <div className="page-head__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => setShowForm(false)}>
+              <button type="button" className="btn btn--ghost" onClick={closeForm}>
                 ביטול
               </button>
-              <button type="submit" className="btn btn--primary">
-                שמרי הצעה
+              <button type="submit" className="btn btn--primary" disabled={busy}>
+                {busy ? "שומרת..." : editing ? "שמרי שינויים" : "שמרי הצעה"}
               </button>
             </div>
           </form>
@@ -148,6 +213,7 @@ export function QuotesPage() {
           preview.map((q) => {
             const rows = buildMonthSchedule(q);
             const open = expandedId === q.id;
+            const canEdit = q.status !== "converted";
             return (
               <article key={q.id} className="quote-card">
                 <header>
@@ -217,14 +283,34 @@ export function QuotesPage() {
                   >
                     {pdfBusyId === q.id ? "מכינים PDF..." : "הורדת PDF"}
                   </button>
-                  {q.status !== "converted" ? (
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={() => convert(q.id, q.prospect_name)}
-                    >
-                      הכניסי כמשקיע חדש
-                    </button>
+                  {canEdit ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => {
+                          setShowForm(false);
+                          setEditing(q);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                      >
+                        עריכה
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--danger"
+                        onClick={() => removeQuote(q)}
+                      >
+                        מחיקה
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => convert(q.id, q.prospect_name)}
+                      >
+                        הכניסי כמשקיע חדש
+                      </button>
+                    </>
                   ) : (
                     <p className="muted">כבר הומר למשקיע #{q.converted_investor_id}</p>
                   )}

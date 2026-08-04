@@ -272,6 +272,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  deleteQuote: (id: number) =>
+    request<void>(`/api/v1/investments/quotes/${id}`, {
+      method: "DELETE",
+    }),
   convertQuote: (
     id: number,
     body: {
