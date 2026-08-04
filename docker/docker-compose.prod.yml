@@ -1,0 +1,21 @@
+services:
+  tazrim:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: tazrim
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      PORT: "8000"
+      JWT_SECRET: ${JWT_SECRET:-tazrim-change-me-in-production-32chars}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8000}
+      INVESTMENTS_DB_PATH: /data/investments.db
+      FRONTEND_DIST: /app/frontend/dist
+      LOG_LEVEL: INFO
+    volumes:
+      - tazrim_data:/data
+
+volumes:
+  tazrim_data:

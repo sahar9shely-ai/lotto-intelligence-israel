@@ -12,6 +12,7 @@ from app.api.v1.stats import router as stats_router
 from app.core.config import settings
 from app.core.error_handlers import register_error_handlers
 from app.core.logging import configure_logging
+from app.spa import mount_frontend
 
 configure_logging(settings.log_level)
 
@@ -37,6 +38,9 @@ app.include_router(admin_stats_router)
 app.include_router(goturs_router)
 app.include_router(auth_router)
 app.include_router(investments_router)
+
+# Production: same-origin UI (built Vite app). Dev without dist keeps API-only.
+FRONTEND_DIST_MOUNTED = mount_frontend(app)
 
 
 @app.on_event("startup")

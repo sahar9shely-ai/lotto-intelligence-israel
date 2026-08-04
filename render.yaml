@@ -1,0 +1,23 @@
+# Example Render Blueprint — one web service for תזרים
+# Connect the GitHub repo in Render and use this file, or deploy the root Dockerfile manually.
+services:
+  - type: web
+    name: tazrim
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: APP_PUBLIC_URL
+        sync: false
+      - key: INVESTMENTS_DB_PATH
+        value: /data/investments.db
+      - key: FRONTEND_DIST
+        value: /app/frontend/dist
+    disk:
+      name: tazrim-data
+      mountPath: /data
+      sizeGB: 1
