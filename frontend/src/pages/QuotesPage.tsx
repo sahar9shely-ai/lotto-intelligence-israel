@@ -173,6 +173,7 @@ export function QuotesPage() {
                   editing?.monthly_rate_percent ?? settings?.default_monthly_rate_percent ?? 0
                 }
                 defaultSavingsRate={editing?.savings_rate_percent ?? 0}
+                defaultPrincipal={editing?.principal ?? 0}
               />
               <label>
                 משך

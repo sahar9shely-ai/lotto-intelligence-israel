@@ -297,6 +297,7 @@ export function InvestorsPage() {
                           defaultPlanType={plan.plan_type}
                           defaultMonthlyRate={plan.monthly_rate_percent}
                           defaultSavingsRate={plan.savings_rate_percent}
+                          defaultPrincipal={plan.principal}
                         />
                         <label>
                           אחוז עמלת ניהול
@@ -424,6 +425,7 @@ function PlanForm({
           defaultPlanType="monthly"
           defaultMonthlyRate={settings?.default_monthly_rate_percent ?? 0}
           defaultSavingsRate={0}
+          defaultPrincipal={0}
         />
         <label>
           אחוז עמלת ניהול (נוסף)
