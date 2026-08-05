@@ -7,9 +7,11 @@ import {
   formatCalendarMonth,
   formatDate,
   formatMoney,
+  formatPercent,
   statusLabel,
 } from "../utils/format";
 import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
+import { planTypeLabel } from "../utils/planTypes";
 
 export function PaymentsPage() {
   const { user } = useAuth();
@@ -31,6 +33,7 @@ export function PaymentsPage() {
     () => (isManager ? api.investors() : Promise.resolve([])),
     [isManager],
   );
+  const { data: plans } = useAsync(() => api.plans(), []);
   const { data, error, loading, reload } = useAsync(
     () =>
       api.payments({
@@ -87,6 +90,35 @@ export function PaymentsPage() {
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name, "he"));
   }, [yearAll]);
+
+  const savingsPlansInView = useMemo(() => {
+    const all = (plans ?? []).filter(
+      (p) => p.plan_type !== "monthly" && Number(p.savings_rate_percent || 0) > 0,
+    );
+    if (investorFilter) {
+      return all.filter((p) => p.investor_id === investorFilter);
+    }
+    if (!isManager && user?.investor_id) {
+      return all.filter((p) => p.investor_id === user.investor_id);
+    }
+    const boardIds = new Set(yearInvestors.map((i) => i.id));
+    return all.filter(
+      (p) =>
+        boardIds.has(p.investor_id) ||
+        (p.start_date != null && Number(p.start_date.slice(0, 4)) === year) ||
+        p.status === "active",
+    );
+  }, [plans, yearInvestors, investorFilter, isManager, user?.investor_id, year]);
+
+  const savingsByInvestor = useMemo(() => {
+    const map = new Map<number, (typeof savingsPlansInView)[number][]>();
+    for (const plan of savingsPlansInView) {
+      const list = map.get(plan.investor_id) ?? [];
+      list.push(plan);
+      map.set(plan.investor_id, list);
+    }
+    return map;
+  }, [savingsPlansInView]);
 
   const yearOptions = useMemo(() => {
     const fromApi = report?.available_years ?? [];
@@ -477,29 +509,88 @@ export function PaymentsPage() {
           subtitle="אם מישהו לא היה במסלול בשנה זו — הסר אותו מהלוח"
         >
           <ul className="list">
-            {yearInvestors.map((inv) => (
-              <li key={inv.id} className="list__row">
-                <div>
-                  <strong>{inv.name}</strong>
-                  <span className="muted">מופיע בדוח {year}</span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn--small btn--ghost btn--danger"
-                  disabled={removeBusyId === inv.id}
-                  onClick={() => removeInvestorFromYear(inv)}
-                >
-                  {removeBusyId === inv.id ? "מסירים..." : "הסר מהשנה"}
-                </button>
-              </li>
-            ))}
+            {yearInvestors.map((inv) => {
+              const savings = savingsByInvestor.get(inv.id) ?? [];
+              return (
+                <li key={inv.id} className="list__row">
+                  <div>
+                    <strong>{inv.name}</strong>
+                    <span className="muted">מופיע בדוח {year}</span>
+                    {savings.length > 0 ? (
+                      <span className="muted">
+                        {" "}
+                        · חיסכון:{" "}
+                        {savings
+                          .map(
+                            (p) =>
+                              `${planTypeLabel(p.plan_type)} ${formatPercent(p.savings_rate_percent)} → ${formatMoney(p.projected_savings_balance)}`,
+                          )
+                          .join(" · ")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn--small btn--ghost btn--danger"
+                    disabled={removeBusyId === inv.id}
+                    onClick={() => removeInvestorFromYear(inv)}
+                  >
+                    {removeBusyId === inv.id ? "מסירים..." : "הסר מהשנה"}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
+        </Panel>
+      ) : null}
+
+      {savingsPlansInView.length > 0 ? (
+        <Panel
+          title={`חיסכון · ${year}`}
+          subtitle="מסלולי חיסכון / משולב — ריבית דריבית כל 12 חודשים (לא מופיע כתשלום חודשי במזומן)"
+        >
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  {isManager ? <th>משקיע</th> : null}
+                  <th>סוג</th>
+                  <th>קרן</th>
+                  <th>אחוז חיסכון</th>
+                  {savingsPlansInView.some((p) => p.plan_type === "hybrid") ? (
+                    <th>החזר חודשי</th>
+                  ) : null}
+                  <th>צבירה חודשית</th>
+                  <th>יתרה צפויה בסיום</th>
+                </tr>
+              </thead>
+              <tbody>
+                {savingsPlansInView.map((p) => (
+                  <tr key={p.id}>
+                    {isManager ? <td>{p.investor_name}</td> : null}
+                    <td>{planTypeLabel(p.plan_type)}</td>
+                    <td>{formatMoney(p.principal)}</td>
+                    <td>{formatPercent(p.savings_rate_percent)}</td>
+                    {savingsPlansInView.some((x) => x.plan_type === "hybrid") ? (
+                      <td>
+                        {p.plan_type === "hybrid"
+                          ? formatMoney(p.monthly_investor_payout, true)
+                          : "—"}
+                      </td>
+                    ) : null}
+                    <td>{formatMoney(p.monthly_savings_accrual, true)}</td>
+                    <td>{formatMoney(p.projected_savings_balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Panel>
       ) : null}
 
       <Panel
         title={`שנת ${year}`}
-        subtitle="מתחילת השנה ועד סופה · לפי חודש קלנדרי"
+        subtitle="מתחילת השנה ועד סופה · לפי חודש קלנדרי · סכום = החזר חודשי במזומן"
         action={
           isManager && (yearly?.scheduled_count ?? 0) > 0 ? (
             <button

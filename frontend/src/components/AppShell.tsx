@@ -1,9 +1,23 @@
+import { useEffect } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useAsync } from "../hooks/useAsync";
+import { api } from "../services/api";
 
 export function AppShell() {
   const { user, logout } = useAuth();
   const isManager = Boolean(user?.is_manager);
+  const { data: siteStatus, reload: reloadStatus } = useAsync(
+    () => api.siteStatus(),
+    [user?.id],
+  );
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      reloadStatus();
+    }, 20000);
+    return () => window.clearInterval(id);
+  }, [reloadStatus]);
 
   const links = [
     { to: "/", label: "לוח בקרה", end: true, managerOnly: false },
@@ -17,6 +31,12 @@ export function AppShell() {
   return (
     <div className="app">
       <div className="atmosphere" aria-hidden="true" />
+      {siteStatus?.site_updating ? (
+        <div className="site-update-banner" role="status">
+          <strong>האתר בעדכון</strong>
+          <span>{siteStatus.site_updating_message}</span>
+        </div>
+      ) : null}
       <header className="topbar">
         <div className="brand">
           <span className="brand__mark">תזרים</span>

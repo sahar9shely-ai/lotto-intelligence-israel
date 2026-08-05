@@ -29,6 +29,7 @@ from app.schemas.investments import (
     QuoteUpdate,
     SettingsOut,
     SettingsUpdate,
+    SiteStatusOut,
 )
 from app.security.auth import get_current_user, is_manager, require_manager
 from app.services import auth_service as auth_svc
@@ -83,7 +84,21 @@ def get_settings(
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    return svc.ensure_settings(db)
+    return _serialize_settings(svc.ensure_settings(db))
+
+
+@router.get("/site-status", response_model=SiteStatusOut)
+def get_site_status(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Readable by every logged-in user — drives the global update banner."""
+    settings = svc.ensure_settings(db)
+    return {
+        "site_updating": bool(getattr(settings, "site_updating", False)),
+        "site_updating_message": getattr(settings, "site_updating_message", None)
+        or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
+    }
 
 
 @router.patch("/settings", response_model=SettingsOut)
@@ -102,7 +117,20 @@ def update_settings(
             manager.name = data["manager_display_name"]
     db.commit()
     db.refresh(settings)
-    return settings
+    return _serialize_settings(settings)
+
+
+def _serialize_settings(settings) -> dict:
+    return {
+        "default_monthly_rate_percent": settings.default_monthly_rate_percent,
+        "default_manager_fee_percent": settings.default_manager_fee_percent,
+        "default_duration_months": settings.default_duration_months,
+        "currency_symbol": settings.currency_symbol,
+        "manager_display_name": settings.manager_display_name,
+        "site_updating": bool(getattr(settings, "site_updating", False)),
+        "site_updating_message": getattr(settings, "site_updating_message", None)
+        or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
+    }
 
 
 @router.get("/investors", response_model=list[InvestorOut])

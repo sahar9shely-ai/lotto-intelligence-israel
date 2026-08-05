@@ -192,6 +192,8 @@ class SettingsUpdate(BaseModel):
     default_duration_months: Optional[int] = Field(default=None, ge=1, le=120)
     currency_symbol: Optional[str] = None
     manager_display_name: Optional[str] = None
+    site_updating: Optional[bool] = None
+    site_updating_message: Optional[str] = Field(default=None, max_length=240)
 
 
 class SettingsOut(BaseModel):
@@ -200,8 +202,15 @@ class SettingsOut(BaseModel):
     default_duration_months: int
     currency_symbol: str
     manager_display_name: str
+    site_updating: bool = False
+    site_updating_message: str = "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה."
 
     model_config = {"from_attributes": True}
+
+
+class SiteStatusOut(BaseModel):
+    site_updating: bool
+    site_updating_message: str
 
 
 class DashboardOut(BaseModel):

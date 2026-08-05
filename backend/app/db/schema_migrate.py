@@ -94,6 +94,38 @@ def ensure_schema(engine: Engine) -> None:
                     )
                 )
 
+    if _table_exists(engine, "app_settings"):
+        cols = _table_columns(engine, "app_settings")
+        with engine.begin() as conn:
+            if "site_updating" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE app_settings ADD COLUMN site_updating BOOLEAN "
+                        "DEFAULT 0"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE app_settings SET site_updating = 0 "
+                        "WHERE site_updating IS NULL"
+                    )
+                )
+            if "site_updating_message" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE app_settings ADD COLUMN site_updating_message "
+                        "VARCHAR(240) DEFAULT "
+                        "'האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.'"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE app_settings SET site_updating_message = "
+                        "'האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.' "
+                        "WHERE site_updating_message IS NULL OR site_updating_message = ''"
+                    )
+                )
+
     if not _table_exists(engine, "users"):
         return
 

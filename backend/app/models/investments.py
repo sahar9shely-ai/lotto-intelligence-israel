@@ -100,3 +100,9 @@ class AppSettings(Base):
     default_duration_months: Mapped[int] = mapped_column(Integer, default=12)
     currency_symbol: Mapped[str] = mapped_column(String(8), default="₪")
     manager_display_name: Mapped[str] = mapped_column(String(120), default="סהר")
+    site_updating: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    site_updating_message: Mapped[str] = mapped_column(
+        String(240),
+        default="האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
+        nullable=False,
+    )

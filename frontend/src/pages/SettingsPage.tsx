@@ -7,6 +7,7 @@ import { api } from "../services/api";
 export function SettingsPage() {
   const { data, error, loading, reload } = useAsync(() => api.settings(), []);
   const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -17,9 +18,27 @@ export function SettingsPage() {
       default_duration_months: Number(fd.get("default_duration_months") || 12),
       manager_display_name: String(fd.get("manager_display_name") || "סהר"),
       currency_symbol: "₪",
+      site_updating: fd.get("site_updating") === "on",
+      site_updating_message: String(
+        fd.get("site_updating_message") ||
+          "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
+      ),
     });
-    setMessage("ההגדרות נשמרו — ישמשו כברירת מחדל למסלולים והצעות חדשים");
+    setMessage("ההגדרות נשמרו");
     reload();
+  }
+
+  async function toggleUpdating(next: boolean) {
+    setBusy(true);
+    try {
+      await api.updateSettings({ site_updating: next });
+      setMessage(next ? "הודעת עדכון מוצגת לכל המחוברים" : "הודעת העדכון כובתה");
+      reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "עדכון נכשל");
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (loading) return <div className="state">טוען הגדרות...</div>;
@@ -38,7 +57,7 @@ export function SettingsPage() {
       <div className="page-head">
         <div>
           <h1>הגדרות גלובליות</h1>
-          <p className="muted">ברירות מחדל למסלולים · ניהול משתמשים במסך ייעודי</p>
+          <p className="muted">ברירות מחדל למסלולים · הודעת עדכון למשתמשים פעילים</p>
         </div>
         <Link className="btn btn--primary" to="/users">
           משתמשים והרשאות
@@ -46,6 +65,38 @@ export function SettingsPage() {
       </div>
 
       {message ? <p className="toast">{message}</p> : null}
+
+      <Panel
+        title="האתר בעדכון"
+        subtitle="כשמופעל — כל משתמש מחובר רואה באנר בראש האתר"
+      >
+        <p className="hint">
+          {data.site_updating
+            ? "כרגע מוצגת הודעת עדכון לכל מי שמחובר."
+            : "כרגע אין הודעת עדכון. הפעילו כשמבצעים שינויים באתר."}
+        </p>
+        <div className="page-head__actions">
+          {data.site_updating ? (
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={busy}
+              onClick={() => toggleUpdating(false)}
+            >
+              {busy ? "מכבים..." : "סיום עדכון"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={busy}
+              onClick={() => toggleUpdating(true)}
+            >
+              {busy ? "מפעילים..." : "הצג הודעת עדכון"}
+            </button>
+          )}
+        </div>
+      </Panel>
 
       <Panel title="גישה למשתמשים" subtitle="מיילים והרשאות מתנהלים באפליקציה">
         <p className="hint">
@@ -101,6 +152,21 @@ export function SettingsPage() {
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                name="site_updating"
+                defaultChecked={data.site_updating}
+              />
+              הצג הודעת «האתר בעדכון» למשתמשים מחוברים
+            </label>
+            <label>
+              טקסט הודעת העדכון
+              <input
+                name="site_updating_message"
+                defaultValue={data.site_updating_message}
+              />
             </label>
           </div>
           <button type="submit" className="btn btn--primary">

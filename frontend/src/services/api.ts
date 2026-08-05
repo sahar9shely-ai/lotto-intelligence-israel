@@ -12,6 +12,7 @@ import type {
   Plan,
   Quote,
   Settings,
+  SiteStatus,
 } from "../types/investments";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -149,6 +150,7 @@ export const api = {
 
   dashboard: () => request<Dashboard>("/api/v1/investments/dashboard"),
   settings: () => request<Settings>("/api/v1/investments/settings"),
+  siteStatus: () => request<SiteStatus>("/api/v1/investments/site-status"),
   updateSettings: (body: Partial<Settings>) =>
     request<Settings>("/api/v1/investments/settings", {
       method: "PATCH",

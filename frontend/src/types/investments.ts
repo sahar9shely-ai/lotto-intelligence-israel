@@ -89,6 +89,13 @@ export type Settings = {
   default_duration_months: number;
   currency_symbol: string;
   manager_display_name: string;
+  site_updating: boolean;
+  site_updating_message: string;
+};
+
+export type SiteStatus = {
+  site_updating: boolean;
+  site_updating_message: string;
 };
 
 export type Dashboard = {
