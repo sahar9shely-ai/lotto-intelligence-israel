@@ -7,6 +7,7 @@ import type {
 import type {
   Dashboard,
   Investor,
+  ManagerIncomeBoard,
   Payment,
   PaymentReport,
   Plan,
@@ -150,6 +151,8 @@ export const api = {
   emailOutbox: () => request<EmailOutboxItem[]>("/api/v1/auth/email-outbox"),
 
   dashboard: () => request<Dashboard>("/api/v1/investments/dashboard"),
+  managerIncome: () =>
+    request<ManagerIncomeBoard>("/api/v1/investments/manager-income"),
   settings: () => request<Settings>("/api/v1/investments/settings"),
   siteStatus: () => request<SiteStatus>("/api/v1/investments/site-status"),
   updateSettings: (body: Partial<Settings>) =>

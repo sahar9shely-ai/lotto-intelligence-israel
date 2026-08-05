@@ -484,6 +484,15 @@ def list_payments(
     return [svc.serialize_payment(p) for p in ordered]
 
 
+@router.get("/manager-income")
+def manager_income(
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Manager-only: fee from each investor + own (Sahar) investment return per month."""
+    return svc.get_manager_income_board(db)
+
+
 @router.get("/payment-report", response_model=PaymentReportOut)
 def payment_report(
     year: int = Query(...),

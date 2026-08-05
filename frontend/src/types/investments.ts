@@ -166,3 +166,51 @@ export type PaymentReport = {
   yearly: PaymentTotals;
   lifetime: PaymentTotals;
 };
+
+export type ManagerIncomePlanFee = {
+  plan_id: number;
+  plan_type: string;
+  principal: number;
+  manager_fee_percent: number;
+  monthly_fee: number;
+};
+
+export type ManagerIncomeInvestor = {
+  investor_id: number;
+  investor_name: string;
+  principal: number;
+  monthly_fee: number;
+  plans: ManagerIncomePlanFee[];
+};
+
+export type ManagerOwnPlan = {
+  plan_id: number;
+  plan_type: string;
+  principal: number;
+  monthly_cash: number;
+  monthly_savings: number;
+  monthly_total: number;
+  savings_rate_percent: number;
+  monthly_rate_percent: number;
+  start_date: string;
+  track_end_date: string;
+  duration_months: number;
+  months_elapsed: number;
+};
+
+export type ManagerIncomeBoard = {
+  manager_name: string;
+  manager_investor_id?: number | null;
+  investors: ManagerIncomeInvestor[];
+  monthly_fees_total: number;
+  manager_own: {
+    investor_id?: number | null;
+    investor_name: string;
+    principal: number;
+    monthly_cash: number;
+    monthly_savings: number;
+    monthly_total: number;
+    plans: ManagerOwnPlan[];
+  };
+  monthly_grand_total: number;
+};

@@ -1468,3 +1468,113 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         "recent_payments": [serialize_payment(p) for p in recent],
         "investors_summary": [serialize_investor(i, today) for i in investors],
     }
+
+
+def get_manager_income_board(db: Session) -> dict:
+    """Manager-only board: fee from each investor + Sahar's own investment return.
+
+    monthly_grand_total = sum of fees from investors + Sahar's monthly return
+    (cash + savings accrual) according to her active plan terms.
+    """
+    settings = ensure_settings(db)
+    manager_name = (settings.manager_display_name or "סהר").strip() or "סהר"
+
+    investors = (
+        db.query(Investor)
+        .options(joinedload(Investor.plans).joinedload(InvestmentPlan.payments))
+        .order_by(Investor.name)
+        .all()
+    )
+
+    fee_rows: list[dict] = []
+    monthly_fees_total = 0.0
+    for inv in investors:
+        if inv.is_manager:
+            continue
+        active = [p for p in (inv.plans or []) if p.status == "active"]
+        if not active:
+            continue
+        principal = round(sum(p.principal for p in active), 2)
+        monthly_fee = round(
+            sum(calc_monthly(p.principal, p.manager_fee_percent) for p in active),
+            2,
+        )
+        plans_out = []
+        for p in active:
+            fee = calc_monthly(p.principal, p.manager_fee_percent)
+            plans_out.append(
+                {
+                    "plan_id": p.id,
+                    "plan_type": getattr(p, "plan_type", None) or "monthly",
+                    "principal": p.principal,
+                    "manager_fee_percent": p.manager_fee_percent,
+                    "monthly_fee": fee,
+                }
+            )
+        fee_rows.append(
+            {
+                "investor_id": inv.id,
+                "investor_name": inv.name,
+                "principal": principal,
+                "monthly_fee": monthly_fee,
+                "plans": plans_out,
+            }
+        )
+        monthly_fees_total = round(monthly_fees_total + monthly_fee, 2)
+
+    fee_rows.sort(key=lambda r: (-r["monthly_fee"], r["investor_name"]))
+
+    manager_inv = next((i for i in investors if i.is_manager), None)
+    own_plans_out: list[dict] = []
+    own_principal = 0.0
+    own_cash = 0.0
+    own_savings = 0.0
+    if manager_inv is not None:
+        for p in (manager_inv.plans or []):
+            if p.status != "active":
+                continue
+            metrics = plan_metrics(p)
+            own_principal = round(own_principal + p.principal, 2)
+            own_cash = round(own_cash + metrics["monthly_investor_payout"], 2)
+            own_savings = round(own_savings + metrics["monthly_savings_accrual"], 2)
+            own_plans_out.append(
+                {
+                    "plan_id": p.id,
+                    "plan_type": getattr(p, "plan_type", None) or "monthly",
+                    "principal": p.principal,
+                    "monthly_cash": metrics["monthly_investor_payout"],
+                    "monthly_savings": metrics["monthly_savings_accrual"],
+                    "monthly_total": round(
+                        metrics["monthly_investor_payout"]
+                        + metrics["monthly_savings_accrual"],
+                        2,
+                    ),
+                    "savings_rate_percent": getattr(p, "savings_rate_percent", 0.0)
+                    or 0.0,
+                    "monthly_rate_percent": p.monthly_rate_percent,
+                    "start_date": p.start_date,
+                    "track_end_date": plan_track_end_date(p),
+                    "duration_months": p.duration_months,
+                    "months_elapsed": metrics["months_elapsed"],
+                }
+            )
+
+    own_monthly_total = round(own_cash + own_savings, 2)
+    monthly_grand_total = round(monthly_fees_total + own_monthly_total, 2)
+
+    return {
+        "manager_name": manager_name,
+        "manager_investor_id": manager_inv.id if manager_inv else None,
+        "investors": fee_rows,
+        "monthly_fees_total": monthly_fees_total,
+        "manager_own": {
+            "investor_id": manager_inv.id if manager_inv else None,
+            "investor_name": manager_inv.name if manager_inv else manager_name,
+            "principal": own_principal,
+            "monthly_cash": own_cash,
+            "monthly_savings": own_savings,
+            "monthly_total": own_monthly_total,
+            "plans": own_plans_out,
+        },
+        "monthly_grand_total": monthly_grand_total,
+    }

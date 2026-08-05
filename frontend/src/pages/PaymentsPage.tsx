@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ManagerIncomePanel } from "../components/ManagerIncomePanel";
 import { Panel } from "../components/Panel";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { Stat } from "../components/Stat";
@@ -731,6 +732,8 @@ export function PaymentsPage() {
           </ul>
         </Panel>
       ) : null}
+
+      {isManager ? <ManagerIncomePanel /> : null}
 
       <div className="filters">
         <label>

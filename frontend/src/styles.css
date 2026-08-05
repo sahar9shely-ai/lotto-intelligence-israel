@@ -1341,3 +1341,179 @@ textarea {
   transition: background-color 99999s ease-in-out 0s;
   box-shadow: 0 0 0 1000px #fff inset;
 }
+
+.manager-income {
+  display: grid;
+  gap: 18px;
+}
+
+.manager-income__hero {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: calc(var(--radius) + 2px);
+  border: 1px solid color-mix(in srgb, #155e75 35%, var(--line));
+  background: linear-gradient(
+    160deg,
+    rgba(21, 94, 117, 0.14),
+    rgba(255, 255, 255, 0.88)
+  );
+}
+
+.manager-income__hero-main {
+  display: grid;
+  gap: 4px;
+}
+
+.manager-income__hero-value {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3.2vw, 2.1rem);
+  font-weight: 700;
+  color: #155e75;
+  line-height: 1.15;
+}
+
+.manager-income__hero-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.manager-income__hero-split > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.manager-income__hero-split strong {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+}
+
+.manager-income__section {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.manager-income__section-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.manager-income__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.manager-income__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px 16px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.manager-income__row-main {
+  display: grid;
+  gap: 2px;
+}
+
+.manager-income__row-fee {
+  display: grid;
+  gap: 2px;
+  text-align: start;
+  min-width: 140px;
+}
+
+.manager-income__row-fee strong {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  color: #155e75;
+}
+
+.manager-income__subtotal {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, #155e75 8%, transparent);
+  font-weight: 600;
+}
+
+.manager-income__subtotal strong {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+}
+
+.manager-income__section--own {
+  padding: 14px;
+  border-radius: calc(var(--radius) + 2px);
+  border: 1px solid color-mix(in srgb, var(--accent, #1f6b55) 35%, var(--line));
+  background: color-mix(in srgb, var(--accent, #1f6b55) 7%, var(--panel));
+}
+
+.manager-income__own-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.manager-income__own-summary > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.manager-income__own-summary strong {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+}
+
+.manager-income__own-total {
+  border-color: color-mix(in srgb, var(--accent, #1f6b55) 45%, var(--line)) !important;
+  background: color-mix(in srgb, var(--accent, #1f6b55) 12%, #fff) !important;
+}
+
+.manager-income__own-total strong {
+  color: var(--accent, #1f6b55);
+  font-size: 1.25rem !important;
+}
+
+.manager-income__own-plan {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px dashed var(--line);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+@media (max-width: 720px) {
+  .manager-income__hero-split,
+  .manager-income__own-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .manager-income__own-summary {
+    grid-template-columns: 1fr;
+  }
+}

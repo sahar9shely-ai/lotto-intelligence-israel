@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ManagerIncomePanel } from "../components/ManagerIncomePanel";
 import { Panel } from "../components/Panel";
 import { Stat } from "../components/Stat";
 import { useAuth } from "../context/AuthContext";
@@ -128,6 +129,8 @@ export function DashboardPage() {
           </>
         )}
       </div>
+
+      {isManager ? <ManagerIncomePanel /> : null}
 
       <div className="grid-2">
         {isManager ? (
