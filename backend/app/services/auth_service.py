@@ -34,7 +34,8 @@ DEFAULT_USER_EMAILS = {
 
 MANAGER_NAME = "סהר"
 MANAGER_USERNAME = "sahar"
-MANAGER_DEMO_PASSWORD = "Sahar1234!"
+# Initial password for a brand-new manager account only — never overwrites an existing hash.
+MANAGER_DEMO_PASSWORD = "sahar1234!"
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{2,64}$")
 
@@ -232,12 +233,14 @@ def seed_users(db: Session) -> dict:
                 user.email = desired_email
                 updated.append(f"email:{user.username}")
 
-        # Ensure manager always has a usable password in demo/local setups.
+        # Only set an initial password when the manager account has none.
+        # Never overwrite an existing password_hash — passwords change only via
+        # explicit manager actions (Users page / fulfill reset request).
         if investor.is_manager and not user.password_hash:
             user.password_hash = hash_password(MANAGER_DEMO_PASSWORD)
             user.must_reset_password = False
             user.password_set_at = utcnow()
-            updated.append("manager-password")
+            updated.append("manager-initial-password")
 
     db.commit()
     return {"created_users": created, "updated": updated}

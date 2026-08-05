@@ -36,10 +36,15 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+    });
+  } catch {
+    throw new Error("אין חיבור לשרת — בדקו את הרשת או נסו שוב בעוד רגע");
+  }
 
   if (response.status === 401) {
     setToken(null);

@@ -35,6 +35,23 @@ export function LoginPage() {
         <h1 className="auth-card__brand">התחברות</h1>
 
         <form className="form" onSubmit={onSubmit} autoComplete="off">
+          {/* Honeypot fields reduce browser autofill of stale credentials */}
+          <input
+            type="text"
+            name="username_decoy"
+            autoComplete="username"
+            tabIndex={-1}
+            aria-hidden="true"
+            style={{ position: "absolute", opacity: 0, height: 0, width: 0, pointerEvents: "none" }}
+          />
+          <input
+            type="password"
+            name="password_decoy"
+            autoComplete="current-password"
+            tabIndex={-1}
+            aria-hidden="true"
+            style={{ position: "absolute", opacity: 0, height: 0, width: 0, pointerEvents: "none" }}
+          />
           <label>
             שם משתמש
             <input
