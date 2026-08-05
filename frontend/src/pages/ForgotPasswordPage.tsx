@@ -37,22 +37,34 @@ export function ForgotPasswordPage() {
           הלקוח לא מאפס סיסמה לבד. שולחים בקשה למנהל — רק הוא מגדיר סיסמה חדשה.
         </p>
 
-        <form className="form" onSubmit={onSubmit}>
+        <form className="form" onSubmit={onSubmit} autoComplete="off">
+          {/* decoy — מונע מילוי אוטומטי של הדפדפן */}
+          <input
+            type="text"
+            name="fake-user"
+            autoComplete="username"
+            tabIndex={-1}
+            aria-hidden="true"
+            style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, width: 0 }}
+          />
           <label>
             שם משתמש
             <input
               type="text"
-              autoComplete="username"
+              name="login-id"
+              autoComplete="off"
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="bar"
+              placeholder=""
             />
           </label>
           <label>
             הערה למנהל (אופציונלי)
             <input
               type="text"
+              name="manager-note"
+              autoComplete="off"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="למשל: שכחתי את הסיסמה"
