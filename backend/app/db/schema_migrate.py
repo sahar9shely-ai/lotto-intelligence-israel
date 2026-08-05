@@ -62,6 +62,38 @@ def ensure_schema(engine: Engine) -> None:
                 )
             )
 
+    for table in ("investment_plans", "quotes"):
+        if not _table_exists(engine, table):
+            continue
+        cols = _table_columns(engine, table)
+        with engine.begin() as conn:
+            if "plan_type" not in cols:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table} ADD COLUMN plan_type VARCHAR(32) "
+                        "DEFAULT 'monthly'"
+                    )
+                )
+                conn.execute(
+                    text(
+                        f"UPDATE {table} SET plan_type = 'monthly' "
+                        "WHERE plan_type IS NULL OR plan_type = ''"
+                    )
+                )
+            if "savings_rate_percent" not in cols:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table} ADD COLUMN savings_rate_percent FLOAT "
+                        "DEFAULT 0"
+                    )
+                )
+                conn.execute(
+                    text(
+                        f"UPDATE {table} SET savings_rate_percent = 0 "
+                        "WHERE savings_rate_percent IS NULL"
+                    )
+                )
+
     if not _table_exists(engine, "users"):
         return
 

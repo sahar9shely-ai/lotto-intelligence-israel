@@ -442,3 +442,83 @@ def test_no_duplicate_investor_due_dates_across_plans():
 
     client.delete(f"/api/v1/investments/plans/{first_id}", headers=headers)
     client.delete(f"/api/v1/investments/plans/{second_id}", headers=headers)
+
+
+def test_hybrid_and_savings_plan_types_available_without_seeding():
+    """Track types exist for quotes/plans; seed does not assign them to anyone."""
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+
+    # Existing seeded investors should not suddenly get savings/hybrid plans.
+    plans = client.get("/api/v1/investments/plans", headers=headers).json()
+    for plan in plans:
+        assert plan.get("plan_type", "monthly") in {"monthly", "savings", "hybrid"}
+
+    quote = client.post(
+        "/api/v1/investments/quotes",
+        headers=headers,
+        json={
+            "prospect_name": "בדיקת משולב",
+            "principal": 100000,
+            "plan_type": "hybrid",
+            "monthly_rate_percent": 1,
+            "savings_rate_percent": 1,
+            "manager_fee_percent": 0.5,
+            "duration_months": 12,
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    body = quote.json()
+    assert body["plan_type"] == "hybrid"
+    assert body["monthly_investor_payout"] == 1000
+    assert body["monthly_savings_accrual"] == 1000
+    assert body["projected_savings_balance"] == 12000
+    assert body["total_cash_payout"] == 12000
+    assert body["total_investor_payout"] == 24000
+
+    savings_quote = client.post(
+        "/api/v1/investments/quotes",
+        headers=headers,
+        json={
+            "prospect_name": "בדיקת חיסכון",
+            "principal": 100000,
+            "plan_type": "savings",
+            "monthly_rate_percent": 9,  # ignored for pure savings
+            "savings_rate_percent": 2,
+            "manager_fee_percent": 0.5,
+            "duration_months": 24,
+        },
+    )
+    assert savings_quote.status_code == 201, savings_quote.text
+    s = savings_quote.json()
+    assert s["plan_type"] == "savings"
+    assert s["monthly_rate_percent"] == 0
+    assert s["monthly_investor_payout"] == 0
+    assert s["monthly_savings_accrual"] == 2000
+    # Year1: 12*2000=24000 compounds; Year2 accrues on 124000 → 12*2480=29760; total 53760
+    assert s["projected_savings_balance"] == 53760
+    assert s["total_investor_payout"] == 53760
+
+    # Convert hybrid quote → plan keeps type; do not attach to existing seeded people.
+    converted = client.post(
+        f"/api/v1/investments/quotes/{body['id']}/convert",
+        headers=headers,
+        json={
+            "start_date": date.today().isoformat(),
+            "username": "hybriddemo",
+            "password": "HybridPass1!",
+        },
+    )
+    assert converted.status_code == 200, converted.text
+    plan = converted.json()
+    assert plan["plan_type"] == "hybrid"
+    assert plan["monthly_investor_payout"] == 1000
+    assert plan["projected_savings_balance"] == 12000
+
+    payments = client.get(
+        f"/api/v1/investments/payments?plan_id={plan['id']}", headers=headers
+    ).json()
+    assert len(payments) == 12
+    assert all(p["investor_amount"] == 1000 for p in payments)
+
+    # Cleanup quote leftover
+    client.delete(f"/api/v1/investments/quotes/{savings_quote.json()['id']}", headers=headers)

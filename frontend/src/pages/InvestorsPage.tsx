@@ -2,11 +2,13 @@ import { FormEvent, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
+import { PlanTrackFields } from "../components/PlanTrackFields";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Settings } from "../types/investments";
 import { formatMoney, formatPercent, yearStartISO } from "../utils/format";
+import { planTypeLabel } from "../utils/planTypes";
 
 export function InvestorsPage() {
   const { user } = useAuth();
@@ -56,7 +58,9 @@ export function InvestorsPage() {
     const plan = await api.createPlan({
       investor_id: selected.id,
       principal: Number(fd.get("principal") || 0),
+      plan_type: String(fd.get("plan_type") || "monthly"),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
+      savings_rate_percent: Number(fd.get("savings_rate_percent") || 0),
       manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
       start_date: String(fd.get("start_date") || yearStartISO()),
       duration_months: Number(fd.get("duration_months") || 12),
@@ -74,7 +78,9 @@ export function InvestorsPage() {
     const fd = new FormData(e.currentTarget);
     await api.updatePlan(planId, {
       principal: Number(fd.get("principal") || 0),
+      plan_type: String(fd.get("plan_type") || "monthly"),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
+      savings_rate_percent: Number(fd.get("savings_rate_percent") || 0),
       manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
       start_date: String(fd.get("start_date")),
       duration_months: Number(fd.get("duration_months") || 12),
@@ -131,7 +137,9 @@ export function InvestorsPage() {
         <div>
           <h1>{isManager ? "משקיעים ומסלולים" : "המסלול שלי"}</h1>
           <p className="muted">
-            {isManager ? "אחוזים קבועים לפי חוזה · משך מסלול גמיש" : "צפייה בנתונים שלך בלבד"}
+            {isManager
+              ? "החזר חודשי · חיסכון · משולב · משך גמיש"
+              : "צפייה בנתונים שלך בלבד"}
           </p>
         </div>
         {isManager ? (
@@ -215,8 +223,8 @@ export function InvestorsPage() {
                     title={`מסלול #${plan.id}`}
                     subtitle={
                       isManager
-                        ? `${plan.duration_months} חודשים · ${formatPercent(plan.monthly_rate_percent)} חודשי · עמלה ${formatPercent(plan.manager_fee_percent)}`
-                        : `${plan.duration_months} חודשים · ${formatPercent(plan.monthly_rate_percent)} חודשי`
+                        ? `${planTypeLabel(plan.plan_type)} · ${plan.duration_months} חודשים · עמלה ${formatPercent(plan.manager_fee_percent)}`
+                        : `${planTypeLabel(plan.plan_type)} · ${plan.duration_months} חודשים`
                     }
                     action={
                       isManager ? (
@@ -231,10 +239,24 @@ export function InvestorsPage() {
                     }
                   >
                     <div className="kv kv--dense">
-                      <div>
-                        <span>חודשי למשקיע</span>
-                        <strong>{formatMoney(plan.monthly_investor_payout, true)}</strong>
-                      </div>
+                      {plan.plan_type !== "savings" ? (
+                        <div>
+                          <span>חודשי למשקיע (מזומן)</span>
+                          <strong>{formatMoney(plan.monthly_investor_payout, true)}</strong>
+                        </div>
+                      ) : null}
+                      {plan.plan_type !== "monthly" ? (
+                        <div>
+                          <span>צבירת חיסכון חודשית</span>
+                          <strong>{formatMoney(plan.monthly_savings_accrual, true)}</strong>
+                        </div>
+                      ) : null}
+                      {plan.plan_type !== "monthly" ? (
+                        <div>
+                          <span>יתרת חיסכון צפויה</span>
+                          <strong>{formatMoney(plan.projected_savings_balance)}</strong>
+                        </div>
+                      ) : null}
                       {isManager ? (
                         <div>
                           <span>עמלה חודשית</span>
@@ -246,7 +268,7 @@ export function InvestorsPage() {
                         <strong>{formatMoney(plan.total_investor_payout)}</strong>
                       </div>
                       <div>
-                        <span>שנתי (×12)</span>
+                        <span>שנתי (×12 / שנה א׳)</span>
                         <strong>{formatMoney(plan.annual_investor_payout)}</strong>
                       </div>
                       <div>
@@ -271,16 +293,11 @@ export function InvestorsPage() {
                           קרן (₪)
                           <input name="principal" type="number" min="0" step="0.01" defaultValue={plan.principal} />
                         </label>
-                        <label>
-                          אחוז חודשי למשקיע
-                          <input
-                            name="monthly_rate_percent"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            defaultValue={plan.monthly_rate_percent}
-                          />
-                        </label>
+                        <PlanTrackFields
+                          defaultPlanType={plan.plan_type}
+                          defaultMonthlyRate={plan.monthly_rate_percent}
+                          defaultSavingsRate={plan.savings_rate_percent}
+                        />
                         <label>
                           אחוז עמלת ניהול
                           <input
@@ -403,17 +420,11 @@ function PlanForm({
           קרן (₪)
           <input name="principal" type="number" min="0" step="0.01" defaultValue={0} required />
         </label>
-        <label>
-          אחוז חודשי למשקיע
-          <input
-            name="monthly_rate_percent"
-            type="number"
-            min="0"
-            step="0.01"
-            defaultValue={settings?.default_monthly_rate_percent ?? 0}
-            required
-          />
-        </label>
+        <PlanTrackFields
+          defaultPlanType="monthly"
+          defaultMonthlyRate={settings?.default_monthly_rate_percent ?? 0}
+          defaultSavingsRate={0}
+        />
         <label>
           אחוז עמלת ניהול (נוסף)
           <input
@@ -451,6 +462,7 @@ function PlanForm({
       <p className="hint">
         ברירת המחדל היא 1 בינואר של השנה הנוכחית — כדי שהלוח יהיה שנתי מתחילת השנה ועד סופה.
         עמלת הניהול מתווספת מעבר לתשלום למשקיע — לא נגזרת מהאחוזים שלו.
+        במסלול חיסכון/משולב הריבית על החיסכון מתרכבת כל 12 חודשים.
       </p>
       <button type="submit" className="btn btn--primary">
         צור מסלול + לוח תשלומים

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 PlanStatus = Literal["active", "completed", "paused"]
 PaymentStatus = Literal["scheduled", "paid", "skipped", "awaiting_confirmation"]
 QuoteStatus = Literal["draft", "sent", "converted", "archived"]
+PlanType = Literal["monthly", "savings", "hybrid"]
 
 
 class InvestorCreate(BaseModel):
@@ -50,7 +51,9 @@ class InvestorOut(BaseModel):
 class PlanCreate(BaseModel):
     investor_id: int
     principal: float = Field(ge=0)
-    monthly_rate_percent: float = Field(ge=0)
+    plan_type: PlanType = "monthly"
+    monthly_rate_percent: float = Field(ge=0, default=0)
+    savings_rate_percent: float = Field(ge=0, default=0)
     manager_fee_percent: float = Field(ge=0)
     start_date: date
     duration_months: int = Field(ge=1, le=120, default=12)
@@ -60,7 +63,9 @@ class PlanCreate(BaseModel):
 
 class PlanUpdate(BaseModel):
     principal: Optional[float] = Field(default=None, ge=0)
+    plan_type: Optional[PlanType] = None
     monthly_rate_percent: Optional[float] = Field(default=None, ge=0)
+    savings_rate_percent: Optional[float] = Field(default=None, ge=0)
     manager_fee_percent: Optional[float] = Field(default=None, ge=0)
     start_date: Optional[date] = None
     duration_months: Optional[int] = Field(default=None, ge=1, le=120)
@@ -74,7 +79,9 @@ class PlanOut(BaseModel):
     investor_id: int
     investor_name: str
     principal: float
+    plan_type: str = "monthly"
     monthly_rate_percent: float
+    savings_rate_percent: float = 0.0
     manager_fee_percent: float
     start_date: date
     duration_months: int
@@ -83,6 +90,9 @@ class PlanOut(BaseModel):
     created_at: datetime
     monthly_investor_payout: float
     monthly_manager_fee: float
+    monthly_savings_accrual: float = 0.0
+    projected_savings_balance: float = 0.0
+    total_cash_payout: float = 0.0
     total_investor_payout: float
     total_manager_fee: float
     annual_investor_payout: float
@@ -122,7 +132,9 @@ class PaymentOut(BaseModel):
 class QuoteCreate(BaseModel):
     prospect_name: str = Field(min_length=1, max_length=120)
     principal: float = Field(ge=0)
-    monthly_rate_percent: float = Field(ge=0)
+    plan_type: PlanType = "monthly"
+    monthly_rate_percent: float = Field(ge=0, default=0)
+    savings_rate_percent: float = Field(ge=0, default=0)
     manager_fee_percent: float = Field(ge=0)
     duration_months: int = Field(ge=1, le=120, default=12)
     notes: Optional[str] = None
@@ -131,7 +143,9 @@ class QuoteCreate(BaseModel):
 class QuoteUpdate(BaseModel):
     prospect_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     principal: Optional[float] = Field(default=None, ge=0)
+    plan_type: Optional[PlanType] = None
     monthly_rate_percent: Optional[float] = Field(default=None, ge=0)
+    savings_rate_percent: Optional[float] = Field(default=None, ge=0)
     manager_fee_percent: Optional[float] = Field(default=None, ge=0)
     duration_months: Optional[int] = Field(default=None, ge=1, le=120)
     notes: Optional[str] = None
@@ -151,7 +165,9 @@ class QuoteOut(BaseModel):
     id: int
     prospect_name: str
     principal: float
+    plan_type: str = "monthly"
     monthly_rate_percent: float
+    savings_rate_percent: float = 0.0
     manager_fee_percent: float
     duration_months: int
     notes: Optional[str] = None
@@ -160,6 +176,9 @@ class QuoteOut(BaseModel):
     created_at: datetime
     monthly_investor_payout: float
     monthly_manager_fee: float
+    monthly_savings_accrual: float = 0.0
+    projected_savings_balance: float = 0.0
+    total_cash_payout: float = 0.0
     total_investor_payout: float
     total_manager_fee: float
     annual_investor_payout: float

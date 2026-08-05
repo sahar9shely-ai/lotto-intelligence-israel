@@ -1,10 +1,12 @@
 import { FormEvent, useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
+import { PlanTrackFields } from "../components/PlanTrackFields";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Quote } from "../types/investments";
 import { buildMonthSchedule, downloadQuotePdf } from "../utils/quotePdf";
 import { formatMoney, formatPercent, statusLabel, yearStartISO } from "../utils/format";
+import { planTypeLabel } from "../utils/planTypes";
 
 export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
@@ -32,7 +34,9 @@ export function QuotesPage() {
     const body = {
       prospect_name: String(fd.get("prospect_name") || "").trim(),
       principal: Number(fd.get("principal") || 0),
+      plan_type: String(fd.get("plan_type") || "monthly"),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
+      savings_rate_percent: Number(fd.get("savings_rate_percent") || 0),
       manager_fee_percent: Number(
         editing?.manager_fee_percent ?? settings?.default_manager_fee_percent ?? 0,
       ),
@@ -120,7 +124,7 @@ export function QuotesPage() {
       <div className="page-head">
         <div>
           <h1>הצעות למשקיעים חדשים</h1>
-          <p className="muted">מפרט חודשי + סה״כ רווח · אפשרות להורדת PDF</p>
+          <p className="muted">החזר חודשי · חיסכון · משולב · מפרט + PDF</p>
         </div>
         <button
           type="button"
@@ -139,7 +143,7 @@ export function QuotesPage() {
       {formOpen ? (
         <Panel
           title={editing ? `עריכת הצעה — ${editing.prospect_name}` : "סיכום הצעה"}
-          subtitle="לחישוב לפי קרן ואחוז קבוע למשקיע"
+          subtitle="בחרו סוג מסלול: החזר חודשי, חיסכון או משולב"
         >
           <form className="form" onSubmit={onSave} key={editing?.id ?? "new"}>
             <div className="form__grid">
@@ -163,19 +167,13 @@ export function QuotesPage() {
                   defaultValue={editing?.principal ?? 0}
                 />
               </label>
-              <label>
-                אחוז חודשי
-                <input
-                  name="monthly_rate_percent"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  required
-                  defaultValue={
-                    editing?.monthly_rate_percent ?? settings?.default_monthly_rate_percent ?? 0
-                  }
-                />
-              </label>
+              <PlanTrackFields
+                defaultPlanType={editing?.plan_type ?? "monthly"}
+                defaultMonthlyRate={
+                  editing?.monthly_rate_percent ?? settings?.default_monthly_rate_percent ?? 0
+                }
+                defaultSavingsRate={editing?.savings_rate_percent ?? 0}
+              />
               <label>
                 משך
                 <select
@@ -221,14 +219,33 @@ export function QuotesPage() {
                   <span className={`badge badge--${q.status}`}>{statusLabel(q.status)}</span>
                 </header>
                 <p className="quote-card__lead">
-                  קרן {formatMoney(q.principal)} · {formatPercent(q.monthly_rate_percent)} לחודש ·{" "}
-                  {q.duration_months} חודשים
+                  {planTypeLabel(q.plan_type)} · קרן {formatMoney(q.principal)} ·{" "}
+                  {q.plan_type === "savings"
+                    ? `${formatPercent(q.savings_rate_percent)} לחיסכון`
+                    : q.plan_type === "hybrid"
+                      ? `${formatPercent(q.monthly_rate_percent)} חודשי + ${formatPercent(q.savings_rate_percent)} חיסכון`
+                      : `${formatPercent(q.monthly_rate_percent)} לחודש`}{" "}
+                  · {q.duration_months} חודשים
                 </p>
                 <dl className="quote-dl">
-                  <div>
-                    <dt>רווח חודשי</dt>
-                    <dd>{formatMoney(q.monthly_investor_payout, true)}</dd>
-                  </div>
+                  {q.plan_type !== "savings" ? (
+                    <div>
+                      <dt>רווח חודשי (מזומן)</dt>
+                      <dd>{formatMoney(q.monthly_investor_payout, true)}</dd>
+                    </div>
+                  ) : null}
+                  {q.plan_type !== "monthly" ? (
+                    <div>
+                      <dt>צבירת חיסכון חודשית (התחלה)</dt>
+                      <dd>{formatMoney(q.monthly_savings_accrual, true)}</dd>
+                    </div>
+                  ) : null}
+                  {q.plan_type !== "monthly" ? (
+                    <div>
+                      <dt>יתרת חיסכון בסיום (ריבית דריבית)</dt>
+                      <dd>{formatMoney(q.projected_savings_balance)}</dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>סה״כ רווח בסיום המסלול</dt>
                     <dd>{formatMoney(q.total_investor_payout)}</dd>
@@ -253,16 +270,30 @@ export function QuotesPage() {
                       <thead>
                         <tr>
                           <th>חודש</th>
-                          <th>רווח לחודש</th>
+                          {q.plan_type !== "savings" ? <th>החזר חודשי</th> : null}
+                          {q.plan_type !== "monthly" ? <th>לחיסכון</th> : null}
                           <th>רווח מצטבר</th>
                         </tr>
                       </thead>
                       <tbody>
                         {rows.map((r) => (
                           <tr key={r.month}>
-                            <td>{r.month}</td>
-                            <td>{formatMoney(r.profit, true)}</td>
-                            <td>{formatMoney(r.cumulative, true)}</td>
+                            <td>
+                              {r.month}
+                              {r.compounded ? " · ריבית דריבית" : ""}
+                            </td>
+                            {q.plan_type !== "savings" ? (
+                              <td>{formatMoney(r.profit, true)}</td>
+                            ) : null}
+                            {q.plan_type !== "monthly" ? (
+                              <td>{formatMoney(r.savings, true)}</td>
+                            ) : null}
+                            <td>
+                              {formatMoney(
+                                r.cumulative + (q.plan_type === "monthly" ? 0 : r.cumulativeSavings),
+                                true,
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

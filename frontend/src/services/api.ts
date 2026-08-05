@@ -186,7 +186,9 @@ export const api = {
   createPlan: (body: {
     investor_id: number;
     principal: number;
+    plan_type?: string;
     monthly_rate_percent: number;
+    savings_rate_percent?: number;
     manager_fee_percent: number;
     start_date: string;
     duration_months: number;
@@ -201,7 +203,9 @@ export const api = {
     id: number,
     body: Partial<{
       principal: number;
+      plan_type: string;
       monthly_rate_percent: number;
+      savings_rate_percent: number;
       manager_fee_percent: number;
       start_date: string;
       duration_months: number;
@@ -298,7 +302,9 @@ export const api = {
   createQuote: (body: {
     prospect_name: string;
     principal: number;
+    plan_type?: string;
     monthly_rate_percent: number;
+    savings_rate_percent?: number;
     manager_fee_percent: number;
     duration_months: number;
     notes?: string;
@@ -312,7 +318,9 @@ export const api = {
     body: Partial<{
       prospect_name: string;
       principal: number;
+      plan_type: string;
       monthly_rate_percent: number;
+      savings_rate_percent: number;
       manager_fee_percent: number;
       duration_months: number;
       notes: string;

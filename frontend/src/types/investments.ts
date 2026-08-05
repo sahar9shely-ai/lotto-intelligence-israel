@@ -15,12 +15,16 @@ export type Investor = {
   has_login?: boolean;
 };
 
+export type PlanType = "monthly" | "savings" | "hybrid";
+
 export type Plan = {
   id: number;
   investor_id: number;
   investor_name: string;
   principal: number;
+  plan_type: PlanType | string;
   monthly_rate_percent: number;
+  savings_rate_percent: number;
   manager_fee_percent: number;
   start_date: string;
   duration_months: number;
@@ -29,6 +33,9 @@ export type Plan = {
   created_at: string;
   monthly_investor_payout: number;
   monthly_manager_fee: number;
+  monthly_savings_accrual: number;
+  projected_savings_balance: number;
+  total_cash_payout: number;
   total_investor_payout: number;
   total_manager_fee: number;
   annual_investor_payout: number;
@@ -57,7 +64,9 @@ export type Quote = {
   id: number;
   prospect_name: string;
   principal: number;
+  plan_type: PlanType | string;
   monthly_rate_percent: number;
+  savings_rate_percent: number;
   manager_fee_percent: number;
   duration_months: number;
   notes?: string | null;
@@ -66,6 +75,9 @@ export type Quote = {
   created_at: string;
   monthly_investor_payout: number;
   monthly_manager_fee: number;
+  monthly_savings_accrual: number;
+  projected_savings_balance: number;
+  total_cash_payout: number;
   total_investor_payout: number;
   total_manager_fee: number;
   annual_investor_payout: number;

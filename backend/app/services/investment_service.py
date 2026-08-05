@@ -32,6 +32,96 @@ def calc_monthly(principal: float, rate_percent: float) -> float:
     return round(principal * (rate_percent / 100.0), 2)
 
 
+def normalize_plan_rates(
+    plan_type: str,
+    monthly_rate_percent: float,
+    savings_rate_percent: float,
+) -> tuple[str, float, float]:
+    """Clamp rates to the selected track type."""
+    kind = (plan_type or "monthly").strip().lower()
+    if kind not in {"monthly", "savings", "hybrid"}:
+        kind = "monthly"
+    monthly = float(monthly_rate_percent or 0)
+    savings = float(savings_rate_percent or 0)
+    if kind == "monthly":
+        return kind, monthly, 0.0
+    if kind == "savings":
+        return kind, 0.0, savings
+    return kind, monthly, savings
+
+
+def projected_compound_savings(
+    principal: float,
+    savings_rate_percent: float,
+    duration_months: int,
+) -> dict:
+    """Savings accrues monthly; every 12 months the balance compounds onto the base."""
+    if principal <= 0 or savings_rate_percent <= 0 or duration_months <= 0:
+        return {
+            "monthly_savings_accrual": 0.0,
+            "projected_savings_balance": 0.0,
+            "first_year_savings": 0.0,
+        }
+
+    initial_monthly = calc_monthly(principal, savings_rate_percent)
+    base = principal
+    total_savings = 0.0
+    year_bucket = 0.0
+    first_year_savings = 0.0
+
+    for month in range(1, duration_months + 1):
+        accrual = calc_monthly(base, savings_rate_percent)
+        year_bucket = round(year_bucket + accrual, 2)
+        if month % 12 == 0 or month == duration_months:
+            total_savings = round(total_savings + year_bucket, 2)
+            if month <= 12:
+                first_year_savings = total_savings
+            base = round(principal + total_savings, 2)
+            year_bucket = 0.0
+
+    return {
+        "monthly_savings_accrual": initial_monthly,
+        "projected_savings_balance": total_savings,
+        "first_year_savings": first_year_savings,
+    }
+
+
+def track_metrics(
+    *,
+    principal: float,
+    plan_type: str,
+    monthly_rate_percent: float,
+    savings_rate_percent: float,
+    manager_fee_percent: float,
+    duration_months: int,
+) -> dict:
+    kind, monthly_rate, savings_rate = normalize_plan_rates(
+        plan_type, monthly_rate_percent, savings_rate_percent
+    )
+    cash_monthly = calc_monthly(principal, monthly_rate)
+    manager_monthly = calc_monthly(principal, manager_fee_percent)
+    savings = projected_compound_savings(principal, savings_rate, duration_months)
+    total_cash = round(cash_monthly * duration_months, 2)
+    total_investor = round(total_cash + savings["projected_savings_balance"], 2)
+    if kind == "monthly":
+        annual = round(cash_monthly * 12, 2)
+    else:
+        annual = round(cash_monthly * 12 + savings["first_year_savings"], 2)
+    return {
+        "plan_type": kind,
+        "monthly_rate_percent": monthly_rate,
+        "savings_rate_percent": savings_rate,
+        "monthly_investor_payout": cash_monthly,
+        "monthly_manager_fee": manager_monthly,
+        "monthly_savings_accrual": savings["monthly_savings_accrual"],
+        "projected_savings_balance": savings["projected_savings_balance"],
+        "total_cash_payout": total_cash,
+        "total_investor_payout": total_investor,
+        "total_manager_fee": round(manager_monthly * duration_months, 2),
+        "annual_investor_payout": annual,
+    }
+
+
 def ensure_settings(db: Session) -> AppSettings:
     settings = db.query(AppSettings).first()
     if settings is None:
@@ -87,18 +177,27 @@ def seed_defaults(db: Session) -> dict:
 
 def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
     today = today or date.today()
-    monthly_investor = calc_monthly(plan.principal, plan.monthly_rate_percent)
-    monthly_manager = calc_monthly(plan.principal, plan.manager_fee_percent)
+    track = track_metrics(
+        principal=plan.principal,
+        plan_type=getattr(plan, "plan_type", None) or "monthly",
+        monthly_rate_percent=plan.monthly_rate_percent,
+        savings_rate_percent=getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+        manager_fee_percent=plan.manager_fee_percent,
+        duration_months=plan.duration_months,
+    )
     elapsed = min(months_between(plan.start_date, today), plan.duration_months)
     remaining = max(plan.duration_months - elapsed, 0)
     payments = plan.payments or []
     paid = [p for p in payments if p.status == "paid"]
     return {
-        "monthly_investor_payout": monthly_investor,
-        "monthly_manager_fee": monthly_manager,
-        "total_investor_payout": round(monthly_investor * plan.duration_months, 2),
-        "total_manager_fee": round(monthly_manager * plan.duration_months, 2),
-        "annual_investor_payout": round(monthly_investor * 12, 2),
+        "monthly_investor_payout": track["monthly_investor_payout"],
+        "monthly_manager_fee": track["monthly_manager_fee"],
+        "monthly_savings_accrual": track["monthly_savings_accrual"],
+        "projected_savings_balance": track["projected_savings_balance"],
+        "total_cash_payout": track["total_cash_payout"],
+        "total_investor_payout": track["total_investor_payout"],
+        "total_manager_fee": track["total_manager_fee"],
+        "annual_investor_payout": track["annual_investor_payout"],
         "months_elapsed": elapsed,
         "months_remaining": remaining,
         "paid_count": len(paid),
@@ -109,12 +208,19 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
 
 def serialize_plan(plan: InvestmentPlan) -> dict:
     metrics = plan_metrics(plan)
+    kind, monthly_rate, savings_rate = normalize_plan_rates(
+        getattr(plan, "plan_type", None) or "monthly",
+        plan.monthly_rate_percent,
+        getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+    )
     return {
         "id": plan.id,
         "investor_id": plan.investor_id,
         "investor_name": plan.investor.name if plan.investor else "",
         "principal": plan.principal,
-        "monthly_rate_percent": plan.monthly_rate_percent,
+        "plan_type": kind,
+        "monthly_rate_percent": monthly_rate,
+        "savings_rate_percent": savings_rate,
         "manager_fee_percent": plan.manager_fee_percent,
         "start_date": plan.start_date,
         "duration_months": plan.duration_months,
@@ -146,7 +252,15 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
     active_plans = [p for p in investor.plans if p.status == "active"]
     active_principal = sum(p.principal for p in active_plans)
     monthly_payout = sum(
-        calc_monthly(p.principal, p.monthly_rate_percent) for p in active_plans
+        calc_monthly(
+            p.principal,
+            normalize_plan_rates(
+                getattr(p, "plan_type", None) or "monthly",
+                p.monthly_rate_percent,
+                getattr(p, "savings_rate_percent", 0.0) or 0.0,
+            )[1],
+        )
+        for p in active_plans
     )
     if active_plans:
         earliest = min(p.start_date for p in active_plans)
@@ -182,23 +296,39 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
 
 
 def quote_metrics(quote: Quote) -> dict:
-    monthly_investor = calc_monthly(quote.principal, quote.monthly_rate_percent)
-    monthly_manager = calc_monthly(quote.principal, quote.manager_fee_percent)
+    track = track_metrics(
+        principal=quote.principal,
+        plan_type=getattr(quote, "plan_type", None) or "monthly",
+        monthly_rate_percent=quote.monthly_rate_percent,
+        savings_rate_percent=getattr(quote, "savings_rate_percent", 0.0) or 0.0,
+        manager_fee_percent=quote.manager_fee_percent,
+        duration_months=quote.duration_months,
+    )
     return {
-        "monthly_investor_payout": monthly_investor,
-        "monthly_manager_fee": monthly_manager,
-        "total_investor_payout": round(monthly_investor * quote.duration_months, 2),
-        "total_manager_fee": round(monthly_manager * quote.duration_months, 2),
-        "annual_investor_payout": round(monthly_investor * 12, 2),
+        "monthly_investor_payout": track["monthly_investor_payout"],
+        "monthly_manager_fee": track["monthly_manager_fee"],
+        "monthly_savings_accrual": track["monthly_savings_accrual"],
+        "projected_savings_balance": track["projected_savings_balance"],
+        "total_cash_payout": track["total_cash_payout"],
+        "total_investor_payout": track["total_investor_payout"],
+        "total_manager_fee": track["total_manager_fee"],
+        "annual_investor_payout": track["annual_investor_payout"],
     }
 
 
 def serialize_quote(quote: Quote) -> dict:
+    kind, monthly_rate, savings_rate = normalize_plan_rates(
+        getattr(quote, "plan_type", None) or "monthly",
+        quote.monthly_rate_percent,
+        getattr(quote, "savings_rate_percent", 0.0) or 0.0,
+    )
     return {
         "id": quote.id,
         "prospect_name": quote.prospect_name,
         "principal": quote.principal,
-        "monthly_rate_percent": quote.monthly_rate_percent,
+        "plan_type": kind,
+        "monthly_rate_percent": monthly_rate,
+        "savings_rate_percent": savings_rate,
         "manager_fee_percent": quote.manager_fee_percent,
         "duration_months": quote.duration_months,
         "notes": quote.notes,
@@ -258,8 +388,17 @@ def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment
 
     Enforces one payment per plan month and one payment per investor due_date
     so the same person cannot appear twice on the same calendar day.
+    Cash months use the monthly (cash) rate only; savings accrues separately.
     """
-    monthly_investor = calc_monthly(plan.principal, plan.monthly_rate_percent)
+    kind, monthly_rate, _savings_rate = normalize_plan_rates(
+        getattr(plan, "plan_type", None) or "monthly",
+        plan.monthly_rate_percent,
+        getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+    )
+    plan.plan_type = kind
+    plan.monthly_rate_percent = monthly_rate
+    plan.savings_rate_percent = _savings_rate
+    monthly_investor = calc_monthly(plan.principal, monthly_rate)
     monthly_manager = calc_monthly(plan.principal, plan.manager_fee_percent)
 
     existing = (
@@ -638,7 +777,9 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
         plan = InvestmentPlan(
             investor_id=investor.id,
             principal=template.principal,
+            plan_type=getattr(template, "plan_type", None) or "monthly",
             monthly_rate_percent=template.monthly_rate_percent,
+            savings_rate_percent=getattr(template, "savings_rate_percent", 0.0) or 0.0,
             manager_fee_percent=template.manager_fee_percent,
             start_date=year_start,
             duration_months=12,

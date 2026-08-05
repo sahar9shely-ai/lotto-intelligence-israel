@@ -209,6 +209,14 @@ def create_plan(
         raise HTTPException(status_code=404, detail="Investor not found")
 
     data = payload.model_dump(exclude={"generate_schedule"})
+    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
+        data.get("plan_type") or "monthly",
+        data.get("monthly_rate_percent") or 0,
+        data.get("savings_rate_percent") or 0,
+    )
+    data["plan_type"] = kind
+    data["monthly_rate_percent"] = monthly_rate
+    data["savings_rate_percent"] = savings_rate
     plan = InvestmentPlan(**data)
     db.add(plan)
     db.commit()
@@ -245,13 +253,23 @@ def update_plan(
     data = payload.model_dump(exclude_unset=True, exclude={"regenerate_schedule"})
     for key, value in data.items():
         setattr(plan, key, value)
+    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
+        getattr(plan, "plan_type", None) or "monthly",
+        plan.monthly_rate_percent,
+        getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+    )
+    plan.plan_type = kind
+    plan.monthly_rate_percent = monthly_rate
+    plan.savings_rate_percent = savings_rate
     db.commit()
 
     should_regen = payload.regenerate_schedule or any(
         field in data
         for field in (
             "principal",
+            "plan_type",
             "monthly_rate_percent",
+            "savings_rate_percent",
             "manager_fee_percent",
             "start_date",
             "duration_months",
@@ -504,7 +522,16 @@ def create_quote(
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    quote = Quote(**payload.model_dump())
+    data = payload.model_dump()
+    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
+        data.get("plan_type") or "monthly",
+        data.get("monthly_rate_percent") or 0,
+        data.get("savings_rate_percent") or 0,
+    )
+    data["plan_type"] = kind
+    data["monthly_rate_percent"] = monthly_rate
+    data["savings_rate_percent"] = savings_rate
+    quote = Quote(**data)
     db.add(quote)
     db.commit()
     db.refresh(quote)
@@ -523,6 +550,14 @@ def update_quote(
         raise HTTPException(status_code=404, detail="Quote not found")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(quote, key, value)
+    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
+        getattr(quote, "plan_type", None) or "monthly",
+        quote.monthly_rate_percent,
+        getattr(quote, "savings_rate_percent", 0.0) or 0.0,
+    )
+    quote.plan_type = kind
+    quote.monthly_rate_percent = monthly_rate
+    quote.savings_rate_percent = savings_rate
     db.commit()
     db.refresh(quote)
     return svc.serialize_quote(quote)
@@ -571,7 +606,9 @@ def convert_quote(
     plan = InvestmentPlan(
         investor_id=investor.id,
         principal=quote.principal,
+        plan_type=getattr(quote, "plan_type", None) or "monthly",
         monthly_rate_percent=quote.monthly_rate_percent,
+        savings_rate_percent=getattr(quote, "savings_rate_percent", 0.0) or 0.0,
         manager_fee_percent=quote.manager_fee_percent,
         start_date=payload.start_date,
         duration_months=quote.duration_months,

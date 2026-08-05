@@ -2,6 +2,7 @@ import type { Quote } from "../types/investments";
 import { formatMoney, formatPercent } from "./format";
 import { PDF_BASE_STYLES, renderHtmlToPdf } from "./pdfDocument";
 import { buildMonthSchedule } from "./quoteSchedule";
+import { planTypeLabel } from "./planTypes";
 
 export type { MonthRow } from "./quoteSchedule";
 export { buildMonthSchedule } from "./quoteSchedule";
@@ -24,14 +25,28 @@ function buildQuoteDocumentHtml(quote: Quote): string {
     day: "numeric",
   });
   const name = escapeHtml(quote.prospect_name);
+  const typeLabel = planTypeLabel(quote.plan_type);
+  const rateLine =
+    quote.plan_type === "savings"
+      ? `${formatPercent(quote.savings_rate_percent)} לחיסכון`
+      : quote.plan_type === "hybrid"
+        ? `${formatPercent(quote.monthly_rate_percent)} חודשי + ${formatPercent(quote.savings_rate_percent)} חיסכון`
+        : `${formatPercent(quote.monthly_rate_percent)} לחודש`;
+
+  const showCash = quote.plan_type !== "savings";
+  const showSavings = quote.plan_type !== "monthly";
 
   const tableRows = rows
     .map(
       (r, i) => `
       <tr class="${i % 2 === 0 ? "even" : "odd"}">
-        <td class="muted">חודש ${r.month}</td>
-        <td class="col-num">${formatMoney(r.profit, true)}</td>
-        <td class="col-num">${formatMoney(r.cumulative, true)}</td>
+        <td class="muted">חודש ${r.month}${r.compounded ? " · ריבית דריבית" : ""}</td>
+        ${showCash ? `<td class="col-num">${formatMoney(r.profit, true)}</td>` : ""}
+        ${showSavings ? `<td class="col-num">${formatMoney(r.savings, true)}</td>` : ""}
+        <td class="col-num">${formatMoney(
+          r.cumulative + (showSavings ? r.cumulativeSavings : 0),
+          true,
+        )}</td>
       </tr>`,
     )
     .join("");
@@ -52,15 +67,27 @@ function buildQuoteDocumentHtml(quote: Quote): string {
     <section class="pdf-hero">
       <h1>${name}</h1>
       <p class="pdf-hero__sub">
-        קרן ${formatMoney(quote.principal)} · ${formatPercent(quote.monthly_rate_percent)} לחודש · ${quote.duration_months} חודשים
+        ${typeLabel} · קרן ${formatMoney(quote.principal)} · ${rateLine} · ${quote.duration_months} חודשים
       </p>
     </section>
 
     <section class="pdf-kpis">
-      <div class="pdf-kpi">
-        <span class="pdf-kpi__label">רווח חודשי</span>
+      ${
+        showCash
+          ? `<div class="pdf-kpi">
+        <span class="pdf-kpi__label">רווח חודשי (מזומן)</span>
         <strong class="pdf-kpi__value">${formatMoney(quote.monthly_investor_payout, true)}</strong>
-      </div>
+      </div>`
+          : ""
+      }
+      ${
+        showSavings
+          ? `<div class="pdf-kpi">
+        <span class="pdf-kpi__label">יתרת חיסכון בסיום</span>
+        <strong class="pdf-kpi__value">${formatMoney(quote.projected_savings_balance)}</strong>
+      </div>`
+          : ""
+      }
       <div class="pdf-kpi">
         <span class="pdf-kpi__label">סה״כ רווח בסיום המסלול</span>
         <strong class="pdf-kpi__value">${formatMoney(totalProfit)}</strong>
@@ -74,13 +101,20 @@ function buildQuoteDocumentHtml(quote: Quote): string {
     <section class="pdf-table-wrap">
       <div class="pdf-section-title">
         <h2>מפרט חודשי</h2>
-        <p>רווח קבוע בכל חודש לאורך המסלול</p>
+        <p>${
+          quote.plan_type === "savings"
+            ? "צבירה לחיסכון עם ריבית דריבית כל 12 חודשים"
+            : quote.plan_type === "hybrid"
+              ? "החזר חודשי במזומן + צבירה לחיסכון עם ריבית דריבית"
+              : "רווח קבוע בכל חודש לאורך המסלול"
+        }</p>
       </div>
       <table class="pdf-table">
         <thead>
           <tr>
             <th>חודש</th>
-            <th>רווח לחודש</th>
+            ${showCash ? "<th>החזר חודשי</th>" : ""}
+            ${showSavings ? "<th>לחיסכון</th>" : ""}
             <th>רווח מצטבר</th>
           </tr>
         </thead>
