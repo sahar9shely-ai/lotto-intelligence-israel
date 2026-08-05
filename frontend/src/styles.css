@@ -949,3 +949,23 @@ textarea {
   word-break: break-all;
   color: var(--ink-soft);
 }
+
+/* Chrome autofill detection — triggers animationstart so JS can clear the value */
+@keyframes tazrim-on-autofill {
+  from {
+    opacity: 0.99;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.auth-card input:-webkit-autofill,
+.auth-card input:-webkit-autofill:hover,
+.auth-card input:-webkit-autofill:focus {
+  animation-name: tazrim-on-autofill;
+  animation-duration: 0.001s;
+  -webkit-text-fill-color: var(--ink);
+  transition: background-color 99999s ease-in-out 0s;
+  box-shadow: 0 0 0 1000px #fff inset;
+}

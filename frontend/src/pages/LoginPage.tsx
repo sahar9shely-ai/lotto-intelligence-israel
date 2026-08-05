@@ -1,6 +1,31 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+
+/** מונע מילוי אוטומטי של הדפדפן (Chrome ממלא ערכים שמורים גם כשה-state ריק). */
+function useBlockAutofill(ref: React.RefObject<HTMLInputElement | null>, setValue: (v: string) => void) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const wipe = () => {
+      if (document.activeElement === el) return;
+      if (el.value) {
+        el.value = "";
+        setValue("");
+      }
+    };
+
+    wipe();
+    const timers = [50, 150, 400, 800, 1500].map((ms) => window.setTimeout(wipe, ms));
+    el.addEventListener("animationstart", wipe);
+
+    return () => {
+      timers.forEach(clearTimeout);
+      el.removeEventListener("animationstart", wipe);
+    };
+  }, [ref, setValue]);
+}
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -9,6 +34,13 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [unlockUser, setUnlockUser] = useState(false);
+  const [unlockPass, setUnlockPass] = useState(false);
+  const userRef = useRef<HTMLInputElement>(null);
+  const passRef = useRef<HTMLInputElement>(null);
+
+  useBlockAutofill(userRef, setUsername);
+  useBlockAutofill(passRef, setPassword);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -33,45 +65,35 @@ export function LoginPage() {
         <p className="muted">הזן את פרטי הכניסה שלך כדי להמשיך.</p>
 
         <form className="form" onSubmit={onSubmit} autoComplete="off">
-          {/* decoy fields — מונעים מילוי אוטומטי של שם/סיסמה שמורים בדפדפן */}
-          <input
-            type="text"
-            name="fake-username"
-            autoComplete="username"
-            tabIndex={-1}
-            aria-hidden="true"
-            style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, width: 0 }}
-          />
-          <input
-            type="password"
-            name="fake-password"
-            autoComplete="current-password"
-            tabIndex={-1}
-            aria-hidden="true"
-            style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, width: 0 }}
-          />
           <label>
             שם משתמש
             <input
+              ref={userRef}
               type="text"
-              name="login-id"
+              name="tazrim-login-id"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               required
+              readOnly={!unlockUser}
               value={username}
+              onFocus={() => setUnlockUser(true)}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder=""
             />
           </label>
           <label>
             סיסמה
             <input
+              ref={passRef}
               type="password"
-              name="login-secret"
+              name="tazrim-login-secret"
               autoComplete="new-password"
               required
+              readOnly={!unlockPass}
               value={password}
+              onFocus={() => setUnlockPass(true)}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder=""
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
