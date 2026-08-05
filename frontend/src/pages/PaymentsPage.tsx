@@ -234,6 +234,48 @@ export function PaymentsPage() {
     };
   }, [savingsPlansInView]);
 
+  const savingsByInvestorCards = useMemo(() => {
+    const map = new Map<
+      number,
+      { id: number; name: string; plans: Plan[] }
+    >();
+    for (const p of savingsPlansInView) {
+      const cur = map.get(p.investor_id);
+      if (cur) cur.plans.push(p);
+      else {
+        map.set(p.investor_id, {
+          id: p.investor_id,
+          name: p.investor_name,
+          plans: [p],
+        });
+      }
+    }
+    return [...map.values()]
+      .map((g) => ({
+        ...g,
+        plans: [...g.plans].sort((a, b) =>
+          a.start_date < b.start_date ? 1 : -1,
+        ),
+        cashToDate: round2(g.plans.reduce((s, p) => s + planCashToDate(p), 0)),
+        savingsToDate: round2(
+          g.plans.reduce((s, p) => s + Number(p.current_savings_balance || 0), 0),
+        ),
+        totalToDate: round2(
+          g.plans.reduce((s, p) => s + planTotalToDate(p), 0),
+        ),
+        totalAtEnd: round2(
+          g.plans.reduce((s, p) => s + Number(p.total_investor_payout || 0), 0),
+        ),
+        savingsAtEnd: round2(
+          g.plans.reduce(
+            (s, p) => s + Number(p.projected_savings_balance || 0),
+            0,
+          ),
+        ),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "he"));
+  }, [savingsPlansInView]);
+
   const savingsByInvestor = useMemo(() => {
     const map = new Map<number, (typeof savingsPlansInView)[number][]>();
     for (const plan of savingsPlansInView) {
@@ -931,195 +973,185 @@ export function PaymentsPage() {
               : undefined
           }
         >
-        <Panel
-          title={
-            detailFocus === "lifetime-savings-now"
-              ? "פירוט · חיסכון עד עכשיו"
-              : detailFocus === "lifetime-savings-end"
-                ? "פירוט · חיסכון עד סוף מסלול"
-                : "חיסכון · לפי תנאי מסלול"
-          }
-          subtitle="כמה נצבר עד עכשיו בתקופת המסלול (מזומן + חיסכון) · לחצו על שורה לפירוט חודשי"
-        >
-          <div className="stats-grid stats-grid--compact savings-summary-stats">
-            <div className="stat">
-              <span className="stat__label">מזומן שנצבר עד עכשיו</span>
-              <strong className="stat__value">
-                {formatMoney(savingsTotals.cashToDate)}
-              </strong>
-            </div>
-            <div
-              className={`stat${detailFocus === "lifetime-savings-now" ? " stat--active" : ""}`}
-            >
-              <span className="stat__label">חיסכון שנצבר עד עכשיו</span>
-              <strong className="stat__value">
-                {formatMoney(savingsTotals.savingsToDate)}
-              </strong>
-            </div>
-            <div className="stat tone-accent">
-              <span className="stat__label">סה״כ עד עכשיו</span>
-              <strong className="stat__value">
-                {formatMoney(savingsTotals.totalToDate)}
-              </strong>
-              <span className="stat__hint">מזומן ששולם + יתרת חיסכון</span>
-            </div>
-            <div
-              className={`stat${detailFocus === "lifetime-savings-end" ? " stat--active" : ""}`}
-            >
-              <span className="stat__label">צפוי בסיום מסלול</span>
-              <strong className="stat__value">
-                {formatMoney(savingsTotals.totalAtEnd)}
-              </strong>
-              <span className="stat__hint">
-                כולל חיסכון {formatMoney(savingsTotals.savingsAtEnd)}
-              </span>
-            </div>
-          </div>
+          <Panel
+            title={
+              detailFocus === "lifetime-savings-now"
+                ? "פירוט · חיסכון עד עכשיו"
+                : detailFocus === "lifetime-savings-end"
+                  ? "פירוט · חיסכון עד סוף מסלול"
+                  : "חיסכון · לפי תנאי מסלול"
+            }
+            subtitle="כל משקיע בנפרד · כמה קיבל במזומן, כמה נצבר בחיסכון, ומה הסה״כ עד עכשיו"
+          >
+            {savingsByInvestorCards.length > 1 ? (
+              <div className="savings-grand-total">
+                <span className="muted">סה״כ כל המשקיעים בלוח</span>
+                <div className="savings-grand-total__nums">
+                  <span>
+                    מזומן {formatMoney(savingsTotals.cashToDate)}
+                  </span>
+                  <span>+</span>
+                  <span>
+                    חיסכון {formatMoney(savingsTotals.savingsToDate)}
+                  </span>
+                  <span>=</span>
+                  <strong>סה״כ עד עכשיו {formatMoney(savingsTotals.totalToDate)}</strong>
+                </div>
+              </div>
+            ) : null}
 
-          <div className="table-wrap">
-            <table className="table table--clickable-rows">
-              <thead>
-                <tr>
-                  {isManager ? <th>משקיע</th> : null}
-                  <th>מסלול</th>
-                  <th>תקופה במסלול</th>
-                  <th>קרן</th>
-                  <th>מזומן עד עכשיו</th>
-                  <th
-                    className={
-                      detailFocus === "lifetime-savings-now"
-                        ? "col-highlight"
-                        : undefined
-                    }
-                  >
-                    חיסכון עד עכשיו
-                  </th>
-                  <th className="col-highlight">סה״כ עד עכשיו</th>
-                  <th
-                    className={
-                      detailFocus === "lifetime-savings-end"
-                        ? "col-highlight"
-                        : undefined
-                    }
-                  >
-                    צפוי בסיום
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {savingsPlansInView.map((p) => {
-                  const cash = planCashToDate(p);
-                  const sav = Number(p.current_savings_balance || 0);
-                  const totalNow = planTotalToDate(p);
-                  const endTotal = Number(p.total_investor_payout || 0);
-                  return (
-                    <tr
-                      key={p.id}
-                      tabIndex={0}
-                      role="link"
-                      title="מעבר לפירוט חודשי של המסלול"
-                      onClick={() => focusStatusReport(p.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          focusStatusReport(p.id);
-                        }
-                      }}
-                    >
-                      {isManager ? <td>{p.investor_name}</td> : null}
-                      <td>
-                        <strong>{planTypeLabel(p.plan_type)}</strong>
-                        <div className="muted">
-                          מסלול #{p.id}
-                          {p.status === "active" ? " · פעיל" : ""}
-                          {" · "}
-                          {formatPercent(p.savings_rate_percent)} חיסכון
-                          {p.plan_type === "hybrid"
-                            ? ` · ${formatMoney(p.monthly_investor_payout, true)}/ח׳ מזומן`
-                            : ""}
-                        </div>
-                      </td>
-                      <td>
-                        <div>
-                          {formatCalendarMonth(p.start_date)}{" "}
-                          {p.start_date.slice(0, 4)}
-                          {" → "}
-                          {formatCalendarMonth(planTrackEnd(p))}{" "}
-                          {planTrackEnd(p).slice(0, 4)}
-                        </div>
-                        <div className="muted">
-                          {p.months_elapsed}/{p.duration_months} חודשים חלפו
-                          {p.months_remaining > 0
-                            ? ` · נותרו ${p.months_remaining}`
-                            : " · הסתיים"}
-                        </div>
-                      </td>
-                      <td>{formatMoney(p.principal)}</td>
-                      <td>
-                        {formatMoney(cash)}
-                        {p.plan_type !== "savings" ? (
-                          <div className="muted">
-                            {formatMoney(p.monthly_investor_payout, true)} ×{" "}
-                            {p.months_elapsed || p.paid_count || 0}
+            <div className="savings-investor-list">
+              {savingsByInvestorCards.map((inv) => (
+                <article key={inv.id} className="savings-investor-card">
+                  <header className="savings-investor-card__head">
+                    <div>
+                      <h3 className="savings-investor-card__name">{inv.name}</h3>
+                      <p className="muted" style={{ margin: 0 }}>
+                        {inv.plans.length === 1
+                          ? `${planTypeLabel(inv.plans[0].plan_type)} · קרן ${formatMoney(inv.plans[0].principal)}`
+                          : `${inv.plans.length} מסלולי חיסכון / משולב`}
+                      </p>
+                    </div>
+                    <div className="savings-investor-card__hero">
+                      <span className="stat__label">סה״כ עד עכשיו</span>
+                      <strong className="savings-investor-card__hero-value">
+                        {formatMoney(inv.totalToDate)}
+                      </strong>
+                      <span className="muted">
+                        מזומן {formatMoney(inv.cashToDate)} + חיסכון{" "}
+                        {formatMoney(inv.savingsToDate)}
+                      </span>
+                    </div>
+                  </header>
+
+                  <div className="savings-breakdown">
+                    <div className="savings-breakdown__item">
+                      <span className="stat__label">מזומן עד עכשיו</span>
+                      <strong>{formatMoney(inv.cashToDate)}</strong>
+                    </div>
+                    <div className="savings-breakdown__plus" aria-hidden>
+                      +
+                    </div>
+                    <div className="savings-breakdown__item">
+                      <span className="stat__label">חיסכון עד עכשיו</span>
+                      <strong>{formatMoney(inv.savingsToDate)}</strong>
+                    </div>
+                    <div className="savings-breakdown__plus" aria-hidden>
+                      =
+                    </div>
+                    <div className="savings-breakdown__item savings-breakdown__item--total">
+                      <span className="stat__label">סה״כ עד עכשיו</span>
+                      <strong>{formatMoney(inv.totalToDate)}</strong>
+                    </div>
+                    <div className="savings-breakdown__item savings-breakdown__item--end">
+                      <span className="stat__label">צפוי בסיום מסלול</span>
+                      <strong>{formatMoney(inv.totalAtEnd)}</strong>
+                      <span className="muted">
+                        מתוכו חיסכון {formatMoney(inv.savingsAtEnd)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {inv.plans.map((p) => {
+                    const cash = planCashToDate(p);
+                    const sav = Number(p.current_savings_balance || 0);
+                    const totalNow = planTotalToDate(p);
+                    const progress =
+                      p.duration_months > 0
+                        ? Math.min(
+                            100,
+                            Math.round(
+                              (Number(p.months_elapsed || 0) /
+                                p.duration_months) *
+                                100,
+                            ),
+                          )
+                        : 0;
+                    return (
+                      <div key={p.id} className="savings-track-block">
+                        <div className="savings-track-block__meta">
+                          <div>
+                            <strong>
+                              מסלול #{p.id} · {planTypeLabel(p.plan_type)}
+                            </strong>
+                            <div className="muted">
+                              {formatCalendarMonth(p.start_date)}{" "}
+                              {p.start_date.slice(0, 4)}
+                              {" → "}
+                              {formatCalendarMonth(planTrackEnd(p))}{" "}
+                              {planTrackEnd(p).slice(0, 4)}
+                              {" · "}
+                              {p.months_elapsed}/{p.duration_months} חודשים
+                              {p.status === "active" ? " · פעיל" : ""}
+                            </div>
                           </div>
-                        ) : (
-                          <div className="muted">אין מזומן חודשי</div>
-                        )}
-                      </td>
-                      <td
-                        className={
-                          detailFocus === "lifetime-savings-now"
-                            ? "col-highlight"
-                            : undefined
-                        }
-                      >
-                        {formatMoney(sav)}
-                        <div className="muted">
-                          {formatMoney(p.monthly_savings_accrual, true)}/ח׳
+                          <button
+                            type="button"
+                            className="btn btn--small btn--ghost"
+                            onClick={() => focusStatusReport(p.id)}
+                          >
+                            פירוט חודשי
+                          </button>
                         </div>
-                      </td>
-                      <td className="col-highlight">
-                        <strong>{formatMoney(totalNow)}</strong>
-                        <div className="muted">מזומן + חיסכון</div>
-                      </td>
-                      <td
-                        className={
-                          detailFocus === "lifetime-savings-end"
-                            ? "col-highlight"
-                            : undefined
-                        }
-                      >
-                        {formatMoney(endTotal)}
-                        <div className="muted">
-                          חיסכון {formatMoney(p.projected_savings_balance)}
+
+                        <div
+                          className="savings-progress"
+                          title={`${progress}% מהמסלול`}
+                        >
+                          <div
+                            className="savings-progress__bar"
+                            style={{ width: `${progress}%` }}
+                          />
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td colSpan={isManager ? 4 : 3}>
-                    <strong>סה״כ בטבלה</strong>
-                  </td>
-                  <td>
-                    <strong>{formatMoney(savingsTotals.cashToDate)}</strong>
-                  </td>
-                  <td>
-                    <strong>{formatMoney(savingsTotals.savingsToDate)}</strong>
-                  </td>
-                  <td className="col-highlight">
-                    <strong>{formatMoney(savingsTotals.totalToDate)}</strong>
-                  </td>
-                  <td>
-                    <strong>{formatMoney(savingsTotals.totalAtEnd)}</strong>
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </Panel>
+
+                        <div className="savings-track-nums">
+                          <div>
+                            <span className="stat__label">קרן</span>
+                            <strong>{formatMoney(p.principal)}</strong>
+                          </div>
+                          <div>
+                            <span className="stat__label">מזומן עד עכשיו</span>
+                            <strong>{formatMoney(cash)}</strong>
+                            {p.plan_type !== "savings" ? (
+                              <span className="muted">
+                                {formatMoney(p.monthly_investor_payout, true)} ×{" "}
+                                {p.months_elapsed || p.paid_count || 0} ח׳
+                              </span>
+                            ) : (
+                              <span className="muted">אין מזומן חודשי</span>
+                            )}
+                          </div>
+                          <div>
+                            <span className="stat__label">חיסכון עד עכשיו</span>
+                            <strong>{formatMoney(sav)}</strong>
+                            <span className="muted">
+                              {formatMoney(p.monthly_savings_accrual, true)}/ח׳ ·{" "}
+                              {formatPercent(p.savings_rate_percent)}
+                            </span>
+                          </div>
+                          <div className="savings-track-nums__total">
+                            <span className="stat__label">סה״כ עד עכשיו</span>
+                            <strong>{formatMoney(totalNow)}</strong>
+                            <span className="muted">מזומן + חיסכון</span>
+                          </div>
+                          <div>
+                            <span className="stat__label">צפוי בסיום</span>
+                            <strong>
+                              {formatMoney(Number(p.total_investor_payout || 0))}
+                            </strong>
+                            <span className="muted">
+                              חיסכון{" "}
+                              {formatMoney(p.projected_savings_balance)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </article>
+              ))}
+            </div>
+          </Panel>
         </div>
       ) : null}
 
