@@ -353,9 +353,33 @@ button.stat {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #1f6b55) 18%, transparent);
 }
 
-.col-highlight {
-  background: color-mix(in srgb, var(--accent, #1f6b55) 12%, transparent);
-  font-weight: 600;
+.table--clickable-rows tbody tr {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.table--clickable-rows tbody tr:hover {
+  background: color-mix(in srgb, var(--accent, #1f6b55) 8%, transparent);
+}
+
+.table--clickable-rows tbody tr:focus-visible {
+  outline: 2px solid var(--accent, #1f6b55);
+  outline-offset: -2px;
+}
+
+.table tfoot td {
+  border-top: 2px solid var(--line);
+  padding-top: 12px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.savings-summary-stats {
+  margin-bottom: 16px;
+}
+
+#status-report-plan-anchor,
+[id^="status-report-plan-"] {
+  scroll-margin-top: 18px;
 }
 
 .grid-2,

@@ -72,6 +72,23 @@ function planTrackEnd(plan: Plan): string {
   return plan.track_end_date || trackEndISO(plan.start_date, plan.duration_months);
 }
 
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function planCashToDate(plan: Plan): number {
+  // Prefer actual paid cash; fall back to elapsed × monthly for hybrid/monthly cash leg.
+  if (Number(plan.paid_investor_total || 0) > 0) return Number(plan.paid_investor_total);
+  if (plan.plan_type === "savings") return 0;
+  return round2(
+    Number(plan.monthly_investor_payout || 0) * Number(plan.months_elapsed || 0),
+  );
+}
+
+function planTotalToDate(plan: Plan): number {
+  return round2(planCashToDate(plan) + Number(plan.current_savings_balance || 0));
+}
+
 export function PaymentsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
@@ -159,20 +176,63 @@ export function PaymentsPage() {
     const all = (plans ?? []).filter(
       (p) => p.plan_type !== "monthly" && Number(p.savings_rate_percent || 0) > 0,
     );
+    let list = all;
     if (investorFilter) {
-      return all.filter((p) => p.investor_id === investorFilter);
+      list = all.filter((p) => p.investor_id === investorFilter);
+    } else if (!isManager && user?.investor_id) {
+      list = all.filter((p) => p.investor_id === user.investor_id);
+    } else {
+      const boardIds = new Set(yearInvestors.map((i) => i.id));
+      list = all.filter(
+        (p) =>
+          boardIds.has(p.investor_id) ||
+          (p.start_date != null && Number(p.start_date.slice(0, 4)) === year) ||
+          p.status === "active",
+      );
     }
-    if (!isManager && user?.investor_id) {
-      return all.filter((p) => p.investor_id === user.investor_id);
+    // One clearest track per investor (prefer year match, then active).
+    const byInvestor = new Map<number, Plan>();
+    const score = (p: Plan) => {
+      let s = 0;
+      if (p.start_date && Number(p.start_date.slice(0, 4)) === year) s += 4;
+      if (p.status === "active") s += 2;
+      return s;
+    };
+    for (const p of list) {
+      const cur = byInvestor.get(p.investor_id);
+      if (!cur || score(p) > score(cur)) byInvestor.set(p.investor_id, p);
+      else if (score(p) === score(cur) && p.start_date > cur.start_date) {
+        byInvestor.set(p.investor_id, p);
+      }
     }
-    const boardIds = new Set(yearInvestors.map((i) => i.id));
-    return all.filter(
-      (p) =>
-        boardIds.has(p.investor_id) ||
-        (p.start_date != null && Number(p.start_date.slice(0, 4)) === year) ||
-        p.status === "active",
+    // When a specific investor is selected, keep all their savings tracks.
+    const result = investorFilter || (!isManager && user?.investor_id)
+      ? list
+      : [...byInvestor.values()];
+    return result.sort((a, b) =>
+      a.investor_name.localeCompare(b.investor_name, "he"),
     );
   }, [plans, yearInvestors, investorFilter, isManager, user?.investor_id, year]);
+
+  const savingsTotals = useMemo(() => {
+    let cashToDate = 0;
+    let savingsToDate = 0;
+    let savingsAtEnd = 0;
+    let totalAtEnd = 0;
+    for (const p of savingsPlansInView) {
+      cashToDate += planCashToDate(p);
+      savingsToDate += Number(p.current_savings_balance || 0);
+      savingsAtEnd += Number(p.projected_savings_balance || 0);
+      totalAtEnd += Number(p.total_investor_payout || 0);
+    }
+    return {
+      cashToDate: round2(cashToDate),
+      savingsToDate: round2(savingsToDate),
+      totalToDate: round2(cashToDate + savingsToDate),
+      savingsAtEnd: round2(savingsAtEnd),
+      totalAtEnd: round2(totalAtEnd),
+    };
+  }, [savingsPlansInView]);
 
   const savingsByInvestor = useMemo(() => {
     const map = new Map<number, (typeof savingsPlansInView)[number][]>();
@@ -218,10 +278,22 @@ export function PaymentsPage() {
         byInvestor.set(p.investor_id, p);
       }
     }
-    return [...byInvestor.values()].sort((a, b) =>
+    // Ensure every savings-table track has a status-report target (clickable rows).
+    const byId = new Map<number, Plan>();
+    for (const p of byInvestor.values()) byId.set(p.id, p);
+    for (const p of savingsPlansInView) byId.set(p.id, p);
+    return [...byId.values()].sort((a, b) =>
       a.investor_name.localeCompare(b.investor_name, "he"),
     );
-  }, [plans, investorFilter, isManager, user?.investor_id, yearInvestors, year]);
+  }, [
+    plans,
+    investorFilter,
+    isManager,
+    user?.investor_id,
+    yearInvestors,
+    year,
+    savingsPlansInView,
+  ]);
 
   const selectedTrackPlan = useMemo(() => {
     if (!investorFilter) return null;
@@ -286,6 +358,15 @@ export function PaymentsPage() {
     }, 120);
     return () => window.clearTimeout(t);
   }, [detailFocus, allYears, status, data]);
+
+  function focusStatusReport(planId: number) {
+    setDetailFocus(null);
+    window.setTimeout(() => {
+      document
+        .getElementById(`status-report-plan-${planId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  }
 
   async function syncYearAmounts() {
     if (
@@ -858,22 +939,52 @@ export function PaymentsPage() {
                 ? "פירוט · חיסכון עד סוף מסלול"
                 : "חיסכון · לפי תנאי מסלול"
           }
-          subtitle="מסלולי חיסכון / משולב — מתחילת המסלול עד סופו · ריבית דריבית כל 12 חודשים"
+          subtitle="כמה נצבר עד עכשיו בתקופת המסלול (מזומן + חיסכון) · לחצו על שורה לפירוט חודשי"
         >
+          <div className="stats-grid stats-grid--compact savings-summary-stats">
+            <div className="stat">
+              <span className="stat__label">מזומן שנצבר עד עכשיו</span>
+              <strong className="stat__value">
+                {formatMoney(savingsTotals.cashToDate)}
+              </strong>
+            </div>
+            <div
+              className={`stat${detailFocus === "lifetime-savings-now" ? " stat--active" : ""}`}
+            >
+              <span className="stat__label">חיסכון שנצבר עד עכשיו</span>
+              <strong className="stat__value">
+                {formatMoney(savingsTotals.savingsToDate)}
+              </strong>
+            </div>
+            <div className="stat tone-accent">
+              <span className="stat__label">סה״כ עד עכשיו</span>
+              <strong className="stat__value">
+                {formatMoney(savingsTotals.totalToDate)}
+              </strong>
+              <span className="stat__hint">מזומן ששולם + יתרת חיסכון</span>
+            </div>
+            <div
+              className={`stat${detailFocus === "lifetime-savings-end" ? " stat--active" : ""}`}
+            >
+              <span className="stat__label">צפוי בסיום מסלול</span>
+              <strong className="stat__value">
+                {formatMoney(savingsTotals.totalAtEnd)}
+              </strong>
+              <span className="stat__hint">
+                כולל חיסכון {formatMoney(savingsTotals.savingsAtEnd)}
+              </span>
+            </div>
+          </div>
+
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--clickable-rows">
               <thead>
                 <tr>
                   {isManager ? <th>משקיע</th> : null}
-                  <th>סוג</th>
-                  <th>תחילת מסלול</th>
-                  <th>סוף מסלול</th>
+                  <th>מסלול</th>
+                  <th>תקופה במסלול</th>
                   <th>קרן</th>
-                  <th>אחוז חיסכון</th>
-                  {savingsPlansInView.some((p) => p.plan_type === "hybrid") ? (
-                    <th>החזר חודשי</th>
-                  ) : null}
-                  <th>צבירה חודשית</th>
+                  <th>מזומן עד עכשיו</th>
                   <th
                     className={
                       detailFocus === "lifetime-savings-now"
@@ -883,6 +994,7 @@ export function PaymentsPage() {
                   >
                     חיסכון עד עכשיו
                   </th>
+                  <th className="col-highlight">סה״כ עד עכשיו</th>
                   <th
                     className={
                       detailFocus === "lifetime-savings-end"
@@ -890,53 +1002,121 @@ export function PaymentsPage() {
                         : undefined
                     }
                   >
-                    יתרה צפויה בסיום
+                    צפוי בסיום
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {savingsPlansInView.map((p) => (
-                  <tr key={p.id}>
-                    {isManager ? <td>{p.investor_name}</td> : null}
-                    <td>{planTypeLabel(p.plan_type)}</td>
-                    <td>
-                      {formatCalendarMonth(p.start_date)} {p.start_date.slice(0, 4)}
-                    </td>
-                    <td>
-                      {formatCalendarMonth(planTrackEnd(p))}{" "}
-                      {planTrackEnd(p).slice(0, 4)}
-                    </td>
-                    <td>{formatMoney(p.principal)}</td>
-                    <td>{formatPercent(p.savings_rate_percent)}</td>
-                    {savingsPlansInView.some((x) => x.plan_type === "hybrid") ? (
+                {savingsPlansInView.map((p) => {
+                  const cash = planCashToDate(p);
+                  const sav = Number(p.current_savings_balance || 0);
+                  const totalNow = planTotalToDate(p);
+                  const endTotal = Number(p.total_investor_payout || 0);
+                  return (
+                    <tr
+                      key={p.id}
+                      tabIndex={0}
+                      role="link"
+                      title="מעבר לפירוט חודשי של המסלול"
+                      onClick={() => focusStatusReport(p.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          focusStatusReport(p.id);
+                        }
+                      }}
+                    >
+                      {isManager ? <td>{p.investor_name}</td> : null}
                       <td>
-                        {p.plan_type === "hybrid"
-                          ? formatMoney(p.monthly_investor_payout, true)
-                          : "—"}
+                        <strong>{planTypeLabel(p.plan_type)}</strong>
+                        <div className="muted">
+                          מסלול #{p.id}
+                          {p.status === "active" ? " · פעיל" : ""}
+                          {" · "}
+                          {formatPercent(p.savings_rate_percent)} חיסכון
+                          {p.plan_type === "hybrid"
+                            ? ` · ${formatMoney(p.monthly_investor_payout, true)}/ח׳ מזומן`
+                            : ""}
+                        </div>
                       </td>
-                    ) : null}
-                    <td>{formatMoney(p.monthly_savings_accrual, true)}</td>
-                    <td
-                      className={
-                        detailFocus === "lifetime-savings-now"
-                          ? "col-highlight"
-                          : undefined
-                      }
-                    >
-                      {formatMoney(p.current_savings_balance ?? 0)}
-                    </td>
-                    <td
-                      className={
-                        detailFocus === "lifetime-savings-end"
-                          ? "col-highlight"
-                          : undefined
-                      }
-                    >
-                      {formatMoney(p.projected_savings_balance)}
-                    </td>
-                  </tr>
-                ))}
+                      <td>
+                        <div>
+                          {formatCalendarMonth(p.start_date)}{" "}
+                          {p.start_date.slice(0, 4)}
+                          {" → "}
+                          {formatCalendarMonth(planTrackEnd(p))}{" "}
+                          {planTrackEnd(p).slice(0, 4)}
+                        </div>
+                        <div className="muted">
+                          {p.months_elapsed}/{p.duration_months} חודשים חלפו
+                          {p.months_remaining > 0
+                            ? ` · נותרו ${p.months_remaining}`
+                            : " · הסתיים"}
+                        </div>
+                      </td>
+                      <td>{formatMoney(p.principal)}</td>
+                      <td>
+                        {formatMoney(cash)}
+                        {p.plan_type !== "savings" ? (
+                          <div className="muted">
+                            {formatMoney(p.monthly_investor_payout, true)} ×{" "}
+                            {p.months_elapsed || p.paid_count || 0}
+                          </div>
+                        ) : (
+                          <div className="muted">אין מזומן חודשי</div>
+                        )}
+                      </td>
+                      <td
+                        className={
+                          detailFocus === "lifetime-savings-now"
+                            ? "col-highlight"
+                            : undefined
+                        }
+                      >
+                        {formatMoney(sav)}
+                        <div className="muted">
+                          {formatMoney(p.monthly_savings_accrual, true)}/ח׳
+                        </div>
+                      </td>
+                      <td className="col-highlight">
+                        <strong>{formatMoney(totalNow)}</strong>
+                        <div className="muted">מזומן + חיסכון</div>
+                      </td>
+                      <td
+                        className={
+                          detailFocus === "lifetime-savings-end"
+                            ? "col-highlight"
+                            : undefined
+                        }
+                      >
+                        {formatMoney(endTotal)}
+                        <div className="muted">
+                          חיסכון {formatMoney(p.projected_savings_balance)}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={isManager ? 4 : 3}>
+                    <strong>סה״כ בטבלה</strong>
+                  </td>
+                  <td>
+                    <strong>{formatMoney(savingsTotals.cashToDate)}</strong>
+                  </td>
+                  <td>
+                    <strong>{formatMoney(savingsTotals.savingsToDate)}</strong>
+                  </td>
+                  <td className="col-highlight">
+                    <strong>{formatMoney(savingsTotals.totalToDate)}</strong>
+                  </td>
+                  <td>
+                    <strong>{formatMoney(savingsTotals.totalAtEnd)}</strong>
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </Panel>
@@ -949,7 +1129,11 @@ export function PaymentsPage() {
           subtitle="לפי תנאי המסלול של כל משקיע — בלי חודשים שלפני ההתחלה ובלי קיצוץ מלאכותי לסוף שנה"
         >
           {statusReportPlans.map((p) => (
-            <div key={p.id} style={{ marginBottom: 18 }}>
+            <div
+              key={p.id}
+              id={`status-report-plan-${p.id}`}
+              style={{ marginBottom: 18 }}
+            >
               <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem" }}>
                 {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)}
                 {" · "}
