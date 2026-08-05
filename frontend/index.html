@@ -23,6 +23,32 @@
       rel="stylesheet"
     />
     <title>תזרים</title>
+    <script>
+      /* Force-clear stale PWA cache that still showed username "bar" */
+      (function () {
+        var V = "tazrim-v3-20260805";
+        try {
+          if (localStorage.getItem("tazrim-cache-bust") === V) return;
+          localStorage.setItem("tazrim-cache-bust", V);
+          var done = Promise.resolve();
+          if (window.caches) {
+            done = done.then(function () {
+              return caches.keys().then(function (ks) {
+                return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+              });
+            });
+          }
+          if (navigator.serviceWorker) {
+            done = done.then(function () {
+              return navigator.serviceWorker.getRegistrations().then(function (rs) {
+                return Promise.all(rs.map(function (r) { return r.unregister(); }));
+              });
+            });
+          }
+          done.finally(function () { location.reload(); });
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

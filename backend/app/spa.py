@@ -34,6 +34,14 @@ def resolve_frontend_dist() -> Path | None:
     return None
 
 
+def _file_response(path: Path, *, no_cache: bool = False) -> FileResponse:
+    headers: dict[str, str] = {}
+    if no_cache:
+        headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        headers["Pragma"] = "no-cache"
+    return FileResponse(path, headers=headers)
+
+
 def mount_frontend(app: FastAPI) -> Path | None:
     """Serve the Vite production build from the same origin as the API."""
     dist = resolve_frontend_dist()
@@ -46,7 +54,7 @@ def mount_frontend(app: FastAPI) -> Path | None:
 
     @app.get("/")
     async def spa_index() -> FileResponse:
-        return FileResponse(dist / "index.html")
+        return _file_response(dist / "index.html", no_cache=True)
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str) -> FileResponse:
@@ -62,7 +70,8 @@ def mount_frontend(app: FastAPI) -> Path | None:
 
         candidate = dist / full_path
         if candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(dist / "index.html")
+            no_cache = full_path in {"sw.js", "index.html", "manifest.webmanifest"}
+            return _file_response(candidate, no_cache=no_cache)
+        return _file_response(dist / "index.html", no_cache=True)
 
     return dist

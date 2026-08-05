@@ -2,41 +2,35 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../services/api";
 
-/** מונע מילוי אוטומטי של הדפדפן (Chrome ממלא ערכים שמורים גם כשה-state ריק). */
-function useBlockAutofill(ref: React.RefObject<HTMLInputElement | null>, setValue: (v: string) => void) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const wipe = () => {
-      if (document.activeElement === el) return;
-      if (el.value) {
-        el.value = "";
-        setValue("");
-      }
-    };
-
-    wipe();
-    const timers = [50, 150, 400, 800, 1500].map((ms) => window.setTimeout(wipe, ms));
-    el.addEventListener("animationstart", wipe);
-
-    return () => {
-      timers.forEach(clearTimeout);
-      el.removeEventListener("animationstart", wipe);
-    };
-  }, [ref, setValue]);
-}
-
 export function ForgotPasswordPage() {
   const [username, setUsername] = useState("");
   const [note, setNote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [unlockUser, setUnlockUser] = useState(false);
+  const [ready, setReady] = useState(false);
   const userRef = useRef<HTMLInputElement>(null);
 
-  useBlockAutofill(userRef, setUsername);
+  // Always start empty; strip any browser autofill (e.g. saved "bar").
+  useEffect(() => {
+    setUsername("");
+    const el = userRef.current;
+    if (el) el.value = "";
+    const wipe = () => {
+      if (!el || document.activeElement === el) return;
+      el.value = "";
+      setUsername("");
+    };
+    const timers = [0, 50, 100, 250, 500, 1000, 2000].map((ms) =>
+      window.setTimeout(wipe, ms),
+    );
+    el?.addEventListener("animationstart", wipe);
+    setReady(true);
+    return () => {
+      timers.forEach(clearTimeout);
+      el?.removeEventListener("animationstart", wipe);
+    };
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -71,24 +65,29 @@ export function ForgotPasswordPage() {
             שם משתמש
             <input
               ref={userRef}
-              type="text"
-              name="tazrim-reset-id"
+              key={ready ? "user-ready" : "user-boot"}
+              type="search"
+              name="tazrim_reset_account"
+              inputMode="text"
               autoComplete="off"
               autoCorrect="off"
-              autoCapitalize="off"
+              autoCapitalize="none"
               spellCheck={false}
               required
-              readOnly={!unlockUser}
+              readOnly={!ready}
               value={username}
-              onFocus={() => setUnlockUser(true)}
+              onFocus={(e) => {
+                e.currentTarget.readOnly = false;
+              }}
               onChange={(e) => setUsername(e.target.value)}
+              placeholder=""
             />
           </label>
           <label>
             הערה למנהל (אופציונלי)
             <input
               type="text"
-              name="tazrim-reset-note"
+              name="tazrim_reset_note"
               autoComplete="off"
               value={note}
               onChange={(e) => setNote(e.target.value)}
