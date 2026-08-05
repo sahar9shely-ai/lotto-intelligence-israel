@@ -221,8 +221,13 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  planStatusReport: (id: number) =>
-    request<PlanStatusReport>(`/api/v1/investments/plans/${id}/status-report`),
+  planStatusReport: (id: number, params?: { year?: number }) => {
+    const q =
+      params?.year != null ? `?year=${encodeURIComponent(String(params.year))}` : "";
+    return request<PlanStatusReport>(
+      `/api/v1/investments/plans/${id}/status-report${q}`,
+    );
+  },
   syncPaymentAmounts: (params?: { year?: number; investor_id?: number }) => {
     const q = new URLSearchParams();
     if (params?.year != null) q.set("year", String(params.year));

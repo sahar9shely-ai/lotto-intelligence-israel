@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../services/api";
 import type { PlanStatusReport } from "../types/investments";
 import {
@@ -12,9 +12,12 @@ import { planTypeLabel } from "../utils/planTypes";
 export function PlanStatusReportPanel({
   planId,
   title,
+  year,
 }: {
   planId: number;
   title?: string;
+  /** When set, only months in this calendar year are shown (from actual start). */
+  year?: number;
 }) {
   const [report, setReport] = useState<PlanStatusReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +27,7 @@ export function PlanStatusReportPanel({
     let alive = true;
     setError(null);
     api
-      .planStatusReport(planId)
+      .planStatusReport(planId, year != null ? { year } : undefined)
       .then((res) => {
         if (alive) setReport(res);
       })
@@ -34,13 +37,24 @@ export function PlanStatusReportPanel({
     return () => {
       alive = false;
     };
-  }, [planId]);
+  }, [planId, year]);
+
+  const months = useMemo(() => report?.months ?? [], [report]);
 
   if (error) return <p className="form-error">{error}</p>;
   if (!report) return <p className="muted">טוען דוח מצב...</p>;
+  if (months.length === 0) {
+    return (
+      <p className="muted">
+        אין חודשים להצגה
+        {year ? ` בשנת ${year}` : ""} — המשקיע לא היה במסלול בתקופה הזו.
+      </p>
+    );
+  }
 
   const showSavings = report.plan_type !== "monthly";
   const showCash = report.plan_type !== "savings";
+  const startLabel = formatCalendarMonth(report.start_date);
 
   return (
     <div className="status-report">
@@ -57,6 +71,9 @@ export function PlanStatusReportPanel({
         <>
           <p className="muted" style={{ marginTop: 0 }}>
             {title ?? `${planTypeLabel(report.plan_type)} · מתחילת המסלול`}
+            {" · "}
+            התחלה: {startLabel}
+            {year ? ` · רק חודשי ${year}` : ""}
             {" · "}
             מזומן ששולם: {formatMoney(report.paid_cash_total)}
             {showSavings
@@ -78,7 +95,7 @@ export function PlanStatusReportPanel({
                 </tr>
               </thead>
               <tbody>
-                {report.months.map((m) => (
+                {months.map((m) => (
                   <tr key={m.month_number}>
                     <td>
                       {m.month_number}

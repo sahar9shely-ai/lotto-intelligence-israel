@@ -426,8 +426,16 @@ def month_savings_ledger(
     return rows
 
 
-def build_plan_status_report(plan: InvestmentPlan) -> dict:
-    """Full month-by-month status from plan start: cash + savings + payment status."""
+def build_plan_status_report(
+    plan: InvestmentPlan,
+    *,
+    year: Optional[int] = None,
+) -> dict:
+    """Full month-by-month status from plan start: cash + savings + payment status.
+
+    If `year` is set, only months whose due date falls in that calendar year are
+    returned (no months before the investor joined / outside the year).
+    """
     kind, monthly_rate, savings_rate = normalize_plan_rates(
         getattr(plan, "plan_type", None) or "monthly",
         plan.monthly_rate_percent,
@@ -450,7 +458,6 @@ def build_plan_status_report(plan: InvestmentPlan) -> dict:
     cumulative_cash = 0.0
     for month in range(1, plan.duration_months + 1):
         payment = payments_by_month.get(month)
-        # Prefer live cash amount from payment when present (synced schedule).
         cash = float(payment.investor_amount) if payment is not None else cash_monthly
         if kind == "savings":
             cash = 0.0 if payment is None else float(payment.investor_amount or 0)
@@ -465,6 +472,8 @@ def build_plan_status_report(plan: InvestmentPlan) -> dict:
             if payment is not None and payment.due_date is not None
             else add_months(plan.start_date, month - 1)
         )
+        if year is not None and due.year != year:
+            continue
         months.append(
             {
                 "month_number": month,
@@ -502,11 +511,16 @@ def build_plan_status_report(plan: InvestmentPlan) -> dict:
         "monthly_savings_accrual": calc_monthly(plan.principal, savings_rate)
         if savings_rate
         else 0.0,
-        "projected_savings_balance": months[-1]["cumulative_savings"] if months else 0.0,
+        "projected_savings_balance": (
+            savings_rows.get(plan.duration_months, {}).get("cumulative_savings", 0.0)
+            if savings_rows
+            else 0.0
+        ),
         "paid_cash_total": paid_cash,
         "current_savings_balance": (latest or current or {}).get("cumulative_savings", 0.0)
         if (latest or current)
         else 0.0,
+        "filter_year": year,
         "months": months,
     }
 
@@ -782,16 +796,18 @@ def repair_duplicate_payments(db: Session) -> dict:
 
 
 def repair_reporting_year_plans(db: Session) -> dict:
-    """Startup safety: remove payment duplicates only.
+    """Startup safety: remove payment duplicates and clip mid-year reporting boards.
 
-    Never rewrite client start_dates automatically — date changes are explicit
-    manager actions (align / open year / editing start_date).
+    Never rewrite client start_dates to January — only trim spill past December
+    of a reporting year and drop months before the investor actually started.
     """
     dupes = dedupe_all_payments(db)
+    clipped = repair_midyear_reporting_plans(db)
     return {
         "duplicate_payments_removed": dupes["removed"],
         "plans_realigned": 0,
         "active_starts_fixed": 0,
+        "reporting_plans_clipped": clipped["clipped"],
     }
 
 
@@ -932,10 +948,58 @@ def get_payment_report(
     }
 
 
-def open_calendar_year_plans(db: Session, *, year: int) -> dict:
-    """Create Jan–Dec plans for a past/reporting year from each investor's latest plan.
+def months_through_december(start: date) -> int:
+    """How many calendar months from start (inclusive) until December of that year."""
+    return max(1, 12 - start.month + 1)
 
-    Past years are marked completed so active principal on the dashboard is not doubled.
+
+def clip_plan_to_calendar_year(db: Session, plan: InvestmentPlan, year: int) -> bool:
+    """Keep only months from plan.start through Dec of `year`; drop spill into next year."""
+    if not plan.start_date or plan.start_date.year != year:
+        return False
+    max_months = months_through_december(plan.start_date)
+    year_end = date(year, 12, 31)
+    changed = False
+    if plan.duration_months > max_months:
+        plan.duration_months = max_months
+        changed = True
+    # Remove payments that fall after the reporting year (or beyond clipped duration).
+    for payment in list(db.query(Payment).filter(Payment.plan_id == plan.id).all()):
+        out_of_year = payment.due_date is not None and payment.due_date > year_end
+        out_of_duration = payment.month_number > plan.duration_months
+        if out_of_year or out_of_duration:
+            if payment.status in {"paid", "awaiting_confirmation"} and not out_of_year:
+                continue
+            db.delete(payment)
+            changed = True
+    if changed:
+        db.commit()
+        generate_payment_schedule(db, plan, realign_dates=False)
+    return changed
+
+
+def repair_midyear_reporting_plans(db: Session) -> dict:
+    """Clip 'לוח דיווח לשנת YYYY' plans so they never invent months before start
+    or spill past December of that year."""
+    import re
+
+    clipped = 0
+    for plan in db.query(InvestmentPlan).all():
+        notes = plan.notes or ""
+        match = re.search(r"לוח דיווח לשנת (\d{4})", notes)
+        if not match or not plan.start_date:
+            continue
+        year = int(match.group(1))
+        if clip_plan_to_calendar_year(db, plan, year):
+            clipped += 1
+    return {"clipped": clipped}
+
+
+def open_calendar_year_plans(db: Session, *, year: int) -> dict:
+    """Create a reporting-year plan covering only months the investor is in that year.
+
+    If their template/start is mid-year, the board starts that month through December —
+    never backfills January–prior months they were not part of.
     """
     if year < 2000 or year > date.today().year + 1:
         raise ValueError("שנה לא תקינה")
@@ -973,6 +1037,20 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
             continue
 
         template = next((p for p in plans if p.status == "active"), plans[0])
+        # Start from actual entry month in this year when known; otherwise Jan 1.
+        if template.start_date and template.start_date.year == year:
+            start = template.start_date
+        elif template.start_date and template.start_date.year < year:
+            start = year_start
+        else:
+            start = year_start
+        if start < year_start:
+            start = year_start
+        if start > year_end:
+            skipped.append({"investor_id": investor.id, "reason": "starts_after_year"})
+            continue
+        duration = months_through_december(start)
+
         plan = InvestmentPlan(
             investor_id=investor.id,
             principal=template.principal,
@@ -980,20 +1058,21 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
             monthly_rate_percent=template.monthly_rate_percent,
             savings_rate_percent=getattr(template, "savings_rate_percent", 0.0) or 0.0,
             manager_fee_percent=template.manager_fee_percent,
-            start_date=year_start,
-            duration_months=12,
+            start_date=start,
+            duration_months=duration,
             status=plan_status,
             notes=f"לוח דיווח לשנת {year}",
         )
         db.add(plan)
         db.commit()
         db.refresh(plan)
-        generate_payment_schedule(db, plan)
+        generate_payment_schedule(db, plan, realign_dates=True)
         created.append(
             {
                 "plan_id": plan.id,
                 "investor_id": investor.id,
-                "start_date": year_start.isoformat(),
+                "start_date": start.isoformat(),
+                "duration_months": duration,
                 "status": plan_status,
             }
         )

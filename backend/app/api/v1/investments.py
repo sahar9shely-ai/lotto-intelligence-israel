@@ -374,6 +374,7 @@ def regenerate_schedule(
 @router.get("/plans/{plan_id}/status-report")
 def plan_status_report(
     plan_id: int,
+    year: Optional[int] = Query(default=None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
@@ -388,7 +389,7 @@ def plan_status_report(
         raise HTTPException(status_code=404, detail="Plan not found")
     if not is_manager(user) and plan.investor_id != user.investor_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    return svc.build_plan_status_report(plan)
+    return svc.build_plan_status_report(plan, year=year)
 
 
 @router.post("/sync-payment-amounts")
@@ -399,6 +400,8 @@ def sync_all_payment_amounts(
     db: Session = Depends(get_investment_db),
 ):
     """Sync cash amounts on payments to current plan rates without moving dates."""
+    # First clip mid-year reporting boards so months before start / past Dec disappear.
+    clipped = svc.repair_midyear_reporting_plans(db)
     query = db.query(InvestmentPlan).options(
         joinedload(InvestmentPlan.payments),
         joinedload(InvestmentPlan.investor),
@@ -425,7 +428,12 @@ def sync_all_payment_amounts(
                 **result,
             }
         )
-    return {"year": year, "synced": synced, "count": len(synced)}
+    return {
+        "year": year,
+        "synced": synced,
+        "count": len(synced),
+        "reporting_plans_clipped": clipped["clipped"],
+    }
 
 
 @router.get("/payments", response_model=list[PaymentOut])

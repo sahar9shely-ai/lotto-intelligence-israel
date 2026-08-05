@@ -124,18 +124,25 @@ export function PaymentsPage() {
 
   const statusReportPlans = useMemo(() => {
     const all = plans ?? [];
+    const inYear = (p: (typeof all)[number]) => {
+      if (p.start_date && Number(p.start_date.slice(0, 4)) === year) return true;
+      // plan that has payments in the selected year
+      return false;
+    };
+    let list = all;
     if (investorFilter) {
-      return all.filter((p) => p.investor_id === investorFilter);
+      list = list.filter((p) => p.investor_id === investorFilter);
+    } else if (!isManager && user?.investor_id) {
+      list = list.filter((p) => p.investor_id === user.investor_id);
+    } else {
+      const boardIds = new Set(yearInvestors.map((i) => i.id));
+      list = list.filter((p) => boardIds.has(p.investor_id) || inYear(p));
     }
-    if (!isManager && user?.investor_id) {
-      return all.filter((p) => p.investor_id === user.investor_id);
-    }
-    const boardIds = new Set(yearInvestors.map((i) => i.id));
-    return all.filter(
-      (p) =>
-        boardIds.has(p.investor_id) ||
-        (p.start_date != null && Number(p.start_date.slice(0, 4)) === year),
+    // Prefer plans that actually belong to this calendar year (start year match).
+    const yearPlans = list.filter(
+      (p) => p.start_date && Number(p.start_date.slice(0, 4)) === year,
     );
+    return yearPlans.length > 0 ? yearPlans : list.filter(inYear);
   }, [plans, investorFilter, isManager, user?.investor_id, yearInvestors, year]);
 
   async function syncYearAmounts() {
@@ -253,7 +260,7 @@ export function PaymentsPage() {
   async function openReportingYear() {
     if (
       !window.confirm(
-        `לפתוח לוח תשלומים מלא לשנת ${year}?\nיווצר מסלול 1 בינואר–31 בדצמבר לפי תנאי המסלול הנוכחי של כל משקיע.`,
+        `לפתוח לוח תשלומים לשנת ${year}?\nלכל משקיע ייווצר לוח רק מחודש הכניסה שלו ועד סוף השנה — בלי חודשים שלפני ההתחלה.`,
       )
     ) {
       return;
@@ -645,15 +652,15 @@ export function PaymentsPage() {
 
       {statusReportPlans.length > 0 ? (
         <Panel
-          title="דוח מצב מהמסלול"
-          subtitle="לכל חודש מתחילת המסלול: כמה מקבלים במזומן, כמה נכנס לחיסכון, וכמה יש בחיסכון"
+          title={`דוח מצב · ${year}`}
+          subtitle="רק מחודש ההתחלה של המשקיע ועד סוף השנה — בלי חודשים שלא היה בהם"
         >
           {statusReportPlans.map((p) => (
             <div key={p.id} style={{ marginBottom: 18 }}>
               <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem" }}>
                 {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)}
               </h3>
-              <PlanStatusReportPanel planId={p.id} />
+              <PlanStatusReportPanel planId={p.id} year={year} />
             </div>
           ))}
         </Panel>
