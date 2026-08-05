@@ -175,6 +175,35 @@ def seed_defaults(db: Session) -> dict:
     }
 
 
+def plan_track_end_date(plan: InvestmentPlan) -> date:
+    """Last calendar month of the track (start + duration − 1), by plan terms."""
+    return add_months(plan.start_date, max(plan.duration_months, 1) - 1)
+
+
+def current_savings_for_plan(
+    plan: InvestmentPlan, today: Optional[date] = None
+) -> float:
+    """Savings balance accrued so far (through elapsed months), per plan terms."""
+    today = today or date.today()
+    _, _, savings_rate = normalize_plan_rates(
+        getattr(plan, "plan_type", None) or "monthly",
+        plan.monthly_rate_percent,
+        getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+    )
+    if savings_rate <= 0 or plan.duration_months <= 0:
+        return 0.0
+    elapsed = min(months_between(plan.start_date, today), plan.duration_months)
+    if elapsed <= 0:
+        return 0.0
+    rows = month_savings_ledger(
+        principal=plan.principal,
+        savings_rate_percent=savings_rate,
+        duration_months=plan.duration_months,
+    )
+    row = next((r for r in rows if r["month_number"] == elapsed), None)
+    return float(row["cumulative_savings"]) if row else 0.0
+
+
 def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
     today = today or date.today()
     track = track_metrics(
@@ -194,6 +223,8 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
         "monthly_manager_fee": track["monthly_manager_fee"],
         "monthly_savings_accrual": track["monthly_savings_accrual"],
         "projected_savings_balance": track["projected_savings_balance"],
+        "current_savings_balance": current_savings_for_plan(plan, today),
+        "track_end_date": plan_track_end_date(plan),
         "total_cash_payout": track["total_cash_payout"],
         "total_investor_payout": track["total_investor_payout"],
         "total_manager_fee": track["total_manager_fee"],
@@ -223,6 +254,7 @@ def serialize_plan(plan: InvestmentPlan) -> dict:
         "savings_rate_percent": savings_rate,
         "manager_fee_percent": plan.manager_fee_percent,
         "start_date": plan.start_date,
+        "track_end_date": metrics["track_end_date"],
         "duration_months": plan.duration_months,
         "status": plan.status,
         "notes": plan.notes,
@@ -796,18 +828,19 @@ def repair_duplicate_payments(db: Session) -> dict:
 
 
 def repair_reporting_year_plans(db: Session) -> dict:
-    """Startup safety: remove payment duplicates and clip mid-year reporting boards.
+    """Startup safety: remove payment duplicates and restore mid-year track lengths.
 
-    Never rewrite client start_dates to January — only trim spill past December
-    of a reporting year and drop months before the investor actually started.
+    Never rewrite client start_dates to January — only ensure reporting boards
+    keep full track duration from plan terms (not truncated to December).
     """
     dupes = dedupe_all_payments(db)
-    clipped = repair_midyear_reporting_plans(db)
+    restored = restore_midyear_reporting_plan_durations(db)
     return {
         "duplicate_payments_removed": dupes["removed"],
         "plans_realigned": 0,
         "active_starts_fixed": 0,
-        "reporting_plans_clipped": clipped["clipped"],
+        "reporting_plans_clipped": 0,
+        "reporting_plans_restored": restored["restored"],
     }
 
 
@@ -912,6 +945,53 @@ def _payment_totals(payments: list[Payment]) -> dict:
         "awaiting_count": len(awaiting),
         "skipped_count": len(skipped),
         "total_count": len(payments),
+        "savings_to_date": 0.0,
+        "savings_to_track_end": 0.0,
+    }
+
+
+def _plans_for_savings_summary(
+    db: Session, *, investor_id: Optional[int] = None
+) -> list[InvestmentPlan]:
+    """Active plans preferred; if none for an investor, fall back to latest completed."""
+    query = db.query(InvestmentPlan).options(
+        joinedload(InvestmentPlan.investor),
+        joinedload(InvestmentPlan.payments),
+    )
+    if investor_id is not None:
+        query = query.filter(InvestmentPlan.investor_id == investor_id)
+    plans = query.order_by(InvestmentPlan.id).all()
+    by_investor: dict[int, list[InvestmentPlan]] = {}
+    for plan in plans:
+        by_investor.setdefault(plan.investor_id, []).append(plan)
+
+    chosen: list[InvestmentPlan] = []
+    for inv_plans in by_investor.values():
+        active = [p for p in inv_plans if p.status == "active"]
+        if active:
+            chosen.extend(active)
+            continue
+        # Latest by start_date for completed-only investors
+        inv_plans_sorted = sorted(
+            inv_plans,
+            key=lambda p: (p.start_date or date.min, p.id),
+            reverse=True,
+        )
+        if inv_plans_sorted:
+            chosen.append(inv_plans_sorted[0])
+    return chosen
+
+
+def _savings_totals_for_plans(plans: list[InvestmentPlan]) -> dict:
+    to_date = 0.0
+    to_end = 0.0
+    for plan in plans:
+        metrics = plan_metrics(plan)
+        to_date = round(to_date + float(metrics["current_savings_balance"] or 0), 2)
+        to_end = round(to_end + float(metrics["projected_savings_balance"] or 0), 2)
+    return {
+        "savings_to_date": to_date,
+        "savings_to_track_end": to_end,
     }
 
 
@@ -940,11 +1020,17 @@ def get_payment_report(
         for p in lifetime
         if p.due_date is not None and p.due_date.year == year
     ]
+    lifetime_totals = _payment_totals(lifetime)
+    yearly_totals = _payment_totals(yearly)
+    savings = _savings_totals_for_plans(
+        _plans_for_savings_summary(db, investor_id=investor_id)
+    )
+    lifetime_totals.update(savings)
     return {
         "year": year,
         "available_years": available_payment_years(db, investor_id=investor_id),
-        "yearly": _payment_totals(yearly),
-        "lifetime": _payment_totals(lifetime),
+        "yearly": yearly_totals,
+        "lifetime": lifetime_totals,
     }
 
 
@@ -954,52 +1040,76 @@ def months_through_december(start: date) -> int:
 
 
 def clip_plan_to_calendar_year(db: Session, plan: InvestmentPlan, year: int) -> bool:
-    """Keep only months from plan.start through Dec of `year`; drop spill into next year."""
-    if not plan.start_date or plan.start_date.year != year:
-        return False
-    max_months = months_through_december(plan.start_date)
-    year_end = date(year, 12, 31)
-    changed = False
-    if plan.duration_months > max_months:
-        plan.duration_months = max_months
-        changed = True
-    # Remove payments that fall after the reporting year (or beyond clipped duration).
-    for payment in list(db.query(Payment).filter(Payment.plan_id == plan.id).all()):
-        out_of_year = payment.due_date is not None and payment.due_date > year_end
-        out_of_duration = payment.month_number > plan.duration_months
-        if out_of_year or out_of_duration:
-            if payment.status in {"paid", "awaiting_confirmation"} and not out_of_year:
-                continue
-            db.delete(payment)
-            changed = True
-    if changed:
-        db.commit()
-        generate_payment_schedule(db, plan, realign_dates=False)
-    return changed
+    """No-op: tracks follow plan duration, not calendar-year truncation."""
+    del db, plan, year
+    return False
 
 
-def repair_midyear_reporting_plans(db: Session) -> dict:
-    """Clip 'לוח דיווח לשנת YYYY' plans so they never invent months before start
-    or spill past December of that year."""
+def restore_midyear_reporting_plan_durations(db: Session) -> dict:
+    """Restore 'לוח דיווח' plans truncated to Dec back to full track length.
+
+    Uses the investor's active (or latest) plan duration as the track terms.
+    Keeps the actual start_date — never invents months before the investor joined.
+    """
     import re
 
-    clipped = 0
-    for plan in db.query(InvestmentPlan).all():
+    restored = 0
+    plans = (
+        db.query(InvestmentPlan)
+        .options(joinedload(InvestmentPlan.investor))
+        .all()
+    )
+    by_investor: dict[int, list[InvestmentPlan]] = {}
+    for plan in plans:
+        by_investor.setdefault(plan.investor_id, []).append(plan)
+
+    for plan in plans:
         notes = plan.notes or ""
         match = re.search(r"לוח דיווח לשנת (\d{4})", notes)
         if not match or not plan.start_date:
             continue
         year = int(match.group(1))
-        if clip_plan_to_calendar_year(db, plan, year):
-            clipped += 1
-    return {"clipped": clipped}
+        if plan.start_date.year != year:
+            continue
+        siblings = by_investor.get(plan.investor_id, [])
+        template = next(
+            (p for p in siblings if p.status == "active" and p.id != plan.id),
+            None,
+        )
+        if template is None:
+            others = [p for p in siblings if p.id != plan.id]
+            others = sorted(
+                others,
+                key=lambda p: (p.start_date or date.min, p.id),
+                reverse=True,
+            )
+            template = others[0] if others else None
+        target_duration = (
+            template.duration_months if template is not None else plan.duration_months
+        )
+        # At least cover through December of the reporting year, but prefer full track.
+        min_for_year = months_through_december(plan.start_date)
+        target_duration = max(int(target_duration or 0), min_for_year)
+        if plan.duration_months >= target_duration:
+            continue
+        plan.duration_months = target_duration
+        db.commit()
+        generate_payment_schedule(db, plan, realign_dates=False)
+        restored += 1
+    return {"restored": restored}
+
+
+def repair_midyear_reporting_plans(db: Session) -> dict:
+    """Compatibility alias — restores full track durations instead of clipping."""
+    result = restore_midyear_reporting_plan_durations(db)
+    return {"clipped": 0, "restored": result["restored"]}
 
 
 def open_calendar_year_plans(db: Session, *, year: int) -> dict:
-    """Create a reporting-year plan covering only months the investor is in that year.
+    """Create a reporting-year plan covering the investor's track terms.
 
-    If their template/start is mid-year, the board starts that month through December —
-    never backfills January–prior months they were not part of.
+    If their start is mid-year, the board starts that month — never backfills
+    January–prior months. Duration follows the template track (not truncated to Dec).
     """
     if year < 2000 or year > date.today().year + 1:
         raise ValueError("שנה לא תקינה")
@@ -1049,7 +1159,7 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
         if start > year_end:
             skipped.append({"investor_id": investor.id, "reason": "starts_after_year"})
             continue
-        duration = months_through_december(start)
+        duration = max(int(template.duration_months or 12), 1)
 
         plan = InvestmentPlan(
             investor_id=investor.id,
@@ -1072,6 +1182,7 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
                 "plan_id": plan.id,
                 "investor_id": investor.id,
                 "start_date": start.isoformat(),
+                "track_end_date": plan_track_end_date(plan).isoformat(),
                 "duration_months": duration,
                 "status": plan_status,
             }

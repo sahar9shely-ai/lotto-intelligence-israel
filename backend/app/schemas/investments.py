@@ -84,6 +84,7 @@ class PlanOut(BaseModel):
     savings_rate_percent: float = 0.0
     manager_fee_percent: float
     start_date: date
+    track_end_date: Optional[date] = None
     duration_months: int
     status: str
     notes: Optional[str] = None
@@ -92,6 +93,7 @@ class PlanOut(BaseModel):
     monthly_manager_fee: float
     monthly_savings_accrual: float = 0.0
     projected_savings_balance: float = 0.0
+    current_savings_balance: float = 0.0
     total_cash_payout: float = 0.0
     total_investor_payout: float
     total_manager_fee: float
@@ -240,6 +242,8 @@ class PaymentTotalsOut(BaseModel):
     awaiting_count: int = 0
     skipped_count: int
     total_count: int
+    savings_to_date: float = 0.0
+    savings_to_track_end: float = 0.0
 
 
 class PaymentReportOut(BaseModel):

@@ -400,8 +400,8 @@ def sync_all_payment_amounts(
     db: Session = Depends(get_investment_db),
 ):
     """Sync cash amounts on payments to current plan rates without moving dates."""
-    # First clip mid-year reporting boards so months before start / past Dec disappear.
-    clipped = svc.repair_midyear_reporting_plans(db)
+    # Restore mid-year boards to full track duration (plan terms, not Dec cutoff).
+    restored = svc.repair_midyear_reporting_plans(db)
     query = db.query(InvestmentPlan).options(
         joinedload(InvestmentPlan.payments),
         joinedload(InvestmentPlan.investor),
@@ -432,7 +432,8 @@ def sync_all_payment_amounts(
         "year": year,
         "synced": synced,
         "count": len(synced),
-        "reporting_plans_clipped": clipped["clipped"],
+        "reporting_plans_clipped": restored.get("clipped", 0),
+        "reporting_plans_restored": restored.get("restored", 0),
     }
 
 

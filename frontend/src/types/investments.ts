@@ -27,6 +27,7 @@ export type Plan = {
   savings_rate_percent: number;
   manager_fee_percent: number;
   start_date: string;
+  track_end_date?: string | null;
   duration_months: number;
   status: string;
   notes?: string | null;
@@ -35,6 +36,7 @@ export type Plan = {
   monthly_manager_fee: number;
   monthly_savings_accrual: number;
   projected_savings_balance: number;
+  current_savings_balance?: number;
   total_cash_payout: number;
   total_investor_payout: number;
   total_manager_fee: number;
@@ -154,6 +156,8 @@ export type PaymentTotals = {
   awaiting_count: number;
   skipped_count: number;
   total_count: number;
+  savings_to_date?: number;
+  savings_to_track_end?: number;
 };
 
 export type PaymentReport = {

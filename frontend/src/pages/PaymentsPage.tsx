@@ -10,9 +10,39 @@ import {
   formatMoney,
   formatPercent,
   statusLabel,
+  trackEndISO,
 } from "../utils/format";
 import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
 import { planTypeLabel } from "../utils/planTypes";
+import type { Plan } from "../types/investments";
+
+function primaryPlanForInvestor(
+  plans: Plan[] | null | undefined,
+  investorId: number,
+  year?: number,
+): Plan | null {
+  const mine = (plans ?? []).filter((p) => p.investor_id === investorId);
+  if (mine.length === 0) return null;
+  if (year != null) {
+    const inYear = mine.filter(
+      (p) => p.start_date && Number(p.start_date.slice(0, 4)) === year,
+    );
+    if (inYear.length > 0) {
+      const activeInYear = inYear.find((p) => p.status === "active");
+      if (activeInYear) return activeInYear;
+      return [...inYear].sort((a, b) =>
+        a.start_date < b.start_date ? 1 : -1,
+      )[0];
+    }
+  }
+  const active = mine.find((p) => p.status === "active");
+  if (active) return active;
+  return [...mine].sort((a, b) => (a.start_date < b.start_date ? 1 : -1))[0];
+}
+
+function planTrackEnd(plan: Plan): string {
+  return plan.track_end_date || trackEndISO(plan.start_date, plan.duration_months);
+}
 
 export function PaymentsPage() {
   const { user } = useAuth();
@@ -124,11 +154,6 @@ export function PaymentsPage() {
 
   const statusReportPlans = useMemo(() => {
     const all = plans ?? [];
-    const inYear = (p: (typeof all)[number]) => {
-      if (p.start_date && Number(p.start_date.slice(0, 4)) === year) return true;
-      // plan that has payments in the selected year
-      return false;
-    };
     let list = all;
     if (investorFilter) {
       list = list.filter((p) => p.investor_id === investorFilter);
@@ -136,14 +161,40 @@ export function PaymentsPage() {
       list = list.filter((p) => p.investor_id === user.investor_id);
     } else {
       const boardIds = new Set(yearInvestors.map((i) => i.id));
-      list = list.filter((p) => boardIds.has(p.investor_id) || inYear(p));
+      list = list.filter(
+        (p) =>
+          boardIds.has(p.investor_id) ||
+          (p.start_date != null && Number(p.start_date.slice(0, 4)) === year),
+      );
     }
-    // Prefer plans that actually belong to this calendar year (start year match).
-    const yearPlans = list.filter(
-      (p) => p.start_date && Number(p.start_date.slice(0, 4)) === year,
+    // Prefer one primary plan per investor — full track terms (not year-clipped).
+    const byInvestor = new Map<number, Plan>();
+    const score = (p: Plan) => {
+      let s = 0;
+      if (p.start_date && Number(p.start_date.slice(0, 4)) === year) s += 4;
+      if (p.status === "active") s += 2;
+      if (p.plan_type !== "monthly") s += 1;
+      return s;
+    };
+    for (const p of list) {
+      const current = byInvestor.get(p.investor_id);
+      if (!current || score(p) > score(current)) {
+        byInvestor.set(p.investor_id, p);
+        continue;
+      }
+      if (score(p) === score(current) && p.start_date > current.start_date) {
+        byInvestor.set(p.investor_id, p);
+      }
+    }
+    return [...byInvestor.values()].sort((a, b) =>
+      a.investor_name.localeCompare(b.investor_name, "he"),
     );
-    return yearPlans.length > 0 ? yearPlans : list.filter(inYear);
   }, [plans, investorFilter, isManager, user?.investor_id, yearInvestors, year]);
+
+  const selectedTrackPlan = useMemo(() => {
+    if (!investorFilter) return null;
+    return primaryPlanForInvestor(plans, investorFilter, year);
+  }, [plans, investorFilter, year]);
 
   async function syncYearAmounts() {
     if (
@@ -260,7 +311,7 @@ export function PaymentsPage() {
   async function openReportingYear() {
     if (
       !window.confirm(
-        `לפתוח לוח תשלומים לשנת ${year}?\nלכל משקיע ייווצר לוח רק מחודש הכניסה שלו ועד סוף השנה — בלי חודשים שלפני ההתחלה.`,
+        `לפתוח לוח תשלומים לשנת ${year}?\nלכל משקיע ייווצר לוח מתחילת המסלול שלו לפי תנאי המסלול (משך מלא) — בלי חודשים שלפני ההתחלה.`,
       )
     ) {
       return;
@@ -378,8 +429,12 @@ export function PaymentsPage() {
           <h1>{isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}</h1>
           <p className="muted">
             {isManager
-              ? `דוח שנתי · שליחה לאישור משקיע · 1 בינואר עד 31 בדצמבר ${year}`
-              : `התשלומים שלך · אשר קבלה כשמגיעה בקשה · שנת ${year}`}
+              ? selectedTrackPlan
+                ? `דוח שנתי · ${selectedInvestorName ?? "משקיע"} · תחילת מסלול ${formatCalendarMonth(selectedTrackPlan.start_date)} ${selectedTrackPlan.start_date.slice(0, 4)} עד סוף מסלול ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))} ${planTrackEnd(selectedTrackPlan).slice(0, 4)} (${selectedTrackPlan.duration_months} חודשים)`
+                : `דוח שנתי · שליחה לאישור משקיע · שנת ${year} · לכל משקיע לפי תחילת וסוף המסלול שלו`
+              : selectedTrackPlan
+                ? `המסלול שלך · ${formatCalendarMonth(selectedTrackPlan.start_date)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))} · שנת ${year}`
+                : `התשלומים שלך · אשר קבלה כשמגיעה בקשה · שנת ${year}`}
           </p>
         </div>
         <div className="page-head__actions">
@@ -535,7 +590,10 @@ export function PaymentsPage() {
           </div>
         </Panel>
 
-        <Panel title="סיכום סה״כ" subtitle="כל השנים יחד · מה ששולם בפועל">
+        <Panel
+          title="סיכום סה״כ"
+          subtitle="כל השנים יחד · מזומן לפי תשלומים · חיסכון לפי תנאי מסלול"
+        >
           <div className="stats-grid stats-grid--compact">
             <div className="stat">
               <span className="stat__label">{isManager ? "סה״כ שולם למשקיעים" : "סה״כ שולם לי"}</span>
@@ -561,6 +619,18 @@ export function PaymentsPage() {
               <span className="stat__label">תשלומים ששולמו</span>
               <strong className="stat__value">{lifetime?.paid_count ?? 0}</strong>
             </div>
+            <div className="stat">
+              <span className="stat__label">חיסכון עד עכשיו</span>
+              <strong className="stat__value">
+                {formatMoney(lifetime?.savings_to_date ?? 0)}
+              </strong>
+            </div>
+            <div className="stat">
+              <span className="stat__label">חיסכון עד סוף מסלול</span>
+              <strong className="stat__value">
+                {formatMoney(lifetime?.savings_to_track_end ?? 0)}
+              </strong>
+            </div>
           </div>
         </Panel>
       </div>
@@ -568,16 +638,30 @@ export function PaymentsPage() {
       {isManager && yearInvestors.length > 0 ? (
         <Panel
           title={`מי בלוח ${year}`}
-          subtitle="אם מישהו לא היה במסלול בשנה זו — הסר אותו מהלוח"
+          subtitle="לכל משקיע — תחילת מסלול וסוף מסלול לפי תנאי המסלול (לא בהכרח עד סוף השנה)"
         >
           <ul className="list">
             {yearInvestors.map((inv) => {
               const savings = savingsByInvestor.get(inv.id) ?? [];
+              const track = primaryPlanForInvestor(plans, inv.id, year);
+              const end = track ? planTrackEnd(track) : null;
               return (
                 <li key={inv.id} className="list__row">
                   <div>
                     <strong>{inv.name}</strong>
-                    <span className="muted">מופיע בדוח {year}</span>
+                    {track ? (
+                      <span className="muted">
+                        {" "}
+                        · תחילת מסלול: {formatCalendarMonth(track.start_date)}{" "}
+                        {track.start_date.slice(0, 4)}
+                        {" · "}
+                        סוף מסלול: {formatCalendarMonth(end)} {end?.slice(0, 4)}
+                        {" · "}
+                        {track.duration_months} חודשים
+                      </span>
+                    ) : (
+                      <span className="muted">מופיע בדוח {year}</span>
+                    )}
                     {savings.length > 0 ? (
                       <span className="muted">
                         {" "}
@@ -585,7 +669,7 @@ export function PaymentsPage() {
                         {savings
                           .map(
                             (p) =>
-                              `${planTypeLabel(p.plan_type)} ${formatPercent(p.savings_rate_percent)} → ${formatMoney(p.projected_savings_balance)}`,
+                              `${planTypeLabel(p.plan_type)} עד עכשיו ${formatMoney(p.current_savings_balance ?? 0)} / עד סוף ${formatMoney(p.projected_savings_balance)}`,
                           )
                           .join(" · ")}
                       </span>
@@ -608,8 +692,8 @@ export function PaymentsPage() {
 
       {savingsPlansInView.length > 0 ? (
         <Panel
-          title={`חיסכון · ${year}`}
-          subtitle="מסלולי חיסכון / משולב — ריבית דריבית כל 12 חודשים (לא מופיע כתשלום חודשי במזומן)"
+          title={`חיסכון · לפי תנאי מסלול`}
+          subtitle="מסלולי חיסכון / משולב — מתחילת המסלול עד סופו · ריבית דריבית כל 12 חודשים"
         >
           <div className="table-wrap">
             <table className="table">
@@ -617,12 +701,15 @@ export function PaymentsPage() {
                 <tr>
                   {isManager ? <th>משקיע</th> : null}
                   <th>סוג</th>
+                  <th>תחילת מסלול</th>
+                  <th>סוף מסלול</th>
                   <th>קרן</th>
                   <th>אחוז חיסכון</th>
                   {savingsPlansInView.some((p) => p.plan_type === "hybrid") ? (
                     <th>החזר חודשי</th>
                   ) : null}
                   <th>צבירה חודשית</th>
+                  <th>חיסכון עד עכשיו</th>
                   <th>יתרה צפויה בסיום</th>
                 </tr>
               </thead>
@@ -631,6 +718,13 @@ export function PaymentsPage() {
                   <tr key={p.id}>
                     {isManager ? <td>{p.investor_name}</td> : null}
                     <td>{planTypeLabel(p.plan_type)}</td>
+                    <td>
+                      {formatCalendarMonth(p.start_date)} {p.start_date.slice(0, 4)}
+                    </td>
+                    <td>
+                      {formatCalendarMonth(planTrackEnd(p))}{" "}
+                      {planTrackEnd(p).slice(0, 4)}
+                    </td>
                     <td>{formatMoney(p.principal)}</td>
                     <td>{formatPercent(p.savings_rate_percent)}</td>
                     {savingsPlansInView.some((x) => x.plan_type === "hybrid") ? (
@@ -641,6 +735,7 @@ export function PaymentsPage() {
                       </td>
                     ) : null}
                     <td>{formatMoney(p.monthly_savings_accrual, true)}</td>
+                    <td>{formatMoney(p.current_savings_balance ?? 0)}</td>
                     <td>{formatMoney(p.projected_savings_balance)}</td>
                   </tr>
                 ))}
@@ -652,23 +747,26 @@ export function PaymentsPage() {
 
       {statusReportPlans.length > 0 ? (
         <Panel
-          title={`דוח מצב · ${year}`}
-          subtitle="רק מחודש ההתחלה של המשקיע ועד סוף השנה — בלי חודשים שלא היה בהם"
+          title="דוח מצב · מתחילת מסלול עד סוף מסלול"
+          subtitle="לפי תנאי המסלול של כל משקיע — בלי חודשים שלפני ההתחלה ובלי קיצוץ מלאכותי לסוף שנה"
         >
           {statusReportPlans.map((p) => (
             <div key={p.id} style={{ marginBottom: 18 }}>
               <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem" }}>
                 {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)}
+                {" · "}
+                {formatCalendarMonth(p.start_date)} →{" "}
+                {formatCalendarMonth(planTrackEnd(p))} ({p.duration_months} ח׳)
               </h3>
-              <PlanStatusReportPanel planId={p.id} year={year} />
+              <PlanStatusReportPanel planId={p.id} />
             </div>
           ))}
         </Panel>
       ) : null}
 
       <Panel
-        title={`שנת ${year}`}
-        subtitle="מתחילת השנה ועד סופה · לפי חודש קלנדרי · סכום = החזר חודשי במזומן"
+        title={`תשלומי ${year}`}
+        subtitle="תשלומי מזומן שחלים בשנה זו · רק חודשים שהמשקיע במסלול בהם"
         action={
           isManager && (yearly?.scheduled_count ?? 0) > 0 ? (
             <button

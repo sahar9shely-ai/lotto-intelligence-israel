@@ -57,6 +57,21 @@ export function yearStartISO(year = new Date().getFullYear()): string {
   return `${year}-01-01`;
 }
 
+/** Add N calendar months to an ISO date (YYYY-MM-DD), keeping day when possible. */
+export function addMonthsISO(value: string, months: number): string {
+  const d = new Date(`${value}T12:00:00`);
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + months);
+  // Clamp day if month rolled (e.g. Jan 31 + 1 month).
+  if (d.getDate() < day) d.setDate(0);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Last month of a track from start + duration (plan terms). */
+export function trackEndISO(startDate: string, durationMonths: number): string {
+  return addMonthsISO(startDate, Math.max(durationMonths, 1) - 1);
+}
+
 /** Hebrew calendar month name from an ISO date (e.g. ינואר). */
 export function formatCalendarMonth(value?: string | null): string {
   if (!value) return "—";

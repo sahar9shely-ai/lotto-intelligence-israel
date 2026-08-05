@@ -64,20 +64,29 @@ export function PlanStatusReportPanel({
           className="btn btn--ghost btn--small"
           onClick={() => setOpen((v) => !v)}
         >
-          {open ? "הסתר דוח מצב" : "הצג דוח מצב מתחילת המסלול"}
+          {open ? "הסתר דוח מצב" : "הצג דוח מצב מתחילת המסלול עד סופו"}
         </button>
       </div>
       {!open ? null : (
         <>
           <p className="muted" style={{ marginTop: 0 }}>
-            {title ?? `${planTypeLabel(report.plan_type)} · מתחילת המסלול`}
+            {title ?? `${planTypeLabel(report.plan_type)} · לפי תנאי המסלול`}
             {" · "}
-            התחלה: {startLabel}
-            {year ? ` · רק חודשי ${year}` : ""}
+            תחילת מסלול: {startLabel}
+            {" · "}
+            סוף מסלול: {formatCalendarMonth(
+              report.months.length
+                ? report.months[report.months.length - 1].due_date
+                : report.start_date,
+            )}
+            {year ? ` · מסונן לשנת ${year}` : ""}
             {" · "}
             מזומן ששולם: {formatMoney(report.paid_cash_total)}
             {showSavings
               ? ` · יתרת חיסכון נוכחית: ${formatMoney(report.current_savings_balance)}`
+              : null}
+            {showSavings
+              ? ` · חיסכון צפוי בסיום: ${formatMoney(report.projected_savings_balance)}`
               : null}
           </p>
           <div className="table-wrap">
