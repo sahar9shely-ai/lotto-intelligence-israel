@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
+import { Stat } from "../components/Stat";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
@@ -15,6 +16,33 @@ import {
 import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
 import { planTypeLabel } from "../utils/planTypes";
 import type { Plan } from "../types/investments";
+
+type DetailFocus =
+  | "yearly-paid"
+  | "yearly-planned"
+  | "yearly-fees"
+  | "yearly-awaiting"
+  | "yearly-scheduled"
+  | "lifetime-paid"
+  | "lifetime-planned"
+  | "lifetime-fees"
+  | "lifetime-paid-count"
+  | "lifetime-savings-now"
+  | "lifetime-savings-end";
+
+const DETAIL_LABELS: Record<DetailFocus, string> = {
+  "yearly-paid": "שולם למשקיעים (שנתי)",
+  "yearly-planned": "מתוכנן לשנה",
+  "yearly-fees": "עמלות ששולמו (שנתי)",
+  "yearly-awaiting": "ממתינים לאישור",
+  "yearly-scheduled": "מתוכננים",
+  "lifetime-paid": "סה״כ שולם למשקיעים",
+  "lifetime-planned": "סה״כ מתוכנן",
+  "lifetime-fees": "סה״כ עמלות",
+  "lifetime-paid-count": "תשלומים ששולמו (כל השנים)",
+  "lifetime-savings-now": "חיסכון עד עכשיו",
+  "lifetime-savings-end": "חיסכון עד סוף מסלול",
+};
 
 function primaryPlanForInvestor(
   plans: Plan[] | null | undefined,
@@ -51,6 +79,8 @@ export function PaymentsPage() {
   const [year, setYear] = useState(yearNow);
   const [status, setStatus] = useState<string>("");
   const [investorId, setInvestorId] = useState<string>("");
+  const [allYears, setAllYears] = useState(false);
+  const [detailFocus, setDetailFocus] = useState<DetailFocus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [alignBusy, setAlignBusy] = useState(false);
@@ -58,6 +88,8 @@ export function PaymentsPage() {
   const [markBusy, setMarkBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [removeBusyId, setRemoveBusyId] = useState<number | null>(null);
+  const paymentsPanelRef = useRef<HTMLDivElement | null>(null);
+  const savingsPanelRef = useRef<HTMLDivElement | null>(null);
 
   const investorFilter = investorId ? Number(investorId) : undefined;
 
@@ -69,11 +101,11 @@ export function PaymentsPage() {
   const { data, error, loading, reload } = useAsync(
     () =>
       api.payments({
-        year,
+        year: allYears ? undefined : year,
         status: status || undefined,
         investor_id: investorFilter,
       }),
-    [year, status, investorFilter],
+    [year, status, investorFilter, allYears],
   );
   const {
     data: report,
@@ -195,6 +227,65 @@ export function PaymentsPage() {
     if (!investorFilter) return null;
     return primaryPlanForInvestor(plans, investorFilter, year);
   }, [plans, investorFilter, year]);
+
+  function clearDetailFocus() {
+    setDetailFocus(null);
+    setAllYears(false);
+  }
+
+  function openDetail(focus: DetailFocus) {
+    setDetailFocus(focus);
+    const isLifetime = focus.startsWith("lifetime-");
+    const isSavings =
+      focus === "lifetime-savings-now" || focus === "lifetime-savings-end";
+
+    if (isSavings) {
+      setAllYears(false);
+      setStatus("");
+      window.setTimeout(() => {
+        savingsPanelRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 80);
+      return;
+    }
+
+    setAllYears(isLifetime);
+    if (
+      focus === "yearly-paid" ||
+      focus === "yearly-fees" ||
+      focus === "lifetime-paid" ||
+      focus === "lifetime-fees" ||
+      focus === "lifetime-paid-count"
+    ) {
+      setStatus("paid");
+    } else if (focus === "yearly-awaiting") {
+      setStatus("awaiting_confirmation");
+    } else if (focus === "yearly-scheduled") {
+      setStatus("scheduled");
+    } else {
+      // planned totals = all statuses in scope
+      setStatus("");
+    }
+  }
+
+  useEffect(() => {
+    if (!detailFocus) return;
+    if (
+      detailFocus === "lifetime-savings-now" ||
+      detailFocus === "lifetime-savings-end"
+    ) {
+      return;
+    }
+    const t = window.setTimeout(() => {
+      paymentsPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [detailFocus, allYears, status, data]);
 
   async function syncYearAmounts() {
     if (
@@ -521,7 +612,21 @@ export function PaymentsPage() {
       <div className="filters">
         <label>
           שנה
-          <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+          <select
+            value={allYears ? "all" : String(year)}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "all") {
+                setAllYears(true);
+                setDetailFocus((prev) => prev ?? "lifetime-planned");
+                return;
+              }
+              setAllYears(false);
+              setYear(Number(v));
+              setDetailFocus(null);
+            }}
+          >
+            <option value="all">כל השנים</option>
             {yearOptions.map((y) => (
               <option key={y} value={y}>
                 {y}
@@ -531,7 +636,13 @@ export function PaymentsPage() {
         </label>
         <label>
           סטטוס
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setDetailFocus(null);
+            }}
+          >
             <option value="">הכל</option>
             <option value="scheduled">מתוכנן</option>
             <option value="awaiting_confirmation">ממתין לאישור</option>
@@ -542,7 +653,13 @@ export function PaymentsPage() {
         {isManager ? (
           <label>
             משקיע
-            <select value={investorId} onChange={(e) => setInvestorId(e.target.value)}>
+            <select
+              value={investorId}
+              onChange={(e) => {
+                setInvestorId(e.target.value);
+                setDetailFocus(null);
+              }}
+            >
               <option value="">הכל</option>
               {(investors ?? []).map((i) => (
                 <option key={i.id} value={i.id}>
@@ -555,85 +672,118 @@ export function PaymentsPage() {
       </div>
 
       <div className="grid-2">
-        <Panel title="סיכום שנתי" subtitle={`שנת ${year} · מתוכנן מול שולם`}>
+        <Panel
+          title="סיכום שנתי"
+          subtitle={`שנת ${year} · לחצו על משבצת לפירוט`}
+        >
           <div className="stats-grid stats-grid--compact">
-            <div className="stat">
-              <span className="stat__label">{isManager ? "שולם למשקיעים" : "שולם לי"}</span>
-              <strong className="stat__value">
-                {formatMoney(yearly?.paid_investor ?? 0)}
-              </strong>
-            </div>
-            <div className="stat">
-              <span className="stat__label">מתוכנן לשנה</span>
-              <strong className="stat__value">
-                {formatMoney(yearly?.planned_investor ?? 0)}
-              </strong>
-            </div>
+            <Stat
+              label={isManager ? "שולם למשקיעים" : "שולם לי"}
+              value={formatMoney(yearly?.paid_investor ?? 0)}
+              active={detailFocus === "yearly-paid"}
+              onClick={() => openDetail("yearly-paid")}
+            />
+            <Stat
+              label="מתוכנן לשנה"
+              value={formatMoney(yearly?.planned_investor ?? 0)}
+              active={detailFocus === "yearly-planned"}
+              onClick={() => openDetail("yearly-planned")}
+            />
             {isManager ? (
-              <div className="stat tone-manager">
-                <span className="stat__label">עמלות ששולמו</span>
-                <strong className="stat__value">
-                  {formatMoney(yearly?.paid_manager ?? 0)}
-                </strong>
-              </div>
+              <Stat
+                label="עמלות ששולמו"
+                value={formatMoney(yearly?.paid_manager ?? 0)}
+                tone="manager"
+                active={detailFocus === "yearly-fees"}
+                onClick={() => openDetail("yearly-fees")}
+              />
             ) : null}
-            <div className="stat">
-              <span className="stat__label">שולמו / ממתינים לאישור</span>
-              <strong className="stat__value">
-                {yearly?.paid_count ?? 0} / {yearly?.awaiting_count ?? 0}
-              </strong>
-            </div>
-            <div className="stat">
-              <span className="stat__label">מתוכננים</span>
-              <strong className="stat__value">{yearly?.scheduled_count ?? 0}</strong>
-            </div>
+            <Stat
+              label="שולמו / ממתינים לאישור"
+              value={`${yearly?.paid_count ?? 0} / ${yearly?.awaiting_count ?? 0}`}
+              hint="לחיצה מציגה ממתינים לאישור"
+              active={detailFocus === "yearly-awaiting"}
+              onClick={() => openDetail("yearly-awaiting")}
+            />
+            <Stat
+              label="מתוכננים"
+              value={String(yearly?.scheduled_count ?? 0)}
+              active={detailFocus === "yearly-scheduled"}
+              onClick={() => openDetail("yearly-scheduled")}
+            />
           </div>
         </Panel>
 
         <Panel
           title="סיכום סה״כ"
-          subtitle="כל השנים יחד · מזומן לפי תשלומים · חיסכון לפי תנאי מסלול"
+          subtitle="כל השנים · לחצו על משבצת לפירוט"
         >
           <div className="stats-grid stats-grid--compact">
-            <div className="stat">
-              <span className="stat__label">{isManager ? "סה״כ שולם למשקיעים" : "סה״כ שולם לי"}</span>
-              <strong className="stat__value">
-                {formatMoney(lifetime?.paid_investor ?? 0)}
-              </strong>
-            </div>
-            <div className="stat">
-              <span className="stat__label">סה״כ מתוכנן</span>
-              <strong className="stat__value">
-                {formatMoney(lifetime?.planned_investor ?? 0)}
-              </strong>
-            </div>
+            <Stat
+              label={isManager ? "סה״כ שולם למשקיעים" : "סה״כ שולם לי"}
+              value={formatMoney(lifetime?.paid_investor ?? 0)}
+              active={detailFocus === "lifetime-paid"}
+              onClick={() => openDetail("lifetime-paid")}
+            />
+            <Stat
+              label="סה״כ מתוכנן"
+              value={formatMoney(lifetime?.planned_investor ?? 0)}
+              active={detailFocus === "lifetime-planned"}
+              onClick={() => openDetail("lifetime-planned")}
+            />
             {isManager ? (
-              <div className="stat tone-manager">
-                <span className="stat__label">סה״כ עמלות</span>
-                <strong className="stat__value">
-                  {formatMoney(lifetime?.paid_manager ?? 0)}
-                </strong>
-              </div>
+              <Stat
+                label="סה״כ עמלות"
+                value={formatMoney(lifetime?.paid_manager ?? 0)}
+                tone="manager"
+                active={detailFocus === "lifetime-fees"}
+                onClick={() => openDetail("lifetime-fees")}
+              />
             ) : null}
-            <div className="stat">
-              <span className="stat__label">תשלומים ששולמו</span>
-              <strong className="stat__value">{lifetime?.paid_count ?? 0}</strong>
-            </div>
-            <div className="stat">
-              <span className="stat__label">חיסכון עד עכשיו</span>
-              <strong className="stat__value">
-                {formatMoney(lifetime?.savings_to_date ?? 0)}
-              </strong>
-            </div>
-            <div className="stat">
-              <span className="stat__label">חיסכון עד סוף מסלול</span>
-              <strong className="stat__value">
-                {formatMoney(lifetime?.savings_to_track_end ?? 0)}
-              </strong>
-            </div>
+            <Stat
+              label="תשלומים ששולמו"
+              value={String(lifetime?.paid_count ?? 0)}
+              active={detailFocus === "lifetime-paid-count"}
+              onClick={() => openDetail("lifetime-paid-count")}
+            />
+            <Stat
+              label="חיסכון עד עכשיו"
+              value={formatMoney(lifetime?.savings_to_date ?? 0)}
+              active={detailFocus === "lifetime-savings-now"}
+              onClick={() => openDetail("lifetime-savings-now")}
+            />
+            <Stat
+              label="חיסכון עד סוף מסלול"
+              value={formatMoney(lifetime?.savings_to_track_end ?? 0)}
+              active={detailFocus === "lifetime-savings-end"}
+              onClick={() => openDetail("lifetime-savings-end")}
+            />
           </div>
         </Panel>
       </div>
+
+      {detailFocus ? (
+        <div className="detail-focus-banner" role="status">
+          <div>
+            <strong>פירוט: {DETAIL_LABELS[detailFocus]}</strong>
+            <span className="muted">
+              {" · "}
+              {detailFocus.startsWith("lifetime-")
+                ? "כל השנים"
+                : `שנת ${year}`}
+              {status ? ` · סטטוס: ${statusLabel(status)}` : " · כל הסטטוסים"}
+              {selectedInvestorName ? ` · ${selectedInvestorName}` : ""}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn--small btn--ghost"
+            onClick={clearDetailFocus}
+          >
+            נקה סינון
+          </button>
+        </div>
+      ) : null}
 
       {isManager && yearInvestors.length > 0 ? (
         <Panel
@@ -691,8 +841,23 @@ export function PaymentsPage() {
       ) : null}
 
       {savingsPlansInView.length > 0 ? (
+        <div
+          ref={savingsPanelRef}
+          className={
+            detailFocus === "lifetime-savings-now" ||
+            detailFocus === "lifetime-savings-end"
+              ? "detail-target detail-target--active"
+              : undefined
+          }
+        >
         <Panel
-          title={`חיסכון · לפי תנאי מסלול`}
+          title={
+            detailFocus === "lifetime-savings-now"
+              ? "פירוט · חיסכון עד עכשיו"
+              : detailFocus === "lifetime-savings-end"
+                ? "פירוט · חיסכון עד סוף מסלול"
+                : "חיסכון · לפי תנאי מסלול"
+          }
           subtitle="מסלולי חיסכון / משולב — מתחילת המסלול עד סופו · ריבית דריבית כל 12 חודשים"
         >
           <div className="table-wrap">
@@ -709,8 +874,24 @@ export function PaymentsPage() {
                     <th>החזר חודשי</th>
                   ) : null}
                   <th>צבירה חודשית</th>
-                  <th>חיסכון עד עכשיו</th>
-                  <th>יתרה צפויה בסיום</th>
+                  <th
+                    className={
+                      detailFocus === "lifetime-savings-now"
+                        ? "col-highlight"
+                        : undefined
+                    }
+                  >
+                    חיסכון עד עכשיו
+                  </th>
+                  <th
+                    className={
+                      detailFocus === "lifetime-savings-end"
+                        ? "col-highlight"
+                        : undefined
+                    }
+                  >
+                    יתרה צפויה בסיום
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -735,14 +916,31 @@ export function PaymentsPage() {
                       </td>
                     ) : null}
                     <td>{formatMoney(p.monthly_savings_accrual, true)}</td>
-                    <td>{formatMoney(p.current_savings_balance ?? 0)}</td>
-                    <td>{formatMoney(p.projected_savings_balance)}</td>
+                    <td
+                      className={
+                        detailFocus === "lifetime-savings-now"
+                          ? "col-highlight"
+                          : undefined
+                      }
+                    >
+                      {formatMoney(p.current_savings_balance ?? 0)}
+                    </td>
+                    <td
+                      className={
+                        detailFocus === "lifetime-savings-end"
+                          ? "col-highlight"
+                          : undefined
+                      }
+                    >
+                      {formatMoney(p.projected_savings_balance)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </Panel>
+        </div>
       ) : null}
 
       {statusReportPlans.length > 0 ? (
@@ -764,11 +962,35 @@ export function PaymentsPage() {
         </Panel>
       ) : null}
 
+      <div
+        ref={paymentsPanelRef}
+        className={
+          detailFocus &&
+          detailFocus !== "lifetime-savings-now" &&
+          detailFocus !== "lifetime-savings-end"
+            ? "detail-target detail-target--active"
+            : undefined
+        }
+      >
       <Panel
-        title={`תשלומי ${year}`}
-        subtitle="תשלומי מזומן שחלים בשנה זו · רק חודשים שהמשקיע במסלול בהם"
+        title={
+          detailFocus &&
+          detailFocus !== "lifetime-savings-now" &&
+          detailFocus !== "lifetime-savings-end"
+            ? `פירוט · ${DETAIL_LABELS[detailFocus]}`
+            : allYears
+              ? "תשלומים · כל השנים"
+              : `תשלומי ${year}`
+        }
+        subtitle={
+          detailFocus === "yearly-fees" || detailFocus === "lifetime-fees"
+            ? "תשלומים שבוצעו · עמלה בעמודה ייעודית"
+            : allYears
+              ? "כל התשלומים בכל השנים · מסונן לפי המשבצת שנבחרה"
+              : "תשלומי מזומן שחלים בשנה זו · רק חודשים שהמשקיע במסלול בהם"
+        }
         action={
-          isManager && (yearly?.scheduled_count ?? 0) > 0 ? (
+          isManager && !allYears && (yearly?.scheduled_count ?? 0) > 0 ? (
             <button
               type="button"
               className="btn btn--small"
@@ -783,12 +1005,18 @@ export function PaymentsPage() {
         {payments.length === 0 ? (
           <div className="empty-block">
             <p className="empty">
-              אין רשומות לשנת {year}.{" "}
-              {isManager
+              {detailFocus
+                ? `אין רשומות לפירוט «${DETAIL_LABELS[detailFocus]}».`
+                : allYears
+                  ? "אין רשומות לכל השנים עם הסינון הנוכחי."
+                  : `אין רשומות לשנת ${year}. `}
+              {!detailFocus && !allYears && isManager
                 ? `לחץ על «פתח לוח ${year}» כדי ליצור לוח דיווח מלא לפי תנאי המסלולים הקיימים.`
-                : "פנו למנהל לפתיחת לוח הדיווח לשנה זו."}
+                : !detailFocus && !allYears
+                  ? "פנו למנהל לפתיחת לוח הדיווח לשנה זו."
+                  : null}
             </p>
-            {isManager ? (
+            {isManager && !allYears && !detailFocus ? (
               <button
                 type="button"
                 className="btn btn--primary"
@@ -805,10 +1033,31 @@ export function PaymentsPage() {
               <thead>
                 <tr>
                   {isManager ? <th>משקיע</th> : null}
+                  {allYears ? <th>שנה</th> : null}
                   <th>חודש</th>
                   <th>תאריך</th>
-                  <th>סכום</th>
-                  {isManager ? <th>עמלה</th> : null}
+                  <th
+                    className={
+                      detailFocus === "yearly-paid" ||
+                      detailFocus === "lifetime-paid"
+                        ? "col-highlight"
+                        : undefined
+                    }
+                  >
+                    סכום
+                  </th>
+                  {isManager ? (
+                    <th
+                      className={
+                        detailFocus === "yearly-fees" ||
+                        detailFocus === "lifetime-fees"
+                          ? "col-highlight"
+                          : undefined
+                      }
+                    >
+                      עמלה
+                    </th>
+                  ) : null}
                   <th>סטטוס</th>
                   <th></th>
                 </tr>
@@ -817,10 +1066,31 @@ export function PaymentsPage() {
                 {payments.map((p) => (
                   <tr key={p.id}>
                     {isManager ? <td>{p.investor_name}</td> : null}
+                    {allYears ? <td>{p.due_date.slice(0, 4)}</td> : null}
                     <td>{formatCalendarMonth(p.due_date)}</td>
                     <td>{formatDate(p.due_date)}</td>
-                    <td>{formatMoney(p.investor_amount, true)}</td>
-                    {isManager ? <td>{formatMoney(p.manager_amount, true)}</td> : null}
+                    <td
+                      className={
+                        detailFocus === "yearly-paid" ||
+                        detailFocus === "lifetime-paid"
+                          ? "col-highlight"
+                          : undefined
+                      }
+                    >
+                      {formatMoney(p.investor_amount, true)}
+                    </td>
+                    {isManager ? (
+                      <td
+                        className={
+                          detailFocus === "yearly-fees" ||
+                          detailFocus === "lifetime-fees"
+                            ? "col-highlight"
+                            : undefined
+                        }
+                      >
+                        {formatMoney(p.manager_amount, true)}
+                      </td>
+                    ) : null}
                     <td>
                       <span className={`badge badge--${p.status}`}>{statusLabel(p.status)}</span>
                     </td>
@@ -877,6 +1147,7 @@ export function PaymentsPage() {
           </div>
         )}
       </Panel>
+      </div>
     </div>
   );
 }

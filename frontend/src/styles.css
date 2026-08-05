@@ -250,12 +250,49 @@ a {
   overflow: hidden;
 }
 
+button.stat {
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  width: 100%;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.stat--clickable {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+}
+
+.stat--clickable:hover {
+  border-color: color-mix(in srgb, var(--ink) 28%, var(--line));
+  box-shadow: 0 4px 14px rgba(20, 40, 30, 0.08);
+  transform: translateY(-1px);
+}
+
+.stat--clickable:focus-visible {
+  outline: 2px solid var(--accent, #1f6b55);
+  outline-offset: 2px;
+}
+
+.stat--active {
+  border-color: var(--accent, #1f6b55);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #1f6b55) 28%, transparent);
+  background: linear-gradient(160deg, rgba(31, 107, 85, 0.14), rgba(255, 255, 255, 0.85));
+}
+
 .stat.tone-accent {
   background: linear-gradient(160deg, rgba(31, 107, 85, 0.12), rgba(255, 255, 255, 0.7));
 }
 
 .stat.tone-manager {
   background: linear-gradient(160deg, rgba(21, 94, 117, 0.12), rgba(255, 255, 255, 0.7));
+}
+
+.stat--active.tone-manager {
+  background: linear-gradient(160deg, rgba(21, 94, 117, 0.18), rgba(255, 255, 255, 0.88));
+  border-color: #155e75;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #155e75 28%, transparent);
 }
 
 .stat__label,
@@ -292,6 +329,33 @@ a {
 
 .stat__hint {
   font-size: 0.78rem;
+}
+
+.detail-focus-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--accent, #1f6b55) 35%, var(--line));
+  background: color-mix(in srgb, var(--accent, #1f6b55) 10%, var(--panel));
+}
+
+.detail-target--active {
+  scroll-margin-top: 16px;
+}
+
+.detail-target--active > .panel {
+  border-color: color-mix(in srgb, var(--accent, #1f6b55) 45%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #1f6b55) 18%, transparent);
+}
+
+.col-highlight {
+  background: color-mix(in srgb, var(--accent, #1f6b55) 12%, transparent);
+  font-weight: 600;
 }
 
 .grid-2,
