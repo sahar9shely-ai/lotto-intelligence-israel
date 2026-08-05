@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
+import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { PlanTrackFields } from "../components/PlanTrackFields";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -73,21 +74,29 @@ export function InvestorsPage() {
     reloadPlans();
   }
 
-  async function onUpdatePlan(e: FormEvent<HTMLFormElement>, planId: number) {
+  async function onUpdatePlan(e: FormEvent<HTMLFormElement>, plan: {
+    id: number;
+    start_date: string;
+  }) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    await api.updatePlan(planId, {
+    const nextStart = String(fd.get("start_date") || plan.start_date);
+    const body: Parameters<typeof api.updatePlan>[1] = {
       principal: Number(fd.get("principal") || 0),
       plan_type: String(fd.get("plan_type") || "monthly"),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
       savings_rate_percent: Number(fd.get("savings_rate_percent") || 0),
       manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
-      start_date: String(fd.get("start_date")),
       duration_months: Number(fd.get("duration_months") || 12),
       status: String(fd.get("status") || "active"),
       regenerate_schedule: true,
-    });
-    setMessage("המסלול עודכן ולוח התשלומים חודש");
+    };
+    // Only send start_date when the manager actually changed it — prevents date drift.
+    if (nextStart !== plan.start_date) {
+      body.start_date = nextStart;
+    }
+    await api.updatePlan(plan.id, body);
+    setMessage("המסלול עודכן — הסכומים סונכרנו בלי לשנות תאריכים");
     reload();
     reloadPlans();
   }
@@ -286,8 +295,13 @@ export function InvestorsPage() {
                       </div>
                     </div>
 
+                    <PlanStatusReportPanel
+                      planId={plan.id}
+                      title={`דוח מצב · ${planTypeLabel(plan.plan_type)} · מתחילת המסלול`}
+                    />
+
                     {isManager ? (
-                      <form className="form" onSubmit={(e) => onUpdatePlan(e, plan.id)}>
+                      <form className="form" onSubmit={(e) => onUpdatePlan(e, plan)}>
                       <div className="form__grid">
                         <label>
                           קרן (₪)

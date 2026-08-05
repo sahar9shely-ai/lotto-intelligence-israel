@@ -1,0 +1,111 @@
+import { useEffect, useState } from "react";
+import { api } from "../services/api";
+import type { PlanStatusReport } from "../types/investments";
+import {
+  formatCalendarMonth,
+  formatDate,
+  formatMoney,
+  statusLabel,
+} from "../utils/format";
+import { planTypeLabel } from "../utils/planTypes";
+
+export function PlanStatusReportPanel({
+  planId,
+  title,
+}: {
+  planId: number;
+  title?: string;
+}) {
+  const [report, setReport] = useState<PlanStatusReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setError(null);
+    api
+      .planStatusReport(planId)
+      .then((res) => {
+        if (alive) setReport(res);
+      })
+      .catch((err: Error) => {
+        if (alive) setError(err.message || "טעינת דוח המצב נכשלה");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [planId]);
+
+  if (error) return <p className="form-error">{error}</p>;
+  if (!report) return <p className="muted">טוען דוח מצב...</p>;
+
+  const showSavings = report.plan_type !== "monthly";
+  const showCash = report.plan_type !== "savings";
+
+  return (
+    <div className="status-report">
+      <div className="page-head__actions" style={{ marginBottom: 10 }}>
+        <button
+          type="button"
+          className="btn btn--ghost btn--small"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? "הסתר דוח מצב" : "הצג דוח מצב מתחילת המסלול"}
+        </button>
+      </div>
+      {!open ? null : (
+        <>
+          <p className="muted" style={{ marginTop: 0 }}>
+            {title ?? `${planTypeLabel(report.plan_type)} · מתחילת המסלול`}
+            {" · "}
+            מזומן ששולם: {formatMoney(report.paid_cash_total)}
+            {showSavings
+              ? ` · יתרת חיסכון נוכחית: ${formatMoney(report.current_savings_balance)}`
+              : null}
+          </p>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>חודש #</th>
+                  <th>חודש</th>
+                  <th>תאריך</th>
+                  {showCash ? <th>מקבל (מזומן)</th> : null}
+                  {showSavings ? <th>נכנס לחיסכון</th> : null}
+                  {showSavings ? <th>יתרת חיסכון</th> : null}
+                  {showCash ? <th>מזומן מצטבר</th> : null}
+                  <th>סטטוס</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.months.map((m) => (
+                  <tr key={m.month_number}>
+                    <td>
+                      {m.month_number}
+                      {m.compounded ? " · ריבית דריבית" : ""}
+                    </td>
+                    <td>{formatCalendarMonth(m.due_date)}</td>
+                    <td>{formatDate(m.due_date)}</td>
+                    {showCash ? <td>{formatMoney(m.cash_amount, true)}</td> : null}
+                    {showSavings ? (
+                      <td>{formatMoney(m.savings_accrual, true)}</td>
+                    ) : null}
+                    {showSavings ? (
+                      <td>{formatMoney(m.cumulative_savings)}</td>
+                    ) : null}
+                    {showCash ? <td>{formatMoney(m.cumulative_cash)}</td> : null}
+                    <td>
+                      <span className={`badge badge--${m.status}`}>
+                        {statusLabel(m.status)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

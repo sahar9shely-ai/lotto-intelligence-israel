@@ -46,6 +46,35 @@ export type Plan = {
   paid_manager_total: number;
 };
 
+export type PlanStatusMonth = {
+  month_number: number;
+  due_date: string;
+  cash_amount: number;
+  manager_amount: number;
+  savings_accrual: number;
+  cumulative_cash: number;
+  cumulative_savings: number;
+  compounded: boolean;
+  status: string;
+  payment_id?: number | null;
+};
+
+export type PlanStatusReport = {
+  plan_id: number;
+  investor_id: number;
+  investor_name: string;
+  plan_type: string;
+  principal: number;
+  start_date: string;
+  duration_months: number;
+  monthly_cash: number;
+  monthly_savings_accrual: number;
+  projected_savings_balance: number;
+  paid_cash_total: number;
+  current_savings_balance: number;
+  months: PlanStatusMonth[];
+};
+
 export type Payment = {
   id: number;
   plan_id: number;

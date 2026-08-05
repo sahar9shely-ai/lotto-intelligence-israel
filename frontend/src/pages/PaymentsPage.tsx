@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
+import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
@@ -25,6 +26,7 @@ export function PaymentsPage() {
   const [alignBusy, setAlignBusy] = useState(false);
   const [openBusy, setOpenBusy] = useState(false);
   const [markBusy, setMarkBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
   const [removeBusyId, setRemoveBusyId] = useState<number | null>(null);
 
   const investorFilter = investorId ? Number(investorId) : undefined;
@@ -33,7 +35,7 @@ export function PaymentsPage() {
     () => (isManager ? api.investors() : Promise.resolve([])),
     [isManager],
   );
-  const { data: plans } = useAsync(() => api.plans(), []);
+  const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
   const { data, error, loading, reload } = useAsync(
     () =>
       api.payments({
@@ -120,6 +122,50 @@ export function PaymentsPage() {
     return map;
   }, [savingsPlansInView]);
 
+  const statusReportPlans = useMemo(() => {
+    const all = plans ?? [];
+    if (investorFilter) {
+      return all.filter((p) => p.investor_id === investorFilter);
+    }
+    if (!isManager && user?.investor_id) {
+      return all.filter((p) => p.investor_id === user.investor_id);
+    }
+    const boardIds = new Set(yearInvestors.map((i) => i.id));
+    return all.filter(
+      (p) =>
+        boardIds.has(p.investor_id) ||
+        (p.start_date != null && Number(p.start_date.slice(0, 4)) === year),
+    );
+  }, [plans, investorFilter, isManager, user?.investor_id, yearInvestors, year]);
+
+  async function syncYearAmounts() {
+    if (
+      !window.confirm(
+        `לסנכרן את סכומי התשלומים לשנת ${year} לפי המסלולים הנוכחיים?\nתאריכי התחלה ותאריכי תשלום לא ישתנו — רק הסכומים.`,
+      )
+    ) {
+      return;
+    }
+    setSyncBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.syncPaymentAmounts({
+        year,
+        investor_id: investorFilter,
+      });
+      setMessage(
+        result.count
+          ? `סונכרנו ${result.count} מסלולים לשנת ${year} — בלי לשנות תאריכים`
+          : `לא נמצאו מסלולים לסנכרון לשנת ${year}`,
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "סנכרון נכשל");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   const yearOptions = useMemo(() => {
     const fromApi = report?.available_years ?? [];
     const set = new Set<number>([...fromApi, yearNow, yearNow - 1, yearNow - 2, 2025]);
@@ -135,6 +181,7 @@ export function PaymentsPage() {
     reload();
     reloadReport();
     reloadYearAll();
+    reloadPlans();
   }
 
   async function markPaid(id: number) {
@@ -331,6 +378,14 @@ export function PaymentsPage() {
         <div className="page-head__actions">
           {isManager ? (
             <>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                disabled={syncBusy}
+                onClick={syncYearAmounts}
+              >
+                {syncBusy ? "מסנכרנים..." : `סנכרון סכומי ${year}`}
+              </button>
               <button
                 type="button"
                 className="btn btn--ghost"
@@ -585,6 +640,22 @@ export function PaymentsPage() {
               </tbody>
             </table>
           </div>
+        </Panel>
+      ) : null}
+
+      {statusReportPlans.length > 0 ? (
+        <Panel
+          title="דוח מצב מהמסלול"
+          subtitle="לכל חודש מתחילת המסלול: כמה מקבלים במזומן, כמה נכנס לחיסכון, וכמה יש בחיסכון"
+        >
+          {statusReportPlans.map((p) => (
+            <div key={p.id} style={{ marginBottom: 18 }}>
+              <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem" }}>
+                {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)}
+              </h3>
+              <PlanStatusReportPanel planId={p.id} />
+            </div>
+          ))}
         </Panel>
       ) : null}
 

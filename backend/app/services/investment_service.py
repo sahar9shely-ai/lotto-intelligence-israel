@@ -383,12 +383,179 @@ def _resolve_investor_due_conflict(
     return True
 
 
-def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment]:
-    """Rebuild unpaid months and keep paid months in sync with start_date.
+def month_savings_ledger(
+    *,
+    principal: float,
+    savings_rate_percent: float,
+    duration_months: int,
+) -> list[dict]:
+    """Per-month savings accrual with compound every 12 months."""
+    rows: list[dict] = []
+    if principal <= 0 or savings_rate_percent <= 0 or duration_months <= 0:
+        for month in range(1, duration_months + 1):
+            rows.append(
+                {
+                    "month_number": month,
+                    "savings_accrual": 0.0,
+                    "cumulative_savings": 0.0,
+                    "compounded": False,
+                }
+            )
+        return rows
 
-    Enforces one payment per plan month and one payment per investor due_date
-    so the same person cannot appear twice on the same calendar day.
-    Cash months use the monthly (cash) rate only; savings accrues separately.
+    base = principal
+    total_savings = 0.0
+    year_bucket = 0.0
+    for month in range(1, duration_months + 1):
+        accrual = calc_monthly(base, savings_rate_percent)
+        year_bucket = round(year_bucket + accrual, 2)
+        compounded = False
+        if month % 12 == 0 or month == duration_months:
+            total_savings = round(total_savings + year_bucket, 2)
+            base = round(principal + total_savings, 2)
+            year_bucket = 0.0
+            compounded = month % 12 == 0
+        rows.append(
+            {
+                "month_number": month,
+                "savings_accrual": accrual,
+                "cumulative_savings": round(total_savings + year_bucket, 2),
+                "compounded": compounded,
+            }
+        )
+    return rows
+
+
+def build_plan_status_report(plan: InvestmentPlan) -> dict:
+    """Full month-by-month status from plan start: cash + savings + payment status."""
+    kind, monthly_rate, savings_rate = normalize_plan_rates(
+        getattr(plan, "plan_type", None) or "monthly",
+        plan.monthly_rate_percent,
+        getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+    )
+    cash_monthly = calc_monthly(plan.principal, monthly_rate)
+    manager_monthly = calc_monthly(plan.principal, plan.manager_fee_percent)
+    savings_rows = {
+        r["month_number"]: r
+        for r in month_savings_ledger(
+            principal=plan.principal,
+            savings_rate_percent=savings_rate,
+            duration_months=plan.duration_months,
+        )
+    }
+    payments_by_month = {
+        p.month_number: p for p in (plan.payments or []) if p.month_number
+    }
+    months: list[dict] = []
+    cumulative_cash = 0.0
+    for month in range(1, plan.duration_months + 1):
+        payment = payments_by_month.get(month)
+        # Prefer live cash amount from payment when present (synced schedule).
+        cash = float(payment.investor_amount) if payment is not None else cash_monthly
+        if kind == "savings":
+            cash = 0.0 if payment is None else float(payment.investor_amount or 0)
+        cumulative_cash = round(cumulative_cash + cash, 2)
+        sav = savings_rows.get(month) or {
+            "savings_accrual": 0.0,
+            "cumulative_savings": 0.0,
+            "compounded": False,
+        }
+        due = (
+            payment.due_date
+            if payment is not None and payment.due_date is not None
+            else add_months(plan.start_date, month - 1)
+        )
+        months.append(
+            {
+                "month_number": month,
+                "due_date": due,
+                "cash_amount": cash,
+                "manager_amount": float(payment.manager_amount)
+                if payment is not None
+                else manager_monthly,
+                "savings_accrual": sav["savings_accrual"],
+                "cumulative_cash": cumulative_cash,
+                "cumulative_savings": sav["cumulative_savings"],
+                "compounded": sav["compounded"],
+                "status": payment.status if payment is not None else "scheduled",
+                "payment_id": payment.id if payment is not None else None,
+            }
+        )
+
+    paid_cash = round(
+        sum(m["cash_amount"] for m in months if m["status"] == "paid"), 2
+    )
+    latest = next((m for m in reversed(months) if m["status"] == "paid"), None)
+    current = next(
+        (m for m in months if m["status"] in {"scheduled", "awaiting_confirmation"}),
+        months[-1] if months else None,
+    )
+    return {
+        "plan_id": plan.id,
+        "investor_id": plan.investor_id,
+        "investor_name": plan.investor.name if plan.investor else "",
+        "plan_type": kind,
+        "principal": plan.principal,
+        "start_date": plan.start_date,
+        "duration_months": plan.duration_months,
+        "monthly_cash": cash_monthly,
+        "monthly_savings_accrual": calc_monthly(plan.principal, savings_rate)
+        if savings_rate
+        else 0.0,
+        "projected_savings_balance": months[-1]["cumulative_savings"] if months else 0.0,
+        "paid_cash_total": paid_cash,
+        "current_savings_balance": (latest or current or {}).get("cumulative_savings", 0.0)
+        if (latest or current)
+        else 0.0,
+        "months": months,
+    }
+
+
+def sync_payment_amounts(db: Session, plan: InvestmentPlan) -> dict:
+    """Update cash amounts on existing payments without touching dates or start_date."""
+    kind, monthly_rate, savings_rate = normalize_plan_rates(
+        getattr(plan, "plan_type", None) or "monthly",
+        plan.monthly_rate_percent,
+        getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+    )
+    plan.plan_type = kind
+    plan.monthly_rate_percent = monthly_rate
+    plan.savings_rate_percent = savings_rate
+    monthly_investor = calc_monthly(plan.principal, monthly_rate)
+    monthly_manager = calc_monthly(plan.principal, plan.manager_fee_percent)
+
+    updated = 0
+    payments = db.query(Payment).filter(Payment.plan_id == plan.id).all()
+    for payment in payments:
+        if payment.status == "skipped":
+            continue
+        # Keep historical paid as-is only if amounts already match; otherwise sync
+        # so the client view stays consistent after rate edits.
+        if (
+            payment.investor_amount != monthly_investor
+            or payment.manager_amount != monthly_manager
+        ):
+            payment.investor_amount = monthly_investor
+            payment.manager_amount = monthly_manager
+            updated += 1
+    db.commit()
+    return {
+        "updated": updated,
+        "monthly_investor": monthly_investor,
+        "monthly_manager": monthly_manager,
+    }
+
+
+def generate_payment_schedule(
+    db: Session,
+    plan: InvestmentPlan,
+    *,
+    realign_dates: bool = True,
+) -> list[Payment]:
+    """Rebuild / fill payment months.
+
+    When realign_dates is False (rate/principal edits), keep existing due_dates and
+    only sync amounts + create missing months — never rewrite plan.start_date.
     """
     kind, monthly_rate, _savings_rate = normalize_plan_rates(
         getattr(plan, "plan_type", None) or "monthly",
@@ -400,6 +567,75 @@ def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment
     plan.savings_rate_percent = _savings_rate
     monthly_investor = calc_monthly(plan.principal, monthly_rate)
     monthly_manager = calc_monthly(plan.principal, plan.manager_fee_percent)
+
+    if not realign_dates:
+        # Soft path: amounts only + fill gaps, preserve every existing due_date.
+        existing = (
+            db.query(Payment).filter(Payment.plan_id == plan.id).order_by(Payment.id).all()
+        )
+        by_month: dict[int, Payment] = {}
+        for payment in existing:
+            prev = by_month.get(payment.month_number)
+            if prev is None:
+                by_month[payment.month_number] = payment
+                continue
+            if _payment_priority(payment.status) > _payment_priority(prev.status):
+                db.delete(prev)
+                by_month[payment.month_number] = payment
+            else:
+                db.delete(payment)
+        db.flush()
+
+        for month, payment in list(by_month.items()):
+            if month < 1 or month > plan.duration_months:
+                if payment.status not in {"paid", "awaiting_confirmation"}:
+                    db.delete(payment)
+                    by_month.pop(month, None)
+                continue
+            payment.investor_id = plan.investor_id
+            if payment.status != "skipped":
+                payment.investor_amount = monthly_investor
+                payment.manager_amount = monthly_manager
+
+        # Drop out-of-range unpaid after loop cleanup
+        for payment in db.query(Payment).filter(Payment.plan_id == plan.id).all():
+            if payment.month_number < 1 or payment.month_number > plan.duration_months:
+                if payment.status not in {"paid", "awaiting_confirmation"}:
+                    db.delete(payment)
+        db.flush()
+
+        by_month = {
+            p.month_number: p
+            for p in db.query(Payment).filter(Payment.plan_id == plan.id).all()
+        }
+        created: list[Payment] = []
+        for month in range(1, plan.duration_months + 1):
+            if month in by_month:
+                continue
+            due = add_months(plan.start_date, month - 1)
+            clash = (
+                db.query(Payment)
+                .filter(
+                    Payment.investor_id == plan.investor_id,
+                    Payment.due_date == due,
+                )
+                .first()
+            )
+            if clash is not None:
+                continue
+            payment = Payment(
+                plan_id=plan.id,
+                investor_id=plan.investor_id,
+                month_number=month,
+                due_date=due,
+                investor_amount=monthly_investor,
+                manager_amount=monthly_manager,
+                status="scheduled",
+            )
+            db.add(payment)
+            created.append(payment)
+        db.commit()
+        return created
 
     existing = (
         db.query(Payment).filter(Payment.plan_id == plan.id).order_by(Payment.id).all()
@@ -463,7 +699,7 @@ def generate_payment_schedule(db: Session, plan: InvestmentPlan) -> list[Payment
             preserved.pop(month, None)
     db.flush()
 
-    created: list[Payment] = []
+    created = []
     for month in range(1, plan.duration_months + 1):
         if month in preserved:
             continue
@@ -546,53 +782,16 @@ def repair_duplicate_payments(db: Session) -> dict:
 
 
 def repair_reporting_year_plans(db: Session) -> dict:
-    """Realign reporting plans, fix drifted starts, and remove all payment duplicates."""
-    import re
-    from collections import Counter
+    """Startup safety: remove payment duplicates only.
 
+    Never rewrite client start_dates automatically — date changes are explicit
+    manager actions (align / open year / editing start_date).
+    """
     dupes = dedupe_all_payments(db)
-    realigned = 0
-    fixed_active = 0
-
-    # Fix active plans whose start_date year drifted away from their payment years
-    # (e.g. start=2025-09 but payments live in 2026) — prevents year overlaps/duplicates.
-    for plan in db.query(InvestmentPlan).filter(InvestmentPlan.status == "active").all():
-        dues = [
-            p.due_date.year
-            for p in db.query(Payment).filter(Payment.plan_id == plan.id).all()
-            if p.due_date is not None
-        ]
-        if not dues:
-            continue
-        years = set(dues)
-        # Only rewrite when start year has no payments at all (drifted / wrong year).
-        if plan.start_date.year in years:
-            continue
-        target_year = min(years)
-        plan.start_date = date(target_year, 1, 1)
-        db.commit()
-        generate_payment_schedule(db, plan)
-        fixed_active += 1
-
-    for plan in db.query(InvestmentPlan).all():
-        notes = plan.notes or ""
-        match = re.search(r"לוח דיווח לשנת (\d{4})", notes)
-        if not match:
-            continue
-        year = int(match.group(1))
-        expected = date(year, 1, 1)
-        if plan.start_date != expected or plan.duration_months != 12:
-            plan.start_date = expected
-            plan.duration_months = 12
-            db.commit()
-            realigned += 1
-        generate_payment_schedule(db, plan)
-
-    dupes2 = dedupe_all_payments(db)
     return {
-        "duplicate_payments_removed": dupes["removed"] + dupes2["removed"],
-        "plans_realigned": realigned,
-        "active_starts_fixed": fixed_active,
+        "duplicate_payments_removed": dupes["removed"],
+        "plans_realigned": 0,
+        "active_starts_fixed": 0,
     }
 
 

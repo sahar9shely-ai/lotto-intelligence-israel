@@ -10,6 +10,7 @@ import type {
   Payment,
   PaymentReport,
   Plan,
+  PlanStatusReport,
   Quote,
   Settings,
   SiteStatus,
@@ -220,6 +221,18 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  planStatusReport: (id: number) =>
+    request<PlanStatusReport>(`/api/v1/investments/plans/${id}/status-report`),
+  syncPaymentAmounts: (params?: { year?: number; investor_id?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.year != null) q.set("year", String(params.year));
+    if (params?.investor_id != null) q.set("investor_id", String(params.investor_id));
+    const suffix = q.toString() ? `?${q}` : "";
+    return request<{ year: number | null; synced: unknown[]; count: number }>(
+      `/api/v1/investments/sync-payment-amounts${suffix}`,
+      { method: "POST" },
+    );
+  },
   deletePlan: (id: number) =>
     request<void>(`/api/v1/investments/plans/${id}`, {
       method: "DELETE",

@@ -278,6 +278,8 @@ def update_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
+    old_start = plan.start_date
+    old_duration = plan.duration_months
     data = payload.model_dump(exclude_unset=True, exclude={"regenerate_schedule"})
     for key, value in data.items():
         setattr(plan, key, value)
@@ -291,7 +293,9 @@ def update_plan(
     plan.savings_rate_percent = savings_rate
     db.commit()
 
-    should_regen = payload.regenerate_schedule or any(
+    start_changed = plan.start_date != old_start
+    duration_changed = plan.duration_months != old_duration
+    money_changed = any(
         field in data
         for field in (
             "principal",
@@ -299,12 +303,18 @@ def update_plan(
             "monthly_rate_percent",
             "savings_rate_percent",
             "manager_fee_percent",
-            "start_date",
-            "duration_months",
         )
     )
+    should_regen = (
+        payload.regenerate_schedule or money_changed or start_changed or duration_changed
+    )
     if should_regen:
-        svc.generate_payment_schedule(db, plan)
+        # Only move due dates when start/duration were explicitly changed.
+        svc.generate_payment_schedule(
+            db,
+            plan,
+            realign_dates=start_changed or duration_changed,
+        )
 
     plan = (
         db.query(InvestmentPlan)
@@ -345,11 +355,12 @@ def regenerate_schedule(
     plan_id: int,
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
+    realign_dates: bool = Query(default=False),
 ):
     plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    svc.generate_payment_schedule(db, plan)
+    svc.generate_payment_schedule(db, plan, realign_dates=realign_dates)
     payments = (
         db.query(Payment)
         .options(joinedload(Payment.investor))
@@ -358,6 +369,63 @@ def regenerate_schedule(
         .all()
     )
     return [svc.serialize_payment(p) for p in payments]
+
+
+@router.get("/plans/{plan_id}/status-report")
+def plan_status_report(
+    plan_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Month-by-month portfolio status from plan start: cash + savings + cumulative."""
+    plan = (
+        db.query(InvestmentPlan)
+        .options(joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments))
+        .filter(InvestmentPlan.id == plan_id)
+        .first()
+    )
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if not is_manager(user) and plan.investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return svc.build_plan_status_report(plan)
+
+
+@router.post("/sync-payment-amounts")
+def sync_all_payment_amounts(
+    year: Optional[int] = Query(default=None),
+    investor_id: Optional[int] = Query(default=None),
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Sync cash amounts on payments to current plan rates without moving dates."""
+    query = db.query(InvestmentPlan).options(
+        joinedload(InvestmentPlan.payments),
+        joinedload(InvestmentPlan.investor),
+    )
+    if investor_id is not None:
+        query = query.filter(InvestmentPlan.investor_id == investor_id)
+    plans = query.all()
+    synced = []
+    for plan in plans:
+        if year is not None:
+            has_year = any(
+                p.due_date and p.due_date.year == year for p in (plan.payments or [])
+            ) or (plan.start_date and plan.start_date.year == year)
+            if not has_year:
+                continue
+        result = svc.sync_payment_amounts(db, plan)
+        # Also fill any missing months without moving dates.
+        svc.generate_payment_schedule(db, plan, realign_dates=False)
+        synced.append(
+            {
+                "plan_id": plan.id,
+                "investor_id": plan.investor_id,
+                "investor_name": plan.investor.name if plan.investor else "",
+                **result,
+            }
+        )
+    return {"year": year, "synced": synced, "count": len(synced)}
 
 
 @router.get("/payments", response_model=list[PaymentOut])
