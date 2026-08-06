@@ -48,6 +48,17 @@ def test_auth_required_for_dashboard():
 def test_username_login_and_investor_scope_alerts_manager():
     _ensure_seeded()
 
+    # Ensure investor starts without a usable password (suite may have set one earlier).
+    db: Session = InvestmentSessionLocal()
+    try:
+        bar_user = db.query(User).filter(User.username == "bar").first()
+        assert bar_user is not None
+        bar_user.password_hash = None
+        bar_user.must_reset_password = True
+        db.commit()
+    finally:
+        db.close()
+
     blocked = client.post(
         "/api/v1/auth/login",
         json={"username": "bar", "password": "anything"},

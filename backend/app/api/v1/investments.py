@@ -89,15 +89,35 @@ def get_settings(
 
 @router.get("/site-status", response_model=SiteStatusOut)
 def get_site_status(
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
     """Readable by every logged-in user — drives the global update banner."""
+    from pathlib import Path
+
     settings = svc.ensure_settings(db)
+    public_url = None
+    # Managers see the live tunnel URL so bookmarks stay current after free-tunnel rotates.
+    if getattr(user, "role", None) == "manager" or bool(
+        getattr(getattr(user, "investor", None), "is_manager", False)
+    ):
+        for candidate in (
+            Path("/workspace/.public-url"),
+            Path(__file__).resolve().parents[4] / ".public-url",
+            Path.cwd() / ".public-url",
+        ):
+            try:
+                if candidate.is_file():
+                    public_url = candidate.read_text(encoding="utf-8").strip() or None
+                    if public_url:
+                        break
+            except OSError:
+                continue
     return {
         "site_updating": bool(getattr(settings, "site_updating", False)),
         "site_updating_message": getattr(settings, "site_updating_message", None)
         or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
+        "public_url": public_url,
     }
 
 

@@ -29,23 +29,27 @@ export function DashboardPage() {
 
   return (
     <div className="page">
-      <section className="hero">
-        <p className="hero__eyebrow">
-          {isManager ? "ניהול שותפים · תשואה חודשית קבועה" : `שלום ${user?.investor_name}`}
-        </p>
-        <h1 className="hero__brand">תזרים</h1>
-        <p className="hero__lead">
-          {isManager
-            ? "תמונה ברורה של הקרנות, התשלומים והעמלות — במקום אחד."
-            : "המסלול שלך במבט אחד: קרן, תשלומים והיסטוריה."}
-        </p>
-        <div className="hero__actions">
+      <header className="page-intro">
+        <div>
+          <p className="page-intro__eyebrow">
+            {isManager ? "ניהול שותפים" : "המסלול שלך"}
+          </p>
+          <h1 className="page-intro__title">
+            {isManager ? `שלום ${user?.investor_name || "סהר"}` : `שלום ${user?.investor_name}`}
+          </h1>
+          <p className="page-intro__lead">
+            {isManager
+              ? "קרנות, תשלומים והכנסות — במבט אחד."
+              : "קרן, תשלומים והיסטוריה שלך."}
+          </p>
+        </div>
+        <div className="page-head__actions">
           <Link className="btn btn--primary" to="/investors">
             {isManager ? "למשקיעים" : "המסלול שלי"}
           </Link>
           {isManager ? (
-            <Link className="btn btn--ghost" to="/quotes">
-              הצעה חדשה
+            <Link className="btn btn--ghost" to="/payments">
+              תשלומים
             </Link>
           ) : (
             <Link className="btn btn--ghost" to="/payments">
@@ -53,7 +57,42 @@ export function DashboardPage() {
             </Link>
           )}
         </div>
-      </section>
+      </header>
+
+      <div className="stats-grid">
+        <Stat
+          label={isManager ? "סך קרן פעילה" : "הקרן שלי"}
+          value={formatMoney(data.total_principal)}
+          tone="accent"
+        />
+        <Stat
+          label={isManager ? "תשלומים חודשיים למשקיעים" : "תשלום חודשי שלי"}
+          value={formatMoney(data.monthly_investor_payouts)}
+        />
+        {isManager ? (
+          <>
+            <Stat
+              label="עמלת ניהול חודשית"
+              value={formatMoney(data.monthly_manager_fees)}
+              hint="בנוסף — לא נגזר מהמשקיעים"
+              tone="manager"
+            />
+            <Stat
+              label="סה״כ חודשי למנהל"
+              value={formatMoney(data.monthly_manager_total)}
+              hint={`השקעה עצמית ${formatMoney(data.monthly_manager_own_payout)} + עמלה`}
+              tone="manager"
+            />
+          </>
+        ) : (
+          <>
+            <Stat label="מסלולים פעילים" value={String(data.active_plans)} />
+            <Stat label="שולם YTD" value={formatMoney(data.ytd_investor_paid)} />
+          </>
+        )}
+      </div>
+
+      {isManager ? <ManagerIncomePanel /> : null}
 
       {isManager && (alerts?.length ?? 0) > 0 ? (
         <Panel
@@ -97,41 +136,6 @@ export function DashboardPage() {
         </Panel>
       ) : null}
 
-      <div className="stats-grid">
-        <Stat
-          label={isManager ? "סך קרן פעילה" : "הקרן שלי"}
-          value={formatMoney(data.total_principal)}
-          tone="accent"
-        />
-        <Stat
-          label={isManager ? "תשלומים חודשיים למשקיעים" : "תשלום חודשי שלי"}
-          value={formatMoney(data.monthly_investor_payouts)}
-        />
-        {isManager ? (
-          <>
-            <Stat
-              label="עמלת ניהול חודשית"
-              value={formatMoney(data.monthly_manager_fees)}
-              hint="בנוסף — לא נגזר מהמשקיעים"
-              tone="manager"
-            />
-            <Stat
-              label="סה״כ חודשי למנהל"
-              value={formatMoney(data.monthly_manager_total)}
-              hint={`השקעה עצמית ${formatMoney(data.monthly_manager_own_payout)} + עמלה`}
-              tone="manager"
-            />
-          </>
-        ) : (
-          <>
-            <Stat label="מסלולים פעילים" value={String(data.active_plans)} />
-            <Stat label="שולם YTD" value={formatMoney(data.ytd_investor_paid)} />
-          </>
-        )}
-      </div>
-
-      {isManager ? <ManagerIncomePanel /> : null}
-
       <div className="grid-2">
         {isManager ? (
           <Panel
@@ -144,25 +148,34 @@ export function DashboardPage() {
             }
             delay={80}
           >
-            <ul className="list">
-              {data.investors_summary.map((inv) => (
-                <li key={inv.id} className="list__row">
-                  <div>
-                    <strong>
-                      {inv.name}
-                      {inv.is_manager ? <span className="chip">מנהל</span> : null}
-                    </strong>
-                    <span className="muted">
-                      {inv.months_in_program} חודשים בתוכנית · {inv.plans_count} מסלולים
-                    </span>
-                  </div>
-                  <div className="list__meta">
-                    <span>{formatMoney(inv.active_principal)}</span>
-                    <span className="muted">{formatMoney(inv.monthly_payout)} / חודש</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            {data.investors_summary.length === 0 ? (
+              <div className="empty-block">
+                <p className="empty">עדיין אין משקיעים.</p>
+                <Link className="btn btn--small btn--primary" to="/investors">
+                  הוסף משקיע
+                </Link>
+              </div>
+            ) : (
+              <ul className="list">
+                {data.investors_summary.map((inv) => (
+                  <li key={inv.id} className="list__row">
+                    <div>
+                      <strong>
+                        {inv.name}
+                        {inv.is_manager ? <span className="chip">מנהל</span> : null}
+                      </strong>
+                      <span className="muted">
+                        {inv.months_in_program} חודשים בתוכנית · {inv.plans_count} מסלולים
+                      </span>
+                    </div>
+                    <div className="list__meta">
+                      <span>{formatMoney(inv.active_principal)}</span>
+                      <span className="muted">{formatMoney(inv.monthly_payout)} / חודש</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Panel>
         ) : (
           <Panel title="הסיכום שלי" subtitle="רק הנתונים שלך" delay={80}>
@@ -260,7 +273,9 @@ export function DashboardPage() {
               </li>
             ))}
           </ul>
-        ) : null}
+        ) : (
+          <p className="empty">אין תשלומים אחרונים להצגה.</p>
+        )}
       </Panel>
     </div>
   );

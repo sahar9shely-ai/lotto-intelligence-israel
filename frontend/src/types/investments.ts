@@ -127,6 +127,7 @@ export type Settings = {
 export type SiteStatus = {
   site_updating: boolean;
   site_updating_message: string;
+  public_url?: string | null;
 };
 
 export type Dashboard = {

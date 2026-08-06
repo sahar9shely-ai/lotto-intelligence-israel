@@ -213,6 +213,7 @@ class SettingsOut(BaseModel):
 class SiteStatusOut(BaseModel):
     site_updating: bool
     site_updating_message: str
+    public_url: Optional[str] = None
 
 
 class DashboardOut(BaseModel):

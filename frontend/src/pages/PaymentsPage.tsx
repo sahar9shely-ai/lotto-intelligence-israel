@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ManagerIncomePanel } from "../components/ManagerIncomePanel";
 import { Panel } from "../components/Panel";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { Stat } from "../components/Stat";
@@ -109,6 +108,12 @@ export function PaymentsPage() {
   const [removeBusyId, setRemoveBusyId] = useState<number | null>(null);
   const paymentsPanelRef = useRef<HTMLDivElement | null>(null);
   const savingsPanelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!message) return;
+    const id = window.setTimeout(() => setMessage(null), 4500);
+    return () => window.clearTimeout(id);
+  }, [message]);
 
   const investorFilter = investorId ? Number(investorId) : undefined;
 
@@ -697,7 +702,11 @@ export function PaymentsPage() {
         </div>
       </div>
 
-      {message ? <p className="toast">{message}</p> : null}
+      {message ? (
+        <p className={`toast ${/נכשל|שגיאה|אין חיבור/.test(message) ? "toast--error" : ""}`} role="status">
+          {message}
+        </p>
+      ) : null}
 
       {!isManager &&
       payments.some((p) => p.status === "awaiting_confirmation") ? (
@@ -737,8 +746,6 @@ export function PaymentsPage() {
           </ul>
         </Panel>
       ) : null}
-
-      {isManager ? <ManagerIncomePanel /> : null}
 
       <div className="filters">
         <label>

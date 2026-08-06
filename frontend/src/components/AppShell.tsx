@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -11,6 +11,7 @@ export function AppShell() {
     () => api.siteStatus(),
     [user?.id],
   );
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -28,6 +29,18 @@ export function AppShell() {
     { to: "/settings", label: "הגדרות", managerOnly: true },
   ].filter((l) => !l.managerOnly || isManager);
 
+  async function copyPublicUrl() {
+    const url = siteStatus?.public_url;
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div className="app">
       <div className="atmosphere" aria-hidden="true" />
@@ -37,11 +50,27 @@ export function AppShell() {
           <span>{siteStatus.site_updating_message}</span>
         </div>
       ) : null}
+      {isManager && siteStatus?.public_url ? (
+        <div className="public-link-bar" role="status">
+          <span className="public-link-bar__label">קישור ציבורי פעיל</span>
+          <a
+            className="public-link-bar__url"
+            href={siteStatus.public_url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {siteStatus.public_url.replace(/^https?:\/\//, "")}
+          </a>
+          <button type="button" className="btn btn--small btn--ghost" onClick={copyPublicUrl}>
+            {copied ? "הועתק" : "העתק"}
+          </button>
+        </div>
+      ) : null}
       <header className="topbar">
         <div className="brand">
           <span className="brand__mark">תזרים</span>
           <span className="brand__tag">
-            {user ? `${user.investor_name} · ${user.username}` : "מעקב השקעות שותפים"}
+            {user?.investor_name || "מעקב השקעות שותפים"}
           </span>
         </div>
         <nav className="nav" aria-label="ניווט ראשי">
@@ -55,7 +84,14 @@ export function AppShell() {
               {link.label}
             </NavLink>
           ))}
-          <button type="button" className="nav__link nav__logout" onClick={() => { logout(); window.location.assign("/login"); }}>
+          <button
+            type="button"
+            className="nav__link nav__logout"
+            onClick={() => {
+              logout();
+              window.location.assign("/login");
+            }}
+          >
             יציאה
           </button>
         </nav>

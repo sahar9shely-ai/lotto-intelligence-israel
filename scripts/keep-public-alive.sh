@@ -37,21 +37,26 @@ http_code() {
 public_ok() {
   local url="${1:-}"
   [[ -n "$url" ]] || return 1
-  # Reject known-dead free tunnel providers' error pages by requiring app HTML/JSON
   local code body
+  # Prefer SPA HTML, but accept /health 200 while HTML catches up.
   code="$(http_code "${url}/")"
-  [[ "$code" == "200" ]] || return 1
-  body="$(curl -sS --max-time 14 -H 'User-Agent: Mozilla/5.0' -H 'Accept: text/html' "${url}/" 2>/dev/null || true)"
-  if echo "$body" | grep -Eqi 'no tunnel here|Tunnel is busy|Tunnel Unavailable|Tunnel website ahead'; then
-    return 1
-  fi
-  # Prefer seeing our app or health
-  if echo "$body" | grep -Eqi 'תזרים|tazrim|<!doctype html'; then
-    return 0
+  if [[ "$code" == "200" ]]; then
+    body="$(curl -sS --max-time 14 -H 'User-Agent: Mozilla/5.0' -H 'Accept: text/html' "${url}/" 2>/dev/null || true)"
+    if echo "$body" | grep -Eqi 'no tunnel here|Tunnel is busy|Tunnel Unavailable|Tunnel website ahead'; then
+      return 1
+    fi
+    if echo "$body" | grep -Eqi 'תזרים|tazrim|<!doctype html'; then
+      return 0
+    fi
   fi
   local hc
   hc="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 "${url}/health" 2>/dev/null || echo 000)"
-  [[ "$hc" == "200" ]]
+  [[ "$hc" == "200" ]] || return 1
+  # Health alone is not enough if root is an explicit tunnel-error page
+  if [[ "$code" == "503" || "$code" == "502" || "$code" == "000" ]]; then
+    return 1
+  fi
+  return 0
 }
 
 local_ok() {
@@ -81,21 +86,45 @@ ensure_cloudflared_bin() {
 }
 
 ensure_uvicorn() {
-  local_ok && return 0
-  log "uvicorn לא מגיב — מפעיל מחדש..."
-  for pid in $(pgrep -f 'uvicorn app.main:app' || true); do kill "$pid" 2>/dev/null || true; done
+  if local_ok; then
+    # Also ensure SPA is mounted (health alone is not enough for browsers).
+    local root_code
+    root_code="$(curl -sS -o /tmp/tazrim-root-check.html -w '%{http_code}' --max-time 4 "http://${HOST}:${PORT}/" 2>/dev/null || echo 000)"
+    if [[ "$root_code" == "200" ]] && grep -Eqi '<!doctype html>|תזרים' /tmp/tazrim-root-check.html 2>/dev/null; then
+      return 0
+    fi
+    log "uvicorn חי אבל ה־SPA לא מוגש (/ → ${root_code}) — מפעיל מחדש עם FRONTEND_DIST"
+  else
+    log "uvicorn לא מגיב — מפעיל מחדש..."
+  fi
+  for pid in $(pgrep -f '/.local/bin/uvicorn app.main:app' || true); do
+    kill "$pid" 2>/dev/null || true
+  done
   sleep 1
   if [[ ! -f "$ROOT/frontend/dist/index.html" ]]; then
+    log "בונה frontend..."
     (cd "$ROOT/frontend" && npm ci && VITE_API_BASE_URL= npm run build) >>"$KEEP_LOG" 2>&1 || return 1
   fi
   (
     cd "$ROOT/backend"
-    export PYTHONPATH="$ROOT/backend" FRONTEND_DIST="$ROOT/frontend/dist"
+    export PYTHONPATH="$ROOT/backend"
+    export FRONTEND_DIST="$ROOT/frontend/dist"
     export INVESTMENTS_DB_PATH="${INVESTMENTS_DB_PATH:-$ROOT/backend/app/data/investments.db}"
+    export APP_PUBLIC_URL="${APP_PUBLIC_URL:-http://localhost:${PORT}}"
     nohup uvicorn app.main:app --host 127.0.0.1 --port "$PORT" >>"$UV_LOG" 2>&1 &
     echo $! >"$UV_PID_FILE"
   )
-  for _ in $(seq 1 40); do local_ok && return 0; sleep 0.5; done
+  for _ in $(seq 1 50); do
+    if local_ok; then
+      root_code="$(curl -sS -o /tmp/tazrim-root-check.html -w '%{http_code}' --max-time 4 "http://${HOST}:${PORT}/" 2>/dev/null || echo 000)"
+      if [[ "$root_code" == "200" ]] && grep -Eqi '<!doctype html>|תזרים' /tmp/tazrim-root-check.html 2>/dev/null; then
+        log "uvicorn + SPA חיים"
+        return 0
+      fi
+    fi
+    sleep 0.5
+  done
+  log "uvicorn/SPA לא עלו בזמן"
   return 1
 }
 

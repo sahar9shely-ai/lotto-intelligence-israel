@@ -693,8 +693,8 @@ button.stat {
 .list__meta {
   display: grid;
   gap: 2px;
-  text-align: left;
-  justify-items: start;
+  text-align: start;
+  justify-items: end;
 }
 
 .chip {
@@ -890,6 +890,11 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--shadow-soft);
 }
 
 .filters label {
@@ -1070,6 +1075,85 @@ textarea {
   border: 1px solid rgba(47, 111, 94, 0.16);
   color: var(--accent-strong);
   font-weight: 600;
+  position: fixed;
+  z-index: 50;
+  inset-inline: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  max-width: min(520px, calc(100vw - 32px));
+  margin-inline: auto;
+  left: 0;
+  right: 0;
+  box-shadow: var(--shadow);
+  animation: rise 0.25s ease both;
+}
+
+.toast--error {
+  background: rgba(155, 44, 44, 0.1);
+  border-color: rgba(155, 44, 44, 0.25);
+  color: var(--danger);
+}
+
+.page-intro {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px 24px;
+  align-items: end;
+  padding-bottom: 6px;
+}
+
+.page-intro__eyebrow {
+  margin: 0 0 6px;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+.page-intro__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 3.5vw, 2.2rem);
+  color: var(--accent-strong);
+  letter-spacing: -0.02em;
+}
+
+.page-intro__lead {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 0.98rem;
+  max-width: 34rem;
+  line-height: 1.5;
+}
+
+.public-link-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: var(--shadow-soft);
+}
+
+.public-link-bar__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.public-link-bar__url {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .site-update-banner {
@@ -1317,6 +1401,13 @@ textarea {
   border: 0;
   background: transparent;
   cursor: pointer;
+  color: var(--ink-soft) !important;
+}
+
+.nav__logout:hover,
+.nav__logout.is-active {
+  background: transparent !important;
+  color: var(--danger) !important;
 }
 
 .inline-form {
