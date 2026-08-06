@@ -100,6 +100,7 @@ export function PaymentsPage() {
   const [allYears, setAllYears] = useState(false);
   const [detailFocus, setDetailFocus] = useState<DetailFocus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [markBusyId, setMarkBusyId] = useState<number | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [alignBusy, setAlignBusy] = useState(false);
   const [openBusy, setOpenBusy] = useState(false);
@@ -458,18 +459,22 @@ export function PaymentsPage() {
   }
 
   async function markPaid(id: number) {
+    setMarkBusyId(id);
+    setMessage(null);
     try {
       const updated = await api.updatePayment(id, { status: "paid" });
       setMessage(
         updated.status === "awaiting_confirmation"
           ? "נשלחה בקשת אישור למשקיע — הסטטוס ממתין עד שיאשר"
           : updated.status === "paid"
-            ? "התשלום עודכן לבוצע"
+            ? "התשלום שלך עודכן ישירות לבוצע (בלי צורך באישור עצמי)"
             : "הבקשה נשלחה",
       );
       refreshAll();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "שליחת בקשת אישור נכשלה");
+    } finally {
+      setMarkBusyId(null);
     }
   }
 
@@ -1319,9 +1324,10 @@ export function PaymentsPage() {
                           <button
                             type="button"
                             className="btn btn--small"
+                            disabled={markBusyId === p.id}
                             onClick={() => markPaid(p.id)}
                           >
-                            שלח לאישור
+                            {markBusyId === p.id ? "שולח..." : "שלח לאישור"}
                           </button>
                         ) : p.status === "awaiting_confirmation" ? (
                           <button

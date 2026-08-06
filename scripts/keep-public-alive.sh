@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# שומר את תזרים חי באינטרנט עם שתי מנהרות + בדיקה מהירה.
-# Primary: localtunnel (כתובת קבועה tazrim-sahar.loca.lt)
-# Backup:  localhost.run (lhr.life) — מתחלף בכל חיבור מחדש
+# שומר את תזרים חי באינטרנט עם כתובת קבועה + גיבוי.
+# Primary: localtunnel על https://tazrim-sahar.loca.lt בלבד (בלי כתובות אקראיות)
+# Backup:  localhost.run (lhr.life)
 #
 # Usage:
 #   nohup ./scripts/keep-public-alive.sh >/tmp/tazrim-keepalive.out 2>&1 &
@@ -22,6 +22,7 @@ LHR_PID_FILE="${TMPDIR:-/tmp}/tazrim-lhr.pid"
 LT_DIR="${TMPDIR:-/tmp}/tazrim-lt"
 CHECK_EVERY="${CHECK_EVERY:-5}"
 TUNNEL_SUBDOMAIN="${TUNNEL_SUBDOMAIN:-tazrim-sahar}"
+EXPECTED_URL="https://${TUNNEL_SUBDOMAIN}.loca.lt"
 
 export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
 mkdir -p "$(dirname "$KEEP_LOG")" "$LT_DIR"
@@ -111,14 +112,13 @@ ensure_uvicorn() {
 kill_pids_matching() {
   local pattern="$1"
   for pid in $(pgrep -f "$pattern" || true); do
-    # Never kill ourselves / parent shells by matching keepalive script name alone here
     kill -9 "$pid" 2>/dev/null || true
   done
 }
 
 start_localtunnel() {
   ensure_localtunnel_pkg || return 1
-  log "פותח localtunnel (subdomain=${TUNNEL_SUBDOMAIN})..."
+  log "פותח localtunnel קבוע: $EXPECTED_URL"
   kill_pids_matching 'localtunnel-open.js'
   if [[ -f "$LT_PID_FILE" ]]; then
     kill -9 "$(cat "$LT_PID_FILE")" 2>/dev/null || true
@@ -134,34 +134,35 @@ start_localtunnel() {
   )
   local lt_pid url=""
   lt_pid="$(cat "$LT_PID_FILE" 2>/dev/null || echo "")"
-  for _ in $(seq 1 40); do
-    url="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.(loca\.lt|localtunnel\.me)' "$LT_LOG" 2>/dev/null | tail -1 || true)"
+  for _ in $(seq 1 100); do
+    url="$(grep -Eo "https://${TUNNEL_SUBDOMAIN}\\.(loca\\.lt|localtunnel\\.me)" "$LT_LOG" 2>/dev/null | tail -1 || true)"
     if [[ -n "$url" ]]; then
       break
     fi
     if [[ -n "$lt_pid" ]] && ! kill -0 "$lt_pid" 2>/dev/null; then
-      log "localtunnel נעצר מוקדם"
-      tail -20 "$LT_LOG" | tee -a "$KEEP_LOG" || true
+      log "localtunnel נעצר בלי הכתובת הקבועה"
+      tail -30 "$LT_LOG" | tee -a "$KEEP_LOG" || true
       return 1
     fi
     sleep 1
   done
   if [[ -z "$url" ]]; then
-    log "לא התקבל קישור localtunnel"
+    log "לא התקבל הקישור הקבוע $EXPECTED_URL"
+    tail -30 "$LT_LOG" | tee -a "$KEEP_LOG" || true
     return 1
   fi
-  printf '%s\n' "$url" >"$URL_FILE"
+  printf '%s\n' "$EXPECTED_URL" >"$URL_FILE"
   sleep 2
-  if public_ok "$url"; then
-    log "localtunnel חי: $url"
+  if public_ok "$EXPECTED_URL"; then
+    log "localtunnel חי: $EXPECTED_URL"
     return 0
   fi
-  sleep 3
-  if public_ok "$url"; then
-    log "localtunnel חי (המתנה): $url"
+  sleep 4
+  if public_ok "$EXPECTED_URL"; then
+    log "localtunnel חי (המתנה): $EXPECTED_URL"
     return 0
   fi
-  log "localtunnel נוצר אבל health נכשל: $url"
+  log "localtunnel נוצר אבל health נכשל: $EXPECTED_URL"
   return 1
 }
 
@@ -207,14 +208,15 @@ start_lhr() {
 }
 
 ensure_localtunnel() {
-  local url
-  url="$(read_url "$URL_FILE")"
+  # Always pin bookmark URL — never drift to random hosts.
+  printf '%s\n' "$EXPECTED_URL" >"$URL_FILE"
+
   if ! pgrep -f 'localtunnel-open.js' >/dev/null 2>&1; then
     start_localtunnel
     return $?
   fi
-  if [[ -z "$url" ]] || ! public_ok "$url"; then
-    log "localtunnel לא בריא — מפעיל מחדש"
+  if ! public_ok "$EXPECTED_URL"; then
+    log "הקישור הקבוע לא בריא ($EXPECTED_URL) — מפעיל מחדש"
     start_localtunnel
     return $?
   fi
@@ -236,13 +238,12 @@ ensure_lhr() {
   return 0
 }
 
-log "===== keep-public-alive v2 (lt+lhr, כל ${CHECK_EVERY}ש׳) ====="
+log "===== keep-public-alive v3 (fixed loca.lt + lhr, כל ${CHECK_EVERY}ש׳) ====="
 
 LOCK="/tmp/tazrim-keepalive.lock"
 if [[ -f "$LOCK" ]]; then
   old_pid="$(cat "$LOCK" 2>/dev/null || true)"
   if [[ -n "${old_pid:-}" ]] && kill -0 "$old_pid" 2>/dev/null; then
-    # Replace older keepalive with this stronger one
     if [[ "$old_pid" != "$$" ]]; then
       log "מחליף keepalive ישן (pid $old_pid)"
       kill "$old_pid" 2>/dev/null || true
@@ -253,7 +254,6 @@ fi
 echo $$ >"$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
-# Stop leftover Cloudflare quick tunnels (known flaky)
 for pid in $(pgrep -f '/cloudflared tunnel --url' || true); do
   kill -9 "$pid" 2>/dev/null || true
 done
