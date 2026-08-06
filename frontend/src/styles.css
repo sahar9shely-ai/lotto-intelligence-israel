@@ -63,6 +63,16 @@ a {
   padding: 22px 20px 96px;
 }
 
+.shell {
+  position: relative;
+  min-height: 100vh;
+}
+
+.page--refreshing {
+  opacity: 0.92;
+  transition: opacity 0.2s ease;
+}
+
 .atmosphere {
   position: fixed;
   inset: 0;
@@ -756,6 +766,15 @@ button.stat {
   font-size: 0.84rem;
 }
 
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  pointer-events: none;
+}
+
 .hero .btn--primary {
   background: #fff;
   border-color: #fff;
@@ -1081,8 +1100,6 @@ textarea {
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   max-width: min(520px, calc(100vw - 32px));
   margin-inline: auto;
-  left: 0;
-  right: 0;
   box-shadow: var(--shadow);
   animation: rise 0.25s ease both;
 }
@@ -1091,6 +1108,11 @@ textarea {
   background: rgba(155, 44, 44, 0.1);
   border-color: rgba(155, 44, 44, 0.25);
   color: var(--danger);
+}
+
+.col-highlight {
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .page-intro {
@@ -1170,6 +1192,7 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 40;
+  width: 100%;
 }
 
 .site-update-banner strong {
@@ -1178,6 +1201,14 @@ textarea {
 
 .site-update-banner span {
   opacity: 0.92;
+}
+
+.auth-card__eyebrow {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
 }
 
 .checkbox-row {
@@ -1383,7 +1414,7 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  justify-content: space-between;
+  justify-content: center;
 }
 
 .auth-links a {

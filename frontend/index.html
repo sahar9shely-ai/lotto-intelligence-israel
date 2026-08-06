@@ -23,39 +23,6 @@
       rel="stylesheet"
     />
     <title>תזרים</title>
-    <script>
-      /* One-shot cache bust — never loop-reload */
-      (function () {
-        var V = "tazrim-v5-20260806-stable";
-        var LOCK = "tazrim-cache-busting";
-        try {
-          if (sessionStorage.getItem(LOCK) === "1") {
-            sessionStorage.removeItem(LOCK);
-            localStorage.setItem("tazrim-cache-bust", V);
-            return;
-          }
-          if (localStorage.getItem("tazrim-cache-bust") === V) return;
-          sessionStorage.setItem(LOCK, "1");
-          localStorage.setItem("tazrim-cache-bust", V);
-          var done = Promise.resolve();
-          if (window.caches) {
-            done = done.then(function () {
-              return caches.keys().then(function (ks) {
-                return Promise.all(ks.map(function (k) { return caches.delete(k); }));
-              });
-            });
-          }
-          if (navigator.serviceWorker) {
-            done = done.then(function () {
-              return navigator.serviceWorker.getRegistrations().then(function (rs) {
-                return Promise.all(rs.map(function (r) { return r.unregister(); }));
-              });
-            });
-          }
-          done.finally(function () { location.reload(); });
-        } catch (e) {}
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -28,7 +28,7 @@ function useBlockAutofill(ref: React.RefObject<HTMLInputElement | null>, setValu
 }
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { user, loading, login } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -41,6 +41,10 @@ export function LoginPage() {
 
   useBlockAutofill(userRef, setUsername);
   useBlockAutofill(passRef, setPassword);
+
+  useEffect(() => {
+    if (!loading && user) navigate("/", { replace: true });
+  }, [loading, user, navigate]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -56,11 +60,20 @@ export function LoginPage() {
     }
   }
 
+  if (loading) {
+    return (
+      <div className="auth-screen">
+        <div className="atmosphere" aria-hidden="true" />
+        <div className="state">טוען...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <p className="hero__eyebrow">כניסה למערכת</p>
+        <p className="auth-card__eyebrow">כניסה למערכת</p>
         <h1 className="auth-card__brand">תזרים</h1>
         <p className="muted">הזן את פרטי הכניסה שלך כדי להמשיך.</p>
 

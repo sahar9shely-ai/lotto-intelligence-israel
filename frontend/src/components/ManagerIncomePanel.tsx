@@ -40,7 +40,7 @@ export function ManagerIncomeBoardView({ data }: { data: ManagerIncomeBoard }) {
   return (
     <Panel
       title="הכנסות מנהל · כל חודש"
-      subtitle="למנהל בלבד · כמה כל משקיע מביא בעמלה + ההחזר של סהר לפי ההשקעה שלה"
+      subtitle={`למנהל בלבד · עמלות ממשקיעים + החזר ${name} לפי ההשקעה`}
     >
       <div className="manager-income">
         <div className="manager-income__hero">
@@ -105,7 +105,7 @@ export function ManagerIncomeBoardView({ data }: { data: ManagerIncomeBoard }) {
 
         <section className="manager-income__section manager-income__section--own">
           <h3 className="manager-income__section-title">
-            החזר {name} · לפי ההשקעה שלה
+            החזר {name} · לפי ההשקעה
           </h3>
           {own.plans.length === 0 ? (
             <p className="muted">אין מסלול פעיל ל{name}.</p>

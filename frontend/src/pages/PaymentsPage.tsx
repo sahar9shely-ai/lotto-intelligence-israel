@@ -122,7 +122,7 @@ export function PaymentsPage() {
     [isManager],
   );
   const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
-  const { data, error, loading, reload } = useAsync(
+  const { data, error, loading, refreshing, reload } = useAsync(
     () =>
       api.payments({
         year: allYears ? undefined : year,
@@ -154,9 +154,10 @@ export function PaymentsPage() {
       scheduled: 1,
       skipped: 0,
     };
+    // Dedupe only within the same plan + due date (never drop another plan's row).
     const unique = new Map<string, (typeof rows)[number]>();
     for (const row of rows) {
-      const key = `${row.investor_id}|${row.due_date}`;
+      const key = `${row.plan_id ?? "none"}|${row.investor_id}|${row.due_date}`;
       const prev = unique.get(key);
       if (!prev || (priority[row.status] ?? 0) > (priority[prev.status] ?? 0)) {
         unique.set(key, row);
@@ -484,28 +485,44 @@ export function PaymentsPage() {
   }
 
   async function markScheduled(id: number) {
-    await api.updatePayment(id, { status: "scheduled" });
-    setMessage("הבקשה בוטלה — חזר לסטטוס מתוכנן");
-    refreshAll();
+    setMarkBusyId(id);
+    setMessage(null);
+    try {
+      await api.updatePayment(id, { status: "scheduled" });
+      setMessage("הבקשה בוטלה — חזר לסטטוס מתוכנן");
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "ביטול הבקשה נכשל");
+    } finally {
+      setMarkBusyId(null);
+    }
   }
 
   async function confirmPayment(id: number) {
+    setMarkBusyId(id);
+    setMessage(null);
     try {
       await api.confirmPayment(id);
       setMessage("אישרת את התשלום — הסטטוס עודכן לבוצע");
       refreshAll();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "אישור התשלום נכשל");
+    } finally {
+      setMarkBusyId(null);
     }
   }
 
   async function rejectPayment(id: number) {
+    setMarkBusyId(id);
+    setMessage(null);
     try {
       await api.rejectPayment(id);
       setMessage("התשלום נדחה — חזר לסטטוס מתוכנן");
       refreshAll();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "דחיית התשלום נכשלה");
+    } finally {
+      setMarkBusyId(null);
     }
   }
 
@@ -636,8 +653,8 @@ export function PaymentsPage() {
     }
   }
 
-  if (loading) return <div className="state">טוען היסטוריית תשלומים...</div>;
-  if (error)
+  if (loading && !data) return <div className="state">טוען היסטוריית תשלומים...</div>;
+  if (error && !data)
     return (
       <div className="state state--error">
         <p>{error}</p>
@@ -647,8 +664,11 @@ export function PaymentsPage() {
       </div>
     );
 
+  const isToastError = (msg: string) =>
+    /נכשל|שגיאה|אין חיבור|אסור|הרשאה|401|403|failed|error/i.test(msg);
+
   return (
-    <div className="page">
+    <div className={`page${refreshing ? " page--refreshing" : ""}`}>
       <div className="page-head">
         <div>
           <h1>{isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}</h1>
@@ -703,7 +723,7 @@ export function PaymentsPage() {
       </div>
 
       {message ? (
-        <p className={`toast ${/נכשל|שגיאה|אין חיבור/.test(message) ? "toast--error" : ""}`} role="status">
+        <p className={`toast ${isToastError(message) ? "toast--error" : ""}`} role="status">
           {message}
         </p>
       ) : null}
@@ -712,13 +732,13 @@ export function PaymentsPage() {
       payments.some((p) => p.status === "awaiting_confirmation") ? (
         <Panel
           title="ממתין לאישור שלך"
-          subtitle="המנהל סימן תשלום — אשר או דחה כדי לעדכן את הסטטוס"
+          subtitle="המנהל שלח בקשה — אשר או דחה למטה ברשימה, או כאן"
         >
           <ul className="list">
             {payments
               .filter((p) => p.status === "awaiting_confirmation")
               .map((p) => (
-                <li key={p.id} className="list__row">
+                <li key={`await-${p.id}`} className="list__row">
                   <div>
                     <strong>{formatCalendarMonth(p.due_date)}</strong>
                     <span className="muted">
@@ -729,13 +749,15 @@ export function PaymentsPage() {
                     <button
                       type="button"
                       className="btn btn--small btn--primary"
+                      disabled={markBusyId === p.id}
                       onClick={() => confirmPayment(p.id)}
                     >
-                      אשר קבלה
+                      {markBusyId === p.id ? "מאשר..." : "אשר קבלה"}
                     </button>
                     <button
                       type="button"
                       className="btn btn--small btn--ghost btn--danger"
+                      disabled={markBusyId === p.id}
                       onClick={() => rejectPayment(p.id)}
                     >
                       דחה
@@ -837,9 +859,9 @@ export function PaymentsPage() {
               />
             ) : null}
             <Stat
-              label="שולמו / ממתינים לאישור"
-              value={`${yearly?.paid_count ?? 0} / ${yearly?.awaiting_count ?? 0}`}
-              hint="לחיצה מציגה ממתינים לאישור"
+              label="ממתינים לאישור"
+              value={String(yearly?.awaiting_count ?? 0)}
+              hint={`שולמו השנה: ${yearly?.paid_count ?? 0}`}
               active={detailFocus === "yearly-awaiting"}
               onClick={() => openDetail("yearly-awaiting")}
             />
@@ -1340,17 +1362,19 @@ export function PaymentsPage() {
                           <button
                             type="button"
                             className="btn btn--small btn--ghost"
+                            disabled={markBusyId === p.id}
                             onClick={() => markScheduled(p.id)}
                           >
-                            בטל בקשה
+                            {markBusyId === p.id ? "מבטל..." : "בטל בקשה"}
                           </button>
                         ) : p.status === "paid" ? (
                           <button
                             type="button"
                             className="btn btn--small btn--ghost"
+                            disabled={markBusyId === p.id}
                             onClick={() => markScheduled(p.id)}
                           >
-                            החזר למתוכנן
+                            {markBusyId === p.id ? "מעדכן..." : "החזר למתוכנן"}
                           </button>
                         ) : null
                       ) : p.status === "awaiting_confirmation" ? (
@@ -1358,13 +1382,15 @@ export function PaymentsPage() {
                           <button
                             type="button"
                             className="btn btn--small btn--primary"
+                            disabled={markBusyId === p.id}
                             onClick={() => confirmPayment(p.id)}
                           >
-                            אשר קבלה
+                            {markBusyId === p.id ? "מאשר..." : "אשר קבלה"}
                           </button>
                           <button
                             type="button"
                             className="btn btn--small btn--ghost btn--danger"
+                            disabled={markBusyId === p.id}
                             onClick={() => rejectPayment(p.id)}
                           >
                             דחה

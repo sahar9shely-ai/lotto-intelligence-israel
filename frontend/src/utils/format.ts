@@ -26,9 +26,20 @@ export function formatPercent(value: number): string {
   })}%`;
 }
 
+/** Parse ISO date safely for display (avoid UTC midnight → previous-day in Israel). */
+function parseDisplayDate(value: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T12:00:00`);
+  }
+  if (/^\d{4}-\d{2}-\d{2}T/.test(value) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(value)) {
+    return new Date(value.includes("T") ? value : `${value}T12:00:00`);
+  }
+  return new Date(value);
+}
+
 export function formatDate(value?: string | null): string {
   if (!value) return "—";
-  return dateFmt.format(new Date(value));
+  return dateFmt.format(parseDisplayDate(value));
 }
 
 export function statusLabel(status: string): string {
@@ -75,5 +86,7 @@ export function trackEndISO(startDate: string, durationMonths: number): string {
 /** Hebrew calendar month name from an ISO date (e.g. ינואר). */
 export function formatCalendarMonth(value?: string | null): string {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("he-IL", { month: "long" }).format(new Date(value));
+  return new Intl.DateTimeFormat("he-IL", { month: "long" }).format(
+    parseDisplayDate(value),
+  );
 }

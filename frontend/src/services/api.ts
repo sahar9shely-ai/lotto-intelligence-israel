@@ -19,6 +19,7 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const TOKEN_KEY = "tazrim_token";
+export const AUTH_EXPIRED_EVENT = "tazrim:auth-expired";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -27,6 +28,11 @@ export function getToken(): string | null {
 export function setToken(token: string | null) {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+}
+
+function notifyAuthExpired() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
 }
 
 async function request<T>(path: string, init?: RequestInit, auth = true): Promise<T> {
@@ -51,6 +57,7 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
 
   if (response.status === 401) {
     setToken(null);
+    notifyAuthExpired();
   }
 
   if (!response.ok) {

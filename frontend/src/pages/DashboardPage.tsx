@@ -35,7 +35,9 @@ export function DashboardPage() {
             {isManager ? "ניהול שותפים" : "המסלול שלך"}
           </p>
           <h1 className="page-intro__title">
-            {isManager ? `שלום ${user?.investor_name || "סהר"}` : `שלום ${user?.investor_name}`}
+            {isManager
+              ? `שלום ${user?.investor_name || user?.username || ""}`
+              : `שלום ${user?.investor_name || user?.username || ""}`}
           </h1>
           <p className="page-intro__lead">
             {isManager
