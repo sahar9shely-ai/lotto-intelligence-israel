@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Public tunnel keepalive v8 — localhost.run primary (proven in this env).
-# Cloudflare quick tunnel is tried only if lhr fails repeatedly.
-# Rewrite .public-url only after browser HTML check. Avoid thrashing.
+# Public tunnel keepalive v10 — STABILITY FIRST.
+# Never thrash a working URL. Cloudflare primary, lhr fallback.
+# Health = /health JSON ok OR SPA HTML. Grace period after connect.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,11 +14,16 @@ LHR_LOG="${TMPDIR:-/tmp}/localhost-run.log"
 KEEP_LOG="${TMPDIR:-/tmp}/tazrim-keepalive.log"
 UV_LOG="${TMPDIR:-/tmp}/tazrim-uvicorn.log"
 LOCK="/tmp/tazrim-keepalive.lock"
+CF_PID_FILE="/tmp/tazrim-cf.pid"
+LHR_PID_FILE="/tmp/tazrim-lhr.pid"
+GRACE_UNTIL=0
 
 export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
 mkdir -p "$(dirname "$KEEP_LOG")"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$KEEP_LOG"; }
+
+now() { date +%s; }
 
 local_spa_ok() {
   local code
@@ -32,7 +37,6 @@ ensure_uvicorn() {
     return 0
   fi
   log "מפעיל uvicorn + SPA..."
-  # Kill by matching python uvicorn cmdline carefully
   for pid in $(pgrep -f '/.local/bin/uvicorn app.main:app' || true); do
     kill -9 "$pid" 2>/dev/null || true
   done
@@ -54,29 +58,32 @@ ensure_uvicorn() {
   return 1
 }
 
+# True if the public URL serves our app (HTML or health JSON).
 browser_ok() {
   local url="$1"
-  local code body
-  code="$(curl -sS -o /tmp/tazrim-pub-check.html -w '%{http_code}' --max-time 16 \
-    -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15' \
-    -H 'Accept: text/html' "${url}/" 2>/dev/null || echo 000)"
-  [[ "$code" == "200" ]] || return 1
-  body="$(cat /tmp/tazrim-pub-check.html 2>/dev/null || true)"
-  echo "$body" | grep -Eqi 'no tunnel here|Tunnel is busy|Tunnel Unavailable|Error 1033' && return 1
-  echo "$body" | grep -Eqi '<!doctype html>|תזרים'
+  local code body hcode
+  # Prefer health — stable and not blocked by interstitial pages
+  hcode="$(curl -sS -o /tmp/tazrim-pub-health.json -w '%{http_code}' --max-time 12 \
+    -H 'User-Agent: Mozilla/5.0' "${url}/health" 2>/dev/null || echo 000)"
+  if [[ "$hcode" == "200" ]] && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/tazrim-pub-health.json 2>/dev/null; then
+    # Also require root is not "no tunnel here"
+    code="$(curl -sS -o /tmp/tazrim-pub-check.html -w '%{http_code}' --max-time 12 \
+      -H 'User-Agent: Mozilla/5.0' -H 'Accept: text/html' "${url}/" 2>/dev/null || echo 000)"
+    if [[ "$code" == "200" ]]; then
+      body="$(cat /tmp/tazrim-pub-check.html 2>/dev/null || true)"
+      echo "$body" | grep -Eqi 'no tunnel here|Tunnel is busy|Tunnel Unavailable|Tunnel website ahead' && return 1
+      return 0
+    fi
+  fi
+  return 1
 }
 
 publish_url() {
   local url="$1"
-  local prev
-  prev="$(current_url)"
   printf '%s\n' "$url" >"$URL_FILE"
   printf '%s\n' "$url" >"$BACKUP_FILE"
-  if [[ "$prev" == "$url" ]]; then
-    log "קישור פעיל (אותו): $url"
-  else
-    log "קישור פעיל: $url"
-  fi
+  GRACE_UNTIL=$(( $(now) + 120 ))
+  log "קישור פעיל: $url (grace 120s)"
 }
 
 current_url() {
@@ -84,27 +91,91 @@ current_url() {
   tr -d '[:space:]' < "$URL_FILE"
 }
 
-stop_cloudflare() {
-  for pid in $(pgrep -f '/cloudflared tunnel --url' || true); do
+# Kill ALL cloudflared quick tunnels (by matching binary+args carefully via pgrep -f on unique string)
+kill_all_cf() {
+  local pids
+  pids="$(pgrep -f 'cloudflared tunnel --url http://127.0.0.1:' || true)"
+  for pid in $pids; do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  rm -f "$CF_PID_FILE"
+}
+
+kill_all_lhr() {
+  local pids
+  pids="$(pgrep -f 'nokey@localhost.run' || true)"
+  for pid in $pids; do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  rm -f "$LHR_PID_FILE"
+}
+
+kill_localtunnel() {
+  local pids
+  pids="$(pgrep -f 'localtunnel-open.js' || true)"
+  for pid in $pids; do
     kill -9 "$pid" 2>/dev/null || true
   done
 }
 
-stop_lhr() {
-  for pid in $(pgrep -f 'nokey@localhost.run' || true); do
-    kill -9 "$pid" 2>/dev/null || true
+tunnel_proc_alive_for_url() {
+  local url="$1"
+  if [[ "$url" == *.trycloudflare.com ]]; then
+    pgrep -f 'cloudflared tunnel --url http://127.0.0.1:' >/dev/null 2>&1
+  elif [[ "$url" == *.lhr.life ]]; then
+    pgrep -f 'nokey@localhost.run' >/dev/null 2>&1
+  else
+    return 0
+  fi
+}
+
+open_cloudflare() {
+  command -v cloudflared >/dev/null 2>&1 || return 1
+  kill_all_cf
+  sleep 2
+  : >"$CF_LOG"
+  nohup cloudflared tunnel --url "http://${HOST}:${PORT}" --protocol http2 --no-autoupdate \
+    >"$CF_LOG" 2>&1 &
+  local cf_pid=$!
+  echo "$cf_pid" >"$CF_PID_FILE"
+  local url=""
+  for _ in $(seq 1 55); do
+    url="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$CF_LOG" 2>/dev/null | tail -1 || true)"
+    [[ -n "$url" ]] && break
+    kill -0 "$cf_pid" 2>/dev/null || return 1
+    sleep 1
   done
+  [[ -n "$url" ]] || return 1
+  sleep 8
+  for _ in $(seq 1 40); do
+    if browser_ok "$url"; then
+      kill_all_lhr
+      kill_localtunnel
+      # Ensure only this CF remains
+      for pid in $(pgrep -f 'cloudflared tunnel --url http://127.0.0.1:' || true); do
+        if [[ "$pid" != "$cf_pid" ]]; then
+          kill -9 "$pid" 2>/dev/null || true
+        fi
+      done
+      publish_url "$url"
+      return 0
+    fi
+    sleep 2
+  done
+  log "cloudflare נוצר אבל לא עבר בדיקה: $url"
+  kill -9 "$cf_pid" 2>/dev/null || true
+  return 1
 }
 
 open_lhr() {
-  stop_lhr
+  kill_all_lhr
   sleep 1
   : >"$LHR_LOG"
   nohup ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o ServerAliveInterval=20 -o ServerAliveCountMax=4 -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 -o ServerAliveCountMax=5 -o ExitOnForwardFailure=yes \
     -R 80:localhost:${PORT} nokey@localhost.run >>"$LHR_LOG" 2>&1 &
   local ssh_pid=$!
-  echo "$ssh_pid" > /tmp/tazrim-lhr.pid
+  echo "$ssh_pid" >"$LHR_PID_FILE"
   local url=""
   for _ in $(seq 1 45); do
     url="$(grep -Eo 'https://[a-z0-9]+\.lhr\.life' "$LHR_LOG" 2>/dev/null | tail -1 || true)"
@@ -115,7 +186,6 @@ open_lhr() {
   [[ -n "$url" ]] || return 1
   for _ in $(seq 1 25); do
     if browser_ok "$url"; then
-      stop_cloudflare
       publish_url "$url"
       return 0
     fi
@@ -125,46 +195,17 @@ open_lhr() {
   return 1
 }
 
-open_cloudflare() {
-  command -v cloudflared >/dev/null 2>&1 || return 1
-  stop_cloudflare
-  sleep 1
-  : >"$CF_LOG"
-  nohup cloudflared tunnel --url "http://${HOST}:${PORT}" --protocol http2 --no-autoupdate \
-    >"$CF_LOG" 2>&1 &
-  local cf_pid=$!
-  echo "$cf_pid" > /tmp/tazrim-cf.pid
-  local url=""
-  for _ in $(seq 1 50); do
-    url="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$CF_LOG" 2>/dev/null | tail -1 || true)"
-    [[ -n "$url" ]] && break
-    kill -0 "$cf_pid" 2>/dev/null || return 1
-    sleep 1
-  done
-  [[ -n "$url" ]] || return 1
-  # DNS + edge warm-up can take a while
-  for _ in $(seq 1 30); do
-    if browser_ok "$url"; then
-      stop_lhr
-      publish_url "$url"
-      return 0
-    fi
-    sleep 2
-  done
-  log "cloudflare נוצר אבל לא עבר בדיקה: $url"
-  stop_cloudflare
-  return 1
-}
-
 reconnect() {
-  log "מנהרה לא בריאה — מחבר מחדש (lhr)"
-  if open_lhr; then
+  log "מנהרה לא בריאה — מחבר מחדש (cloudflare)"
+  if open_cloudflare; then
     return 0
   fi
-  log "lhr נכשל — מנסה cloudflare"
-  open_cloudflare
+  log "cloudflare נכשל — מנסה localhost.run"
+  kill_all_cf
+  open_lhr
 }
 
+# --- main ---
 if [[ -f "$LOCK" ]]; then
   old="$(cat "$LOCK" 2>/dev/null || true)"
   if [[ -n "${old:-}" ]] && kill -0 "$old" 2>/dev/null && [[ "$old" != "$$" ]]; then
@@ -175,36 +216,44 @@ fi
 echo $$ >"$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
-# Stop competing localtunnel (browser interstitial / 511)
-for pid in $(pgrep -f 'localtunnel-open.js' || true); do kill -9 "$pid" 2>/dev/null || true; done
+kill_localtunnel
 
-log "===== keep-public-alive v8 (lhr primary) ====="
+log "===== keep-public-alive v10 (anti-thrash) ====="
+
+ensure_uvicorn || true
+url="$(current_url)"
+if [[ -n "$url" ]] && tunnel_proc_alive_for_url "$url" && browser_ok "$url"; then
+  GRACE_UNTIL=$(( $(now) + 120 ))
+  log "שומר קישור קיים ובריא: $url"
+else
+  reconnect || true
+fi
 
 STABLE_FAILS=0
 while true; do
   ensure_uvicorn || true
   url="$(current_url)"
-  # Also require the ssh process if URL is lhr
-  alive_proc=1
-  if [[ "$url" == *.lhr.life ]]; then
-    pgrep -f 'nokey@localhost.run' >/dev/null 2>&1 || alive_proc=0
-  elif [[ "$url" == *.trycloudflare.com ]]; then
-    pgrep -f '/cloudflared tunnel --url' >/dev/null 2>&1 || alive_proc=0
+
+  # During grace — never reconnect
+  if [[ $(now) -lt $GRACE_UNTIL ]]; then
+    sleep 15
+    continue
   fi
 
-  if [[ -n "$url" ]] && [[ "$alive_proc" -eq 1 ]] && browser_ok "$url"; then
+  if [[ -n "$url" ]] && tunnel_proc_alive_for_url "$url" && browser_ok "$url"; then
     STABLE_FAILS=0
-    sleep 20
+    sleep 40
     continue
   fi
+
   STABLE_FAILS=$((STABLE_FAILS + 1))
-  # 3 consecutive failures before reconnect (reduce URL thrash)
-  if [[ "$STABLE_FAILS" -lt 3 ]]; then
-    log "בדיקת מנהרה נכשלה פעם ${STABLE_FAILS}/3 — ממתין"
-    sleep 8
+  # Need 5 consecutive failures over ~2+ minutes before reconnect
+  if [[ "$STABLE_FAILS" -lt 5 ]]; then
+    log "בדיקת מנהרה נכשלה פעם ${STABLE_FAILS}/5 — לא מחליפים עדיין"
+    sleep 25
     continue
   fi
-  reconnect || sleep 10
+  reconnect || sleep 20
   STABLE_FAILS=0
-  sleep 10
+  sleep 20
 done
