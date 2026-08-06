@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# שומר את תזרים חי באינטרנט: מפעיל מחדש uvicorn + cloudflared אם נופלים.
-# מנהרות trycloudflare.com הזמניות נקטעות מצד Cloudflare — הסקריפט מזהה ופותח מחדש.
-#
+# שומר את תזרים חי באינטרנט דרך localtunnel (כתובת יציבה יותר מ־trycloudflare).
 # Usage:
 #   nohup ./scripts/keep-public-alive.sh >/tmp/tazrim-keepalive.out 2>&1 &
 set -uo pipefail
@@ -9,53 +7,23 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PORT:-8000}"
 HOST="127.0.0.1"
-BIN_DIR="${HOME}/.local/bin"
-CLOUDFLARED="${BIN_DIR}/cloudflared"
 URL_FILE="${ROOT}/.public-url"
 UV_LOG="${TMPDIR:-/tmp}/tazrim-uvicorn.log"
-CF_LOG="${TMPDIR:-/tmp}/cloudflared.log"
+LT_LOG="${TMPDIR:-/tmp}/localtunnel.log"
 KEEP_LOG="${TMPDIR:-/tmp}/tazrim-keepalive.log"
 UV_PID_FILE="${TMPDIR:-/tmp}/tazrim-uvicorn.pid"
-CF_PID_FILE="${TMPDIR:-/tmp}/tazrim-cloudflared.pid"
+LT_PID_FILE="${TMPDIR:-/tmp}/tazrim-localtunnel.pid"
+LT_DIR="${TMPDIR:-/tmp}/tazrim-lt"
 CHECK_EVERY="${CHECK_EVERY:-15}"
+TUNNEL_SUBDOMAIN="${TUNNEL_SUBDOMAIN:-tazrim-sahar}"
 
-export PATH="${BIN_DIR}:/usr/local/bin:/usr/bin:/bin:${PATH}"
-mkdir -p "$BIN_DIR" "$(dirname "$KEEP_LOG")"
-
-# ripgrep may be missing in background PATH — fall back to grep -E
-extract_cf_url() {
-  if command -v rg >/dev/null 2>&1; then
-    rg -o 'https://[a-z0-9-]+\.trycloudflare\.com' "$1" 2>/dev/null | tail -1 || true
-  else
-    grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$1" 2>/dev/null | tail -1 || true
-  fi
-}
-
-cf_log_has_dead() {
-  [[ -f "$CF_LOG" ]] || return 1
-  if command -v rg >/dev/null 2>&1; then
-    rg -q 'Tunnel not found|Unauthorized: Tunnel not found|control stream encountered a failure|Unable to reach the origin' "$CF_LOG" 2>/dev/null
-  else
-    grep -Eq 'Tunnel not found|Unauthorized: Tunnel not found|control stream encountered a failure|Unable to reach the origin' "$CF_LOG" 2>/dev/null
-  fi
-}
+export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+mkdir -p "$(dirname "$KEEP_LOG")" "$LT_DIR"
 
 log() {
   local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"
   echo "$msg" | tee -a "$KEEP_LOG"
 }
-
-install_cloudflared() {
-  local ver url
-  ver="$(curl -fsSL https://api.github.com/repos/cloudflare/cloudflared/releases/latest \
-    | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')"
-  url="https://github.com/cloudflare/cloudflared/releases/download/${ver}/cloudflared-linux-amd64"
-  log "מתקין cloudflared ${ver}..."
-  curl -fsSL -o "$CLOUDFLARED" "$url"
-  chmod +x "$CLOUDFLARED"
-}
-
-[[ -x "$CLOUDFLARED" ]] || install_cloudflared
 
 local_ok() {
   curl -sf --max-time 4 "http://${HOST}:${PORT}/health" >/dev/null 2>&1
@@ -64,12 +32,30 @@ local_ok() {
 public_ok() {
   local url="${1:-}"
   [[ -n "$url" ]] || return 1
-  curl -sf --max-time 12 "${url}/health" >/dev/null 2>&1
+  curl -sf --max-time 15 \
+    -H 'bypass-tunnel-reminder: 1' \
+    -H 'User-Agent: Mozilla/5.0 (compatible; tazrim-keepalive/1.0)' \
+    "${url}/health" >/dev/null 2>&1
 }
 
 read_url() {
   [[ -f "$URL_FILE" ]] || { echo ""; return; }
   tr -d '[:space:]' < "$URL_FILE"
+}
+
+ensure_localtunnel_pkg() {
+  if [[ -f "$LT_DIR/node_modules/localtunnel/package.json" ]]; then
+    return 0
+  fi
+  log "מתקין localtunnel..."
+  mkdir -p "$LT_DIR"
+  if [[ ! -f "$LT_DIR/package.json" ]]; then
+    printf '%s\n' '{"name":"tazrim-lt","private":true}' >"$LT_DIR/package.json"
+  fi
+  (cd "$LT_DIR" && npm install --silent localtunnel@2.0.2) >>"$KEEP_LOG" 2>&1 || {
+    log "התקנת localtunnel נכשלה"
+    return 1
+  }
 }
 
 ensure_uvicorn() {
@@ -106,60 +92,68 @@ ensure_uvicorn() {
   return 1
 }
 
-# Process alive but Cloudflare already killed the tunnel session.
-cloudflared_zombie() {
-  pgrep -f 'cloudflared tunnel --url' >/dev/null 2>&1 || return 1
-  if cf_log_has_dead; then
-    local url
-    url="$(read_url)"
-    if [[ -z "$url" ]] || ! public_ok "$url"; then
-      return 0
-    fi
+stop_old_tunnels() {
+  # Prefer localtunnel; stop flaky Cloudflare quick tunnels to avoid confusion.
+  for pid in $(pgrep -f '/cloudflared tunnel --url' || true); do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  for pid in $(pgrep -f 'localtunnel-open.js' || true); do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  if [[ -f "$LT_PID_FILE" ]]; then
+    kill "$(cat "$LT_PID_FILE")" 2>/dev/null || true
   fi
-  return 1
+  sleep 1
 }
 
 start_tunnel() {
-  log "פותח מנהרת Cloudflare חדשה..."
-  pkill -f 'cloudflared tunnel --url' 2>/dev/null || true
-  sleep 2
-  : >"$CF_LOG"
-  nohup "$CLOUDFLARED" tunnel --url "http://${HOST}:${PORT}" --protocol http2 --no-autoupdate \
-    >>"$CF_LOG" 2>&1 &
-  local cf_pid=$!
-  echo "$cf_pid" >"$CF_PID_FILE"
+  ensure_localtunnel_pkg || return 1
+  log "פותח מנהרת localtunnel (subdomain=${TUNNEL_SUBDOMAIN})..."
+  stop_old_tunnels
+  : >"$LT_LOG"
+  (
+    cd "$LT_DIR"
+    export PORT
+    export TUNNEL_SUBDOMAIN
+    export NODE_PATH="$LT_DIR/node_modules"
+    nohup node "$ROOT/scripts/localtunnel-open.js" >>"$LT_LOG" 2>&1 &
+    echo $! >"$LT_PID_FILE"
+  )
+  local lt_pid
+  lt_pid="$(cat "$LT_PID_FILE" 2>/dev/null || echo "")"
 
   local url=""
-  for _ in $(seq 1 60); do
-    url="$(extract_cf_url "$CF_LOG")"
+  for _ in $(seq 1 45); do
+    url="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.(loca\.lt|localtunnel\.me)' "$LT_LOG" 2>/dev/null | tail -1 || true)"
     if [[ -n "$url" ]]; then
       break
     fi
-    if ! kill -0 "$cf_pid" 2>/dev/null; then
-      log "cloudflared נעצר מוקדם — לוג:"
-      tail -30 "$CF_LOG" | tee -a "$KEEP_LOG" || true
+    if [[ -n "$lt_pid" ]] && ! kill -0 "$lt_pid" 2>/dev/null; then
+      log "localtunnel נעצר מוקדם — לוג:"
+      tail -40 "$LT_LOG" | tee -a "$KEEP_LOG" || true
       return 1
     fi
     sleep 1
   done
 
   if [[ -z "$url" ]]; then
-    log "לא התקבל קישור ציבורי"
+    log "לא התקבל קישור ציבורי מ־localtunnel"
+    tail -40 "$LT_LOG" | tee -a "$KEEP_LOG" || true
     return 1
   fi
 
   printf '%s\n' "$url" >"$URL_FILE"
-  sleep 3
+  sleep 2
   if public_ok "$url"; then
     log "מנהרה חיה: $url"
     return 0
   fi
-  sleep 5
+  sleep 4
   if public_ok "$url"; then
     log "מנהרה חיה (אחרי המתנה): $url"
     return 0
   fi
-  log "קישור נוצר אבל health ציבורי נכשל עדיין: $url"
+  log "קישור נוצר אבל health ציבורי נכשל: $url"
   return 1
 }
 
@@ -167,14 +161,13 @@ ensure_tunnel() {
   local url
   url="$(read_url)"
 
-  if cloudflared_zombie; then
-    log "זוהתה מנהרה מתה (תהליך חי, Cloudflare דחה) — מפעיל מחדש"
-    start_tunnel
-    return $?
+  local lt_alive=0
+  if pgrep -f 'localtunnel-open.js' >/dev/null 2>&1; then
+    lt_alive=1
   fi
 
-  if ! pgrep -f 'cloudflared tunnel --url' >/dev/null 2>&1; then
-    log "cloudflared לא רץ — מפעיל"
+  if [[ "$lt_alive" -eq 0 ]]; then
+    log "localtunnel לא רץ — מפעיל"
     start_tunnel
     return $?
   fi
@@ -193,9 +186,8 @@ ensure_tunnel() {
   start_tunnel
 }
 
-log "===== keep-public-alive התחיל (כל ${CHECK_EVERY}ש׳) ====="
+log "===== keep-public-alive (localtunnel) התחיל (כל ${CHECK_EVERY}ש׳) ====="
 
-# Single-instance lock
 LOCK="/tmp/tazrim-keepalive.lock"
 if [[ -f "$LOCK" ]]; then
   old_pid="$(cat "$LOCK" 2>/dev/null || true)"

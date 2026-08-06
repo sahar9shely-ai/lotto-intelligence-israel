@@ -1,77 +1,43 @@
 #!/usr/bin/env bash
 # פתיחת תזרים לאינטרנט — מכל טלפון / מחשב / רשת
+# משתמש ב־localtunnel עם subdomain קבוע (יציב יותר מ־trycloudflare הזמני).
 # Usage: ./scripts/share-public.sh
-#
-# חשוב: קישור trycloudflare.com משתנה רק אם מפעילים מנהרה חדשה.
-# הסקריפט לא מחליף קישור קיים — אם כבר רצה tunnel, מדפיס את הקישור השמור.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PORT:-8000}"
 HOST="127.0.0.1"
-BIN_DIR="${HOME}/.local/bin"
-CLOUDFLARED="${BIN_DIR}/cloudflared"
 URL_FILE="${ROOT}/.public-url"
-mkdir -p "$BIN_DIR"
-export PATH="${BIN_DIR}:$PATH"
-
-install_cloudflared() {
-  local ver url
-  ver="$(curl -fsSL https://api.github.com/repos/cloudflare/cloudflared/releases/latest \
-    | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')"
-  url="https://github.com/cloudflare/cloudflared/releases/download/${ver}/cloudflared-linux-amd64"
-  echo "→ מתקין cloudflared ${ver}..."
-  curl -fsSL -o "$CLOUDFLARED" "$url"
-  chmod +x "$CLOUDFLARED"
-}
-
-if [[ ! -x "$CLOUDFLARED" ]]; then
-  install_cloudflared
-fi
+LT_DIR="${TMPDIR:-/tmp}/tazrim-lt"
+LT_LOG="${TMPDIR:-/tmp}/localtunnel.log"
+LT_PID_FILE="${TMPDIR:-/tmp}/tazrim-localtunnel.pid"
+TUNNEL_SUBDOMAIN="${TUNNEL_SUBDOMAIN:-tazrim-sahar}"
+export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+mkdir -p "$LT_DIR"
 
 print_locked_url() {
   local url="${1:-}"
   echo
   echo "=============================================="
-  echo "  קישור ציבורי קבוע לסשן הזה (לא מחליפים):"
+  echo "  קישור ציבורי לתזרים:"
   echo "  ${url}"
   echo "=============================================="
   echo
 }
 
-# אם כבר יש מנהרה חיה — לא פותחים חדשה (מונע החלפת קישור ללקוחות)
-if pgrep -f 'cloudflared tunnel --url' >/dev/null 2>&1; then
-  if [[ -f "$URL_FILE" ]]; then
-    LOCKED="$(tr -d '[:space:]' < "$URL_FILE")"
-    if [[ -n "$LOCKED" ]]; then
-      if curl -sf --max-time 12 "${LOCKED}/health" >/dev/null 2>&1; then
-        print_locked_url "$LOCKED"
-        echo "המנהרה כבר רצה ובריאה. לא נוצר קישור חדש."
-        echo "לשמירה אוטומטית מפני נפילות: ./scripts/keep-public-alive.sh &"
-        exit 0
-      fi
-      echo "נמצא cloudflared חי אבל הקישור השמור מת ($LOCKED)." >&2
-      echo "מפעיל מחדש מנהרה..." >&2
-      pkill -f 'cloudflared tunnel --url' 2>/dev/null || true
-      sleep 1
-    fi
-  fi
-fi
-
-# נעילה: אל תפתחי מנהרה חדשה אם כבר נשמר קישור ללקוחות (אלא אם FORCE_NEW_TUNNEL=1
-# או שהקישור השמור כבר לא עובד)
-if [[ -f "$URL_FILE" && "${FORCE_NEW_TUNNEL:-0}" != "1" ]]; then
+# אם כבר יש מנהרה חיה ובריאה — לא פותחים חדשה
+if [[ -f "$URL_FILE" ]]; then
   LOCKED="$(tr -d '[:space:]' < "$URL_FILE")"
-  if [[ -n "$LOCKED" ]]; then
-    if curl -sf --max-time 12 "${LOCKED}/health" >/dev/null 2>&1; then
-      echo "נמצא קישור שמור ובריא ללקוחות:" >&2
-      echo "  $LOCKED" >&2
-      echo >&2
-      echo "לא מופעלת מנהרה חדשה." >&2
-      echo "לשמירה אוטומטית: ./scripts/keep-public-alive.sh &" >&2
+  if [[ -n "$LOCKED" ]] && curl -sf --max-time 12 -H 'bypass-tunnel-reminder: 1' "${LOCKED}/health" >/dev/null 2>&1; then
+    if pgrep -f 'localtunnel-open.js' >/dev/null 2>&1; then
+      print_locked_url "$LOCKED"
+      echo "המנהרה כבר רצה ובריאה."
+      if ! pgrep -f 'keep-public-alive.sh' >/dev/null 2>&1; then
+        nohup "$ROOT/scripts/keep-public-alive.sh" >/tmp/tazrim-keepalive.out 2>&1 &
+        echo "הופעל keep-public-alive (pid $!)."
+      fi
       exit 0
     fi
-    echo "הקישור השמור מת ($LOCKED) — פותחים מנהרה חדשה." >&2
   fi
 fi
 
@@ -105,33 +71,43 @@ ensure_app() {
 
 ensure_app
 
-LOG_FILE="${TMPDIR:-/tmp}/cloudflared.log"
-: > "$LOG_FILE"
+if [[ ! -f "$LT_DIR/node_modules/localtunnel/package.json" ]]; then
+  echo "→ מתקין localtunnel..."
+  mkdir -p "$LT_DIR"
+  if [[ ! -f "$LT_DIR/package.json" ]]; then
+    printf '%s\n' '{"name":"tazrim-lt","private":true}' >"$LT_DIR/package.json"
+  fi
+  (cd "$LT_DIR" && npm install localtunnel@2.0.2)
+fi
 
-echo
-echo "=============================================="
-echo "  תזרים נפתח לאינטרנט"
-echo "  חכי כמה שניות לקישור HTTPS הציבורי"
-echo "  הקישור יישמר ב־.public-url ולא יוחלף אוטומטית"
-echo "=============================================="
-echo
+# עצור מנהרות ישנות (כולל Cloudflare הזמני) — לפי PID בלבד
+for pid in $(pgrep -f '/cloudflared tunnel --url' || true); do
+  kill -9 "$pid" 2>/dev/null || true
+done
+for pid in $(pgrep -f 'localtunnel-open.js' || true); do
+  kill -9 "$pid" 2>/dev/null || true
+done
+sleep 1
 
-"$CLOUDFLARED" tunnel --url "http://${HOST}:${PORT}" --protocol http2 --no-autoupdate >"$LOG_FILE" 2>&1 &
-CF_PID=$!
+: >"$LT_LOG"
+(
+  cd "$LT_DIR"
+  export PORT TUNNEL_SUBDOMAIN
+  export NODE_PATH="$LT_DIR/node_modules"
+  nohup node "$ROOT/scripts/localtunnel-open.js" >>"$LT_LOG" 2>&1 &
+  echo $! >"$LT_PID_FILE"
+)
+LT_PID="$(cat "$LT_PID_FILE")"
 
 URL=""
 for _ in $(seq 1 45); do
-  if command -v rg >/dev/null 2>&1; then
-    URL="$(rg -o 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG_FILE" 2>/dev/null | tail -1 || true)"
-  else
-    URL="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG_FILE" 2>/dev/null | tail -1 || true)"
-  fi
+  URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.(loca\.lt|localtunnel\.me)' "$LT_LOG" 2>/dev/null | tail -1 || true)"
   if [[ -n "$URL" ]]; then
     break
   fi
-  if ! kill -0 "$CF_PID" 2>/dev/null; then
-    echo "cloudflared נעצר מוקדם מדי:" >&2
-    cat "$LOG_FILE" >&2 || true
+  if ! kill -0 "$LT_PID" 2>/dev/null; then
+    echo "localtunnel נעצר מוקדם מדי:" >&2
+    cat "$LT_LOG" >&2 || true
     exit 1
   fi
   sleep 1
@@ -139,22 +115,20 @@ done
 
 if [[ -z "$URL" ]]; then
   echo "לא התקבל קישור ציבורי בזמן" >&2
-  kill "$CF_PID" 2>/dev/null || true
+  kill "$LT_PID" 2>/dev/null || true
   exit 1
 fi
 
 printf '%s\n' "$URL" > "$URL_FILE"
 print_locked_url "$URL"
-echo "PID cloudflared: $CF_PID"
+echo "PID localtunnel: $LT_PID"
 
-# Auto-start watchdog so dead quick-tunnels are recreated without manual intervention.
 if ! pgrep -f 'keep-public-alive.sh' >/dev/null 2>&1; then
   nohup "$ROOT/scripts/keep-public-alive.sh" >/tmp/tazrim-keepalive.out 2>&1 &
-  echo "הופעל keep-public-alive (pid $!) — יחיה מחדש uvicorn/מנהרה אם נופלים."
+  echo "הופעל keep-public-alive (pid $!) — יחיה מחדש אם נופל."
 else
   echo "keep-public-alive כבר רץ."
 fi
-echo "לעצירה ידנית של המנהרה בלבד: kill $CF_PID"
 
-# Keep tunnel attached to this shell when run in foreground.
-wait "$CF_PID"
+# Foreground wait keeps tunnel tied to this shell when run interactively
+wait "$LT_PID"
