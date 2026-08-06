@@ -44,27 +44,34 @@ if pgrep -f 'cloudflared tunnel --url' >/dev/null 2>&1; then
   if [[ -f "$URL_FILE" ]]; then
     LOCKED="$(tr -d '[:space:]' < "$URL_FILE")"
     if [[ -n "$LOCKED" ]]; then
-      print_locked_url "$LOCKED"
-      echo "המנהרה כבר רצה. לא נוצר קישור חדש."
-      exit 0
+      if curl -sf --max-time 12 "${LOCKED}/health" >/dev/null 2>&1; then
+        print_locked_url "$LOCKED"
+        echo "המנהרה כבר רצה ובריאה. לא נוצר קישור חדש."
+        echo "לשמירה אוטומטית מפני נפילות: ./scripts/keep-public-alive.sh &"
+        exit 0
+      fi
+      echo "נמצא cloudflared חי אבל הקישור השמור מת ($LOCKED)." >&2
+      echo "מפעיל מחדש מנהרה..." >&2
+      pkill -f 'cloudflared tunnel --url' 2>/dev/null || true
+      sleep 1
     fi
   fi
-  echo "cloudflared כבר רץ, אבל .public-url חסר. לא מפעילים מנהרה חדשה." >&2
-  echo "מצאי את הקישור בלוג הקיים (/tmp/cloudflared.log) ושמרי ב־.public-url" >&2
-  exit 1
 fi
 
-# נעילה: אל תפתחי מנהרה חדשה אם כבר נשמר קישור ללקוחות (אלא אם FORCE_NEW_TUNNEL=1)
+# נעילה: אל תפתחי מנהרה חדשה אם כבר נשמר קישור ללקוחות (אלא אם FORCE_NEW_TUNNEL=1
+# או שהקישור השמור כבר לא עובד)
 if [[ -f "$URL_FILE" && "${FORCE_NEW_TUNNEL:-0}" != "1" ]]; then
   LOCKED="$(tr -d '[:space:]' < "$URL_FILE")"
   if [[ -n "$LOCKED" ]]; then
-    echo "נמצא קישור שמור ללקוחות:" >&2
-    echo "  $LOCKED" >&2
-    echo >&2
-    echo "לא מופעלת מנהרה חדשה (זה היה מחליף את הקישור)." >&2
-    echo "אם המנהרה מתה ויש צורך בקישור חדש במפורש:" >&2
-    echo "  FORCE_NEW_TUNNEL=1 ./scripts/share-public.sh" >&2
-    exit 1
+    if curl -sf --max-time 12 "${LOCKED}/health" >/dev/null 2>&1; then
+      echo "נמצא קישור שמור ובריא ללקוחות:" >&2
+      echo "  $LOCKED" >&2
+      echo >&2
+      echo "לא מופעלת מנהרה חדשה." >&2
+      echo "לשמירה אוטומטית: ./scripts/keep-public-alive.sh &" >&2
+      exit 0
+    fi
+    echo "הקישור השמור מת ($LOCKED) — פותחים מנהרה חדשה." >&2
   fi
 fi
 
@@ -109,12 +116,16 @@ echo "  הקישור יישמר ב־.public-url ולא יוחלף אוטומטי
 echo "=============================================="
 echo
 
-"$CLOUDFLARED" tunnel --url "http://${HOST}:${PORT}" --no-autoupdate >"$LOG_FILE" 2>&1 &
+"$CLOUDFLARED" tunnel --url "http://${HOST}:${PORT}" --protocol http2 --no-autoupdate >"$LOG_FILE" 2>&1 &
 CF_PID=$!
 
 URL=""
-for _ in $(seq 1 30); do
-  URL="$(rg -o 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG_FILE" 2>/dev/null | tail -1 || true)"
+for _ in $(seq 1 45); do
+  if command -v rg >/dev/null 2>&1; then
+    URL="$(rg -o 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG_FILE" 2>/dev/null | tail -1 || true)"
+  else
+    URL="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG_FILE" 2>/dev/null | tail -1 || true)"
+  fi
   if [[ -n "$URL" ]]; then
     break
   fi
@@ -135,7 +146,15 @@ fi
 printf '%s\n' "$URL" > "$URL_FILE"
 print_locked_url "$URL"
 echo "PID cloudflared: $CF_PID"
-echo "לעצירה ידנית בלבד: kill $CF_PID"
-echo "(עצירה = הקישור הישן יפסיק לעבוד)"
 
+# Auto-start watchdog so dead quick-tunnels are recreated without manual intervention.
+if ! pgrep -f 'keep-public-alive.sh' >/dev/null 2>&1; then
+  nohup "$ROOT/scripts/keep-public-alive.sh" >/tmp/tazrim-keepalive.out 2>&1 &
+  echo "הופעל keep-public-alive (pid $!) — יחיה מחדש uvicorn/מנהרה אם נופלים."
+else
+  echo "keep-public-alive כבר רץ."
+fi
+echo "לעצירה ידנית של המנהרה בלבד: kill $CF_PID"
+
+# Keep tunnel attached to this shell when run in foreground.
 wait "$CF_PID"

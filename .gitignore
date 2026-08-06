@@ -30,3 +30,6 @@ backend/data/
 backend/app/data/
 /data/
 
+# Local Cloudflare quick-tunnel URL (session-specific)
+.public-url
+
