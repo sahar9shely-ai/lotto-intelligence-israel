@@ -36,8 +36,8 @@ export function DashboardPage() {
         <h1 className="hero__brand">תזרים</h1>
         <p className="hero__lead">
           {isManager
-            ? "מעקב מסודר אחר קרנות המשקיעים, תשלומים חודשיים, עמלת ניהול נפרדת והצעות למשקיעים חדשים."
-            : "כאן מוצגים רק הנתונים של המסלול שלך — קרן, תשלומים והיסטוריה."}
+            ? "תמונה ברורה של הקרנות, התשלומים והעמלות — במקום אחד."
+            : "המסלול שלך במבט אחד: קרן, תשלומים והיסטוריה."}
         </p>
         <div className="hero__actions">
           <Link className="btn btn--primary" to="/investors">
