@@ -58,10 +58,23 @@ ensure_uvicorn() {
   return 1
 }
 
+# DNS dead (NXDOMAIN) → treat as hard fail for fast reconnect.
+dns_ok() {
+  local host="$1"
+  host="${host#https://}"
+  host="${host%%/*}"
+  getent hosts "$host" >/dev/null 2>&1 || host "$host" >/dev/null 2>&1
+}
+
 # True if the public URL serves our app (HTML or health JSON).
 browser_ok() {
   local url="$1"
-  local code body hcode
+  local code body hcode host
+  host="${url#https://}"
+  host="${host%%/*}"
+  if ! dns_ok "$host"; then
+    return 1
+  fi
   # Prefer health — stable and not blocked by interstitial pages
   hcode="$(curl -sS -o /tmp/tazrim-pub-health.json -w '%{http_code}' --max-time 12 \
     -H 'User-Agent: Mozilla/5.0' "${url}/health" 2>/dev/null || echo 000)"
@@ -246,11 +259,21 @@ while true; do
     continue
   fi
 
+  # NXDOMAIN / process dead → reconnect immediately (don't leave users on dead bookmarks)
+  host="${url#https://}"; host="${host%%/*}"
+  if [[ -z "$url" ]] || ! tunnel_proc_alive_for_url "$url" || ! dns_ok "$host"; then
+    log "מנהרה מתה (DNS/תהליך) — מחבר מחדש מיד"
+    reconnect || sleep 15
+    STABLE_FAILS=0
+    sleep 15
+    continue
+  fi
+
   STABLE_FAILS=$((STABLE_FAILS + 1))
-  # Need 5 consecutive failures over ~2+ minutes before reconnect
-  if [[ "$STABLE_FAILS" -lt 5 ]]; then
-    log "בדיקת מנהרה נכשלה פעם ${STABLE_FAILS}/5 — לא מחליפים עדיין"
-    sleep 25
+  # Soft failures: need 3 consecutive before reconnect
+  if [[ "$STABLE_FAILS" -lt 3 ]]; then
+    log "בדיקת מנהרה נכשלה פעם ${STABLE_FAILS}/3 — לא מחליפים עדיין"
+    sleep 20
     continue
   fi
   reconnect || sleep 20
