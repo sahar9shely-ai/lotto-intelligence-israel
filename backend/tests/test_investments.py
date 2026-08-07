@@ -763,3 +763,123 @@ def test_withdraw_and_transfer_savings_to_principal():
     assert forbidden_t.status_code == 403, forbidden_t.text
 
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
+
+
+def test_settle_savings_continue_and_close():
+    """Questionnaire: continue opens successor; close marks completed."""
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+
+    create_inv = client.post(
+        "/api/v1/investments/investors",
+        headers=headers,
+        json={
+            "name": "בדיקת סגירה",
+            "username": "settleclose",
+            "password": "Password1!",
+        },
+    )
+    assert create_inv.status_code == 201, create_inv.text
+    inv_id = create_inv.json()["id"]
+
+    start = date.today().replace(day=1)
+    month = start.month - 5
+    year = start.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    start = start.replace(year=year, month=month)
+
+    create_plan = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": inv_id,
+            "principal": 100000,
+            "plan_type": "hybrid",
+            "monthly_rate_percent": 1,
+            "savings_rate_percent": 1,
+            "manager_fee_percent": 0.5,
+            "start_date": start.isoformat(),
+            "duration_months": 12,
+            "generate_schedule": True,
+        },
+    )
+    assert create_plan.status_code == 201, create_plan.text
+    plan_id = create_plan.json()["id"]
+    available = float(create_plan.json()["current_savings_balance"])
+    assert available >= 1000
+
+    # Continue with new compound track after partial transfer
+    settle = client.post(
+        f"/api/v1/investments/plans/{plan_id}/savings/settle",
+        headers=headers,
+        json={
+            "action_type": "transfer_to_principal",
+            "amount": 1000,
+            "outcome": "continue_new_track",
+            "compound_savings": True,
+            "include_monthly_cash": True,
+            "monthly_rate_percent": 1.2,
+            "savings_rate_percent": 1.1,
+            "manager_fee_percent": 0.5,
+            "new_duration_months": 12,
+            "new_start_date": date.today().replace(day=1).isoformat(),
+        },
+    )
+    assert settle.status_code == 200, settle.text
+    body = settle.json()
+    assert body["outcome"] == "continue_new_track"
+    assert body["closed_plan"]["status"] == "completed"
+    assert body["closed_plan"]["successor_plan_id"] == body["new_plan"]["id"]
+    assert body["new_plan"]["status"] == "active"
+    assert body["new_plan"]["plan_type"] == "hybrid"
+    assert abs(body["new_plan"]["monthly_rate_percent"] - 1.2) < 0.001
+    assert abs(body["new_plan"]["savings_rate_percent"] - 1.1) < 0.001
+    # Leftover savings rolled into קרן: principal ≈ 100000 + available
+    assert abs(body["new_plan"]["principal"] - (100000 + available)) < 0.05
+
+    new_id = body["new_plan"]["id"]
+
+    # Seed a bit of savings on the new plan by backdating... can't easily.
+    # Create another plan to test close_plan path.
+    create_plan2 = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": inv_id,
+            "principal": 50000,
+            "plan_type": "savings",
+            "monthly_rate_percent": 0,
+            "savings_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "start_date": start.isoformat(),
+            "duration_months": 12,
+            "generate_schedule": True,
+        },
+    )
+    assert create_plan2.status_code == 201, create_plan2.text
+    plan2 = create_plan2.json()
+    plan2_id = plan2["id"]
+    avail2 = float(plan2["current_savings_balance"])
+    assert avail2 > 0
+
+    close = client.post(
+        f"/api/v1/investments/plans/{plan2_id}/savings/settle",
+        headers=headers,
+        json={
+            "action_type": "withdraw",
+            "amount": min(500, avail2),
+            "outcome": "close_plan",
+            "withdraw_remaining": True,
+        },
+    )
+    assert close.status_code == 200, close.text
+    closed = close.json()
+    assert closed["outcome"] == "close_plan"
+    assert closed["closed_plan"]["status"] == "completed"
+    assert closed["new_plan"] is None
+    assert float(closed["closed_plan"]["current_savings_balance"]) < 0.02
+
+    client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
+    client.delete(f"/api/v1/investments/plans/{new_id}", headers=headers)
+    client.delete(f"/api/v1/investments/plans/{plan2_id}", headers=headers)

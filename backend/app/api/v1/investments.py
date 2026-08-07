@@ -22,6 +22,8 @@ from app.schemas.investments import (
     PaymentUpdate,
     PlanCreate,
     PlanOut,
+    PlanSettleRequest,
+    PlanSettleResult,
     PlanUpdate,
     QuoteConvert,
     QuoteCreate,
@@ -472,6 +474,10 @@ def delete_plan(
     plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+    # Clear successor links pointing at this plan so SQLite FK allows delete.
+    db.query(InvestmentPlan).filter(
+        InvestmentPlan.successor_plan_id == plan_id
+    ).update({"successor_plan_id": None}, synchronize_session=False)
     db.delete(plan)
     db.commit()
     return None
@@ -545,6 +551,43 @@ def transfer_savings_to_principal(
             amount=payload.amount,
             actor_user_id=user.id,
             notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/plans/{plan_id}/savings/settle",
+    response_model=PlanSettleResult,
+)
+def settle_savings_action(
+    plan_id: int,
+    payload: PlanSettleRequest,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Redeem savings then close the track or open a new successor plan (manager)."""
+    plan = _load_plan_for_savings(db, plan_id)
+    if plan.status == "completed":
+        raise HTTPException(status_code=400, detail="המסלול כבר סגור")
+    try:
+        return svc.settle_savings_action(
+            db,
+            plan=plan,
+            action_type=payload.action_type,
+            amount=payload.amount,
+            outcome=payload.outcome,
+            actor_user_id=user.id,
+            notes=payload.notes,
+            withdraw_remaining=payload.withdraw_remaining,
+            compound_savings=payload.compound_savings,
+            include_monthly_cash=payload.include_monthly_cash,
+            monthly_rate_percent=payload.monthly_rate_percent,
+            savings_rate_percent=payload.savings_rate_percent,
+            manager_fee_percent=payload.manager_fee_percent,
+            new_principal=payload.new_principal,
+            new_duration_months=payload.new_duration_months,
+            new_start_date=payload.new_start_date,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

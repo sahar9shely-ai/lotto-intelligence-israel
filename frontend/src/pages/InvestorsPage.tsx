@@ -66,6 +66,16 @@ export function InvestorsPage() {
     [selectedPlans],
   );
 
+  const closedSelectedPlans = useMemo(
+    () => selectedPlans.filter((p) => p.status === "completed"),
+    [selectedPlans],
+  );
+
+  const otherSelectedPlans = useMemo(
+    () => selectedPlans.filter((p) => p.status !== "active" && p.status !== "completed"),
+    [selectedPlans],
+  );
+
   const portfolio = useMemo(() => {
     const list = investors ?? [];
     return {
@@ -394,27 +404,92 @@ export function InvestorsPage() {
               ) : null}
             </Panel>
           ) : (
-            selectedPlans.map((plan) => (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                isManager={isManager}
-                editing={editingPlanId === plan.id}
-                showReport={reportPlanId === plan.id}
-                onToggleEdit={() =>
-                  setEditingPlanId((id) => (id === plan.id ? null : plan.id))
-                }
-                onToggleReport={() =>
-                  setReportPlanId((id) => (id === plan.id ? null : plan.id))
-                }
-                onUpdate={onUpdatePlan}
-                onDelete={onDeletePlan}
-                onSavingsChanged={() => {
-                  reload();
-                  reloadPlans();
-                }}
-              />
-            ))
+            <>
+              {activeSelectedPlans.length > 0 || otherSelectedPlans.length > 0 ? (
+                [...activeSelectedPlans, ...otherSelectedPlans].map((plan) => (
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    isManager={isManager}
+                    editing={editingPlanId === plan.id}
+                    showReport={reportPlanId === plan.id}
+                    onToggleEdit={() =>
+                      setEditingPlanId((id) => (id === plan.id ? null : plan.id))
+                    }
+                    onToggleReport={() =>
+                      setReportPlanId((id) => (id === plan.id ? null : plan.id))
+                    }
+                    onUpdate={onUpdatePlan}
+                    onDelete={onDeletePlan}
+                    onSavingsChanged={() => {
+                      reload();
+                      reloadPlans();
+                    }}
+                  />
+                ))
+              ) : (
+                <Panel title="אין מסלול פעיל" subtitle="אפשר לפתוח מסלול חדש או לצפות בתיקים סגורים">
+                  <p className="empty">אין מסלול פעיל למשקיע הזה כרגע.</p>
+                  {isManager ? (
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={() => setShowNewPlan(true)}
+                    >
+                      פתח מסלול
+                    </button>
+                  ) : null}
+                </Panel>
+              )}
+
+              {closedSelectedPlans.length > 0 ? (
+                <Panel
+                  title="תיקים סגורים"
+                  subtitle={`${closedSelectedPlans.length} מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה`}
+                >
+                  <div className="closed-plans">
+                    {closedSelectedPlans.map((plan) => (
+                      <div key={plan.id} className="closed-plan-row">
+                        <div>
+                          <strong>
+                            מסלול #{plan.id} · {planTypeLabel(plan.plan_type)}
+                          </strong>
+                          <span className="muted">
+                            קרן {formatMoney(plan.principal)} ·{" "}
+                            {plan.start_date} · {plan.duration_months} ח׳
+                            {plan.successor_plan_id
+                              ? ` · המשך במסלול #${plan.successor_plan_id}`
+                              : ""}
+                          </span>
+                          {plan.notes ? (
+                            <span className="muted" style={{ display: "block" }}>
+                              {plan.notes}
+                            </span>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn--small btn--ghost"
+                          onClick={() =>
+                            setReportPlanId((id) => (id === plan.id ? null : plan.id))
+                          }
+                        >
+                          {reportPlanId === plan.id ? "הסתר דוח" : "דוח מצב"}
+                        </button>
+                        {reportPlanId === plan.id ? (
+                          <div style={{ flexBasis: "100%" }}>
+                            <PlanStatusReportPanel
+                              planId={plan.id}
+                              title={`דוח מצב · מסלול סגור #${plan.id}`}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
+              ) : null}
+            </>
           )}
         </div>
       ) : (

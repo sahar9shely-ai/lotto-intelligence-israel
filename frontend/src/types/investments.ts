@@ -48,7 +48,7 @@ export type Plan = {
   current_savings_balance?: number;
   accrued_savings_balance?: number;
   savings_redeemed_total?: number;
-  accrual_principal?: number;
+  successor_plan_id?: number | null;
   total_cash_payout: number;
   total_investor_payout: number;
   total_manager_fee: number;

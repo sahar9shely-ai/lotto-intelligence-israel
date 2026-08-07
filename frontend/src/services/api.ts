@@ -302,6 +302,46 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  settleSavings: (
+    planId: number,
+    body: {
+      action_type: "withdraw" | "transfer_to_principal";
+      amount: number;
+      outcome: "close_plan" | "continue_new_track";
+      notes?: string;
+      withdraw_remaining?: boolean;
+      compound_savings?: boolean;
+      include_monthly_cash?: boolean;
+      monthly_rate_percent?: number;
+      savings_rate_percent?: number;
+      manager_fee_percent?: number;
+      new_principal?: number;
+      new_duration_months?: number;
+      new_start_date?: string;
+    },
+  ) =>
+    request<{
+      outcome: string;
+      action: {
+        id: number;
+        action_type: string;
+        amount: number;
+        principal_after?: number | null;
+        available_after?: number | null;
+        created_at: string;
+        notes?: string | null;
+      };
+      residual_action?: {
+        id: number;
+        action_type: string;
+        amount: number;
+      } | null;
+      closed_plan: Plan;
+      new_plan?: Plan | null;
+    }>(`/api/v1/investments/plans/${planId}/savings/settle`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   removeFromCalendarYear: (year: number, investor_id: number) =>
     request<{
       year: number;

@@ -55,6 +55,9 @@ class InvestmentPlan(Base):
     savings_actions: Mapped[list["SavingsAction"]] = relationship(
         back_populates="plan", cascade="all, delete-orphan"
     )
+    successor_plan_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("investment_plans.id"), nullable=True
+    )
 
 
 class SavingsAction(Base):

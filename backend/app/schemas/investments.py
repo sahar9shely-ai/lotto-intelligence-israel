@@ -106,6 +106,7 @@ class PlanOut(BaseModel):
     accrued_savings_balance: float = 0.0
     savings_redeemed_total: float = 0.0
     accrual_principal: float = 0.0
+    successor_plan_id: Optional[int] = None
     total_cash_payout: float = 0.0
     total_investor_payout: float
     total_manager_fee: float
@@ -137,6 +138,34 @@ class SavingsActionOut(BaseModel):
 class SavingsActionResult(BaseModel):
     action: SavingsActionOut
     plan: PlanOut
+
+
+class PlanSettleRequest(BaseModel):
+    """Post-redeem questionnaire: close the track or open a successor."""
+
+    action_type: Literal["withdraw", "transfer_to_principal"]
+    amount: float = Field(gt=0)
+    outcome: Literal["close_plan", "continue_new_track"]
+    notes: Optional[str] = Field(default=None, max_length=500)
+    # close_plan
+    withdraw_remaining: bool = True
+    # continue_new_track
+    compound_savings: bool = True
+    include_monthly_cash: bool = True
+    monthly_rate_percent: float = Field(default=0, ge=0)
+    savings_rate_percent: float = Field(default=0, ge=0)
+    manager_fee_percent: Optional[float] = Field(default=None, ge=0)
+    new_principal: Optional[float] = Field(default=None, gt=0)
+    new_duration_months: int = Field(default=12, ge=1, le=120)
+    new_start_date: Optional[date] = None
+
+
+class PlanSettleResult(BaseModel):
+    outcome: str
+    action: SavingsActionOut
+    residual_action: Optional[SavingsActionOut] = None
+    closed_plan: PlanOut
+    new_plan: Optional[PlanOut] = None
 
 
 class PaymentUpdate(BaseModel):

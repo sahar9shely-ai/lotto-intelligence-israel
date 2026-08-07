@@ -184,6 +184,13 @@ def ensure_schema(engine: Engine) -> None:
                         "WHERE savings_redeemed_total IS NULL"
                     )
                 )
+            if "successor_plan_id" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE investment_plans ADD COLUMN "
+                        "successor_plan_id INTEGER"
+                    )
+                )
 
     if not _table_exists(engine, "users"):
         return

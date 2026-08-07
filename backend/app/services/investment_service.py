@@ -323,6 +323,7 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
         "current_savings_balance": available,
         "savings_redeemed_total": round(redeemed, 2),
         "accrual_principal": round(accrual_principal, 2),
+        "successor_plan_id": getattr(plan, "successor_plan_id", None),
         "track_end_date": plan_track_end_date(plan),
         "total_cash_payout": track["total_cash_payout"],
         "total_investor_payout": track["total_investor_payout"],
@@ -345,6 +346,7 @@ def redeem_savings(
     amount: float,
     actor_user_id: Optional[int] = None,
     notes: Optional[str] = None,
+    commit: bool = True,
 ) -> dict:
     """Withdraw savings or transfer into principal. Never touches accrual history."""
     action_type = (action_type or "").strip().lower()
@@ -379,7 +381,7 @@ def redeem_savings(
     if action_type == "transfer_to_principal":
         plan.principal = round(float(plan.principal or 0) + amount, 2)
         # Future cash payments follow the new קרן.
-        generate_payment_schedule(db, plan, realign_dates=False)
+        generate_payment_schedule(db, plan, realign_dates=False, commit=False)
 
     action = SavingsAction(
         plan_id=plan.id,
@@ -392,18 +394,23 @@ def redeem_savings(
         actor_user_id=actor_user_id,
     )
     db.add(action)
-    db.commit()
-    db.refresh(plan)
-    plan = (
-        db.query(InvestmentPlan)
-        .options(
-            joinedload(InvestmentPlan.investor),
-            joinedload(InvestmentPlan.payments),
-            joinedload(InvestmentPlan.savings_actions),
+    if commit:
+        db.commit()
+        db.refresh(plan)
+        db.refresh(action)
+        plan = (
+            db.query(InvestmentPlan)
+            .options(
+                joinedload(InvestmentPlan.investor),
+                joinedload(InvestmentPlan.payments),
+                joinedload(InvestmentPlan.savings_actions),
+            )
+            .filter(InvestmentPlan.id == plan.id)
+            .one()
         )
-        .filter(InvestmentPlan.id == plan.id)
-        .one()
-    )
+    else:
+        db.flush()
+        action.available_after = available_savings_for_plan(plan)
     return {
         "action": {
             "id": action.id,
@@ -414,7 +421,194 @@ def redeem_savings(
             "created_at": action.created_at,
             "notes": action.notes,
         },
-        "plan": serialize_plan(plan),
+        "plan": serialize_plan(plan) if commit else None,
+    }
+
+
+def _close_plan_remaining_payments(db: Session, plan: InvestmentPlan) -> int:
+    """Mark unpaid future rows as skipped when a track is closed."""
+    skipped = 0
+    for payment in db.query(Payment).filter(Payment.plan_id == plan.id).all():
+        if payment.status in {"scheduled", "awaiting_confirmation"}:
+            payment.status = "skipped"
+            payment.notes = (payment.notes or "") or "נסגר עם המסלול"
+            skipped += 1
+    return skipped
+
+
+def settle_savings_action(
+    db: Session,
+    *,
+    plan: InvestmentPlan,
+    action_type: str,
+    amount: float,
+    outcome: str,
+    actor_user_id: Optional[int] = None,
+    notes: Optional[str] = None,
+    withdraw_remaining: bool = True,
+    compound_savings: bool = True,
+    include_monthly_cash: bool = True,
+    monthly_rate_percent: float = 0.0,
+    savings_rate_percent: float = 0.0,
+    manager_fee_percent: Optional[float] = None,
+    new_principal: Optional[float] = None,
+    new_duration_months: int = 12,
+    new_start_date: Optional[date] = None,
+) -> dict:
+    """Redeem savings then either close the track or open a successor plan.
+
+    Questionnaire outcomes:
+    - close_plan: optional full remaining withdraw + status=completed
+    - continue_new_track: close source, open new 12m track with chosen rates
+    """
+    outcome = (outcome or "").strip().lower()
+    if outcome not in {"close_plan", "continue_new_track"}:
+        raise ValueError("יש לבחור: המשך מסלול חדש או סגירה מלאה")
+
+    primary = redeem_savings(
+        db,
+        plan=plan,
+        action_type=action_type,
+        amount=amount,
+        actor_user_id=actor_user_id,
+        notes=notes,
+        commit=False,
+    )
+
+    residual_action = None
+    leftover = available_savings_for_plan(plan)
+    if leftover > 0.001:
+        if outcome == "close_plan" and withdraw_remaining:
+            residual_action = redeem_savings(
+                db,
+                plan=plan,
+                action_type="withdraw",
+                amount=leftover,
+                actor_user_id=actor_user_id,
+                notes="משיכת יתרת חיסכון בסגירת מסלול",
+                commit=False,
+            )["action"]
+        elif outcome == "continue_new_track":
+            # Roll leftover savings into קרן before opening the successor track.
+            residual_action = redeem_savings(
+                db,
+                plan=plan,
+                action_type="transfer_to_principal",
+                amount=leftover,
+                actor_user_id=actor_user_id,
+                notes="יתרת חיסכון הועברה לקרן לפני מסלול חדש",
+                commit=False,
+            )["action"]
+
+    new_plan: Optional[InvestmentPlan] = None
+    if outcome == "continue_new_track":
+        # Derive track type from questionnaire answers.
+        if not compound_savings and not include_monthly_cash:
+            raise ValueError("בחר לפחות החזר חודשי או צבירת חיסכון למסלול החדש")
+        if compound_savings and include_monthly_cash:
+            plan_type = "hybrid"
+        elif compound_savings:
+            plan_type = "savings"
+        else:
+            plan_type = "monthly"
+
+        kind, monthly_rate, savings_rate = normalize_plan_rates(
+            plan_type,
+            float(monthly_rate_percent or 0),
+            float(savings_rate_percent or 0),
+        )
+        if compound_savings and savings_rate <= 0:
+            raise ValueError("לריבית דריבית צריך אחוז חיסכון גדול מאפס")
+        if include_monthly_cash and monthly_rate <= 0 and kind != "savings":
+            raise ValueError("להחזר חודשי במזומן צריך אחוז גדול מאפס")
+
+        principal_for_new = round(
+            float(
+                new_principal
+                if new_principal is not None
+                else (plan.principal or 0)
+            ),
+            2,
+        )
+        if principal_for_new <= 0:
+            raise ValueError("קרן למסלול החדש חייבת להיות גדולה מאפס")
+
+        duration = int(new_duration_months or 12)
+        if duration < 1 or duration > 120:
+            raise ValueError("משך מסלול לא תקין")
+
+        start = new_start_date or date.today().replace(day=1)
+        fee = (
+            float(manager_fee_percent)
+            if manager_fee_percent is not None
+            else float(plan.manager_fee_percent or 0)
+        )
+
+        note_bits = [f"המשך ממסלול #{plan.id}"]
+        if compound_savings:
+            note_bits.append(f"ריבית דריבית {duration} ח׳")
+        new_plan = InvestmentPlan(
+            investor_id=plan.investor_id,
+            principal=principal_for_new,
+            accrual_principal=principal_for_new,
+            savings_redeemed_total=0.0,
+            plan_type=kind,
+            monthly_rate_percent=monthly_rate,
+            savings_rate_percent=savings_rate,
+            manager_fee_percent=fee,
+            start_date=start,
+            duration_months=duration,
+            status="active",
+            notes=" · ".join(note_bits),
+        )
+        db.add(new_plan)
+        db.flush()
+        generate_payment_schedule(db, new_plan, realign_dates=True, commit=False)
+        plan.successor_plan_id = new_plan.id
+        plan.notes = (
+            (plan.notes + " · " if plan.notes else "")
+            + f"נסגר — המשך במסלול #{new_plan.id}"
+        )
+
+    # Close source track (both outcomes end the current savings track).
+    plan.status = "completed"
+    _close_plan_remaining_payments(db, plan)
+    if outcome == "close_plan":
+        plan.notes = (
+            (plan.notes + " · " if plan.notes else "") + "נסגר לגמרי אחרי משיכה/העברה"
+        )
+
+    db.commit()
+
+    plan = (
+        db.query(InvestmentPlan)
+        .options(
+            joinedload(InvestmentPlan.investor),
+            joinedload(InvestmentPlan.payments),
+            joinedload(InvestmentPlan.savings_actions),
+        )
+        .filter(InvestmentPlan.id == plan.id)
+        .one()
+    )
+    new_serialized = None
+    if new_plan is not None:
+        new_plan = (
+            db.query(InvestmentPlan)
+            .options(
+                joinedload(InvestmentPlan.investor),
+                joinedload(InvestmentPlan.payments),
+            )
+            .filter(InvestmentPlan.id == new_plan.id)
+            .one()
+        )
+        new_serialized = serialize_plan(new_plan)
+
+    return {
+        "outcome": outcome,
+        "action": primary["action"],
+        "residual_action": residual_action,
+        "closed_plan": serialize_plan(plan),
+        "new_plan": new_serialized,
     }
 
 
@@ -842,6 +1036,7 @@ def generate_payment_schedule(
     plan: InvestmentPlan,
     *,
     realign_dates: bool = True,
+    commit: bool = True,
 ) -> list[Payment]:
     """Rebuild / fill payment months.
 
@@ -925,7 +1120,10 @@ def generate_payment_schedule(
             )
             db.add(payment)
             created.append(payment)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         return created
 
     existing = (
@@ -1017,7 +1215,10 @@ def generate_payment_schedule(
         db.add(payment)
         created.append(payment)
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return created
 
 

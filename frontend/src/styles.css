@@ -602,6 +602,77 @@ button.stat {
   background: color-mix(in srgb, var(--panel) 85%, #eef3f0);
 }
 
+.savings-actions__wizard {
+  max-width: 36rem;
+}
+
+.savings-actions__choices {
+  display: grid;
+  gap: 10px;
+}
+
+.savings-actions__details {
+  display: grid;
+  gap: 12px;
+}
+
+.savings-actions__fieldset {
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.savings-actions__fieldset legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+
+.savings-actions__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.95rem;
+}
+
+.savings-actions__check input {
+  margin-top: 3px;
+}
+
+.savings-actions__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.savings-actions__grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+.closed-plans {
+  display: grid;
+  gap: 10px;
+}
+
+.closed-plan-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  background: color-mix(in srgb, var(--panel) 90%, #f0f0f0);
+}
+
+.closed-plan-row strong {
+  display: block;
+}
+
 .savings-actions__form-head {
   display: flex;
   flex-wrap: wrap;
