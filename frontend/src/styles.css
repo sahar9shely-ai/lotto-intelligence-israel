@@ -1772,9 +1772,13 @@ textarea {
     font-size: 1.45rem;
   }
 
+  /* Phone: navigation only in the bottom dock — hide the top link bar. */
   .nav {
-    width: 100%;
-    order: 3;
+    display: none;
+  }
+
+  .topbar__logout {
+    margin-inline-start: auto;
   }
 
   .public-link-bar {
@@ -1894,17 +1898,22 @@ textarea {
   font-weight: 600;
 }
 
-.nav__logout {
+.topbar__logout {
   border: 0;
   background: transparent;
   cursor: pointer;
-  color: var(--ink-soft) !important;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 9px 12px;
+  border-radius: 999px;
+  flex: 0 0 auto;
 }
 
-.nav__logout:hover,
-.nav__logout.is-active {
-  background: transparent !important;
-  color: var(--danger) !important;
+.topbar__logout:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .inline-form {

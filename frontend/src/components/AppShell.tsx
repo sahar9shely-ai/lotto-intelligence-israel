@@ -147,17 +147,17 @@ export function AppShell() {
                   {link.label}
                 </NavLink>
               ))}
-              <button
-                type="button"
-                className="nav__link nav__logout"
-                onClick={() => {
-                  logout();
-                  navigate("/login", { replace: true });
-                }}
-              >
-                יציאה
-              </button>
             </nav>
+            <button
+              type="button"
+              className="topbar__logout"
+              onClick={() => {
+                logout();
+                navigate("/login", { replace: true });
+              }}
+            >
+              יציאה
+            </button>
           </header>
         </div>
       </div>
