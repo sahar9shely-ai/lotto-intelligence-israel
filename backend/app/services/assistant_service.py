@@ -203,6 +203,28 @@ def system_prompt(investor_name: str) -> str:
 סגנון: קצר, ברור, עם מספרים ב־₪ כשיש. הפרד תמיד בין החזר חודשי (מזומן) לבין צבירת חיסכון."""
 
 
+# Prefer free-tier-friendly models first; fall back if a model is quota-blocked.
+_GEMINI_MODELS = (
+    "gemini-flash-lite-latest",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
+    "gemini-2.0-flash",
+)
+
+
+def _friendly_model_error(status_code: int, body: str) -> str:
+    """Short Hebrew error for investors — never dump raw API JSON."""
+    lower = (body or "").lower()
+    if status_code == 429 or "quota" in lower or "rate limit" in lower:
+        return "נגמרה מכסת השיחות במודל לזמן מה. נסה שוב עוד כמה דקות."
+    if status_code in {401, 403} or "api key" in lower or "permission" in lower:
+        return "מפתח ה־API לא תקין או חסום. בדוק אותו בהגדרות."
+    if status_code == 404:
+        return "המודל לא זמין כרגע."
+    return "המודל לא היה זמין כרגע. נסה שוב בעוד רגע."
+
+
 def _call_gemini(api_key: str, system: str, messages: list[dict], context: dict) -> str:
     # Build Gemini contents from history
     contents = []
@@ -229,19 +251,30 @@ def _call_gemini(api_key: str, system: str, messages: list[dict], context: dict)
         ],
         "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1024},
     }
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.0-flash:generateContent?key={api_key}"
-    )
+    last_error: Optional[Exception] = None
     with httpx.Client(timeout=45.0) as client:
-        res = client.post(url, json=payload)
-        if res.status_code >= 400:
-            raise RuntimeError(f"שגיאת מודל: {res.status_code} {res.text[:240]}")
-        data = res.json()
-    try:
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("תשובת המודל לא תקינה") from exc
+        for model in _GEMINI_MODELS:
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={api_key}"
+            )
+            res = client.post(url, json=payload)
+            if res.status_code >= 400:
+                last_error = RuntimeError(
+                    _friendly_model_error(res.status_code, res.text)
+                )
+                # Quota / not-found → try next model; auth errors stop immediately.
+                if res.status_code in {401, 403}:
+                    raise last_error
+                continue
+            data = res.json()
+            try:
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            except (KeyError, IndexError, TypeError) as exc:
+                raise RuntimeError("תשובת המודל לא תקינה") from exc
+    if last_error:
+        raise last_error
+    raise RuntimeError("המודל לא היה זמין כרגע. נסה שוב בעוד רגע.")
 
 
 def _call_openai(api_key: str, system: str, messages: list[dict], context: dict) -> str:
@@ -268,7 +301,7 @@ def _call_openai(api_key: str, system: str, messages: list[dict], context: dict)
             json=payload,
         )
         if res.status_code >= 400:
-            raise RuntimeError(f"שגיאת מודל: {res.status_code} {res.text[:240]}")
+            raise RuntimeError(_friendly_model_error(res.status_code, res.text))
         data = res.json()
     return data["choices"][0]["message"]["content"].strip()
 
@@ -382,9 +415,12 @@ def chat(
         else:
             raw = _call_gemini(api_key, system, msgs, context)
     except Exception as exc:
-        # Fall back to calculation-aware local reply
+        # Fall back to calculation-aware local reply — keep the note short.
         raw = _local_reply(context, message, what_if)
-        raw += f"\n\n(המודל לא היה זמין כרגע: {exc})"
+        note = str(exc).strip() or "המודל לא היה זמין כרגע."
+        if len(note) > 160 or "{" in note:
+            note = "המודל לא היה זמין כרגע. נסה שוב בעוד רגע."
+        raw += f"\n\n({note})"
 
     return {
         "reply": scrub_assistant_text(raw),
