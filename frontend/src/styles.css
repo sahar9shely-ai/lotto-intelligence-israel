@@ -1369,15 +1369,46 @@ textarea {
 
 .public-link-bar {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.public-link-bar__toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: var(--shadow-soft);
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.public-link-bar__toggle:hover,
+.public-link-bar__toggle[aria-expanded="true"] {
+  border-color: rgba(31, 107, 85, 0.35);
+  color: var(--accent-strong);
+  background: rgba(31, 107, 85, 0.08);
+}
+
+.public-link-bar__panel {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 6px 12px;
-  margin-bottom: 10px;
+  padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.8);
   box-shadow: var(--shadow-soft);
+  animation: rise 0.25s ease both;
 }
 
 .public-link-bar__actions {
