@@ -153,7 +153,7 @@ export function SettingsPage() {
         subtitle={
           data.assistant_api_key_set
             ? `מפתח מוגדר (${data.assistant_api_key_hint || "****"}) · ${data.assistant_provider || "gemini"}`
-            : "            בלי מפתח — חישובים מהתיק עובדים; שיחה חופשית דורשת Gemini חינמי
+            : "בלי מפתח — חישובים מהתיק עובדים; שיחה חופשית דורשת Gemini חינמי"
         }
       >
         <p className="hint">
@@ -189,7 +189,7 @@ export function SettingsPage() {
             </select>
           </label>
           <label>
-            מפתח API {data.assistant_api_key_set ? "(השאירי ריק כדי לא לשנות)" : ""}
+            מפתח API {data.assistant_api_key_set ? "(השאר ריק כדי לא לשנות)" : ""}
             <input
               name="assistant_api_key"
               type="password"
