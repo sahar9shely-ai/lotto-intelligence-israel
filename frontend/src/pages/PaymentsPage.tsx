@@ -1177,6 +1177,7 @@ export function PaymentsPage() {
 
                         <SavingsActions
                           plan={p}
+                          canManage={isManager}
                           onDone={() => {
                             reloadPlans();
                             reload();

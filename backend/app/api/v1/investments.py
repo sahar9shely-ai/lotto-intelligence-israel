@@ -507,12 +507,11 @@ def _assert_plan_access(user: User, plan: InvestmentPlan) -> None:
 def withdraw_savings(
     plan_id: int,
     payload: SavingsActionRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    """Pull available savings out of the pot (does not change קרן)."""
+    """Pull available savings out of the pot (does not change קרן). Manager only."""
     plan = _load_plan_for_savings(db, plan_id)
-    _assert_plan_access(user, plan)
     try:
         return svc.redeem_savings(
             db,
@@ -533,12 +532,11 @@ def withdraw_savings(
 def transfer_savings_to_principal(
     plan_id: int,
     payload: SavingsActionRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    """Move available savings into קרן — cash return rises; savings pot shrinks."""
+    """Move available savings into קרן. Manager only."""
     plan = _load_plan_for_savings(db, plan_id)
-    _assert_plan_access(user, plan)
     try:
         return svc.redeem_savings(
             db,

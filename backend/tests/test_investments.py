@@ -746,4 +746,20 @@ def test_withdraw_and_transfer_savings_to_principal():
     )
     assert too_much.status_code == 400
 
+    # Investor must not withdraw / transfer — manager only
+    inv_headers = _auth_headers("savingsredeem", "Password1!")
+    # _auth_headers maps email→username; pass username via email-like fallback
+    forbidden_w = client.post(
+        f"/api/v1/investments/plans/{plan_id}/savings/withdraw",
+        headers=inv_headers,
+        json={"amount": 100},
+    )
+    assert forbidden_w.status_code == 403, forbidden_w.text
+    forbidden_t = client.post(
+        f"/api/v1/investments/plans/{plan_id}/savings/transfer-to-principal",
+        headers=inv_headers,
+        json={"amount": 100},
+    )
+    assert forbidden_t.status_code == 403, forbidden_t.text
+
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)

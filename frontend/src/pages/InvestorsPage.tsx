@@ -563,7 +563,11 @@ function PlanCard({
         </div>
       </div>
 
-      <SavingsActions plan={plan} onDone={onSavingsChanged} />
+      <SavingsActions
+        plan={plan}
+        canManage={isManager}
+        onDone={onSavingsChanged}
+      />
 
       {showReport ? (
         <PlanStatusReportPanel

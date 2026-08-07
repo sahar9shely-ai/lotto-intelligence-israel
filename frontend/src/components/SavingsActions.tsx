@@ -8,9 +8,12 @@ type Mode = "withdraw" | "transfer" | null;
 export function SavingsActions({
   plan,
   onDone,
+  canManage = false,
 }: {
   plan: Plan;
   onDone: () => void;
+  /** Manager-only money moves — investors never see these controls. */
+  canManage?: boolean;
 }) {
   const available = Number(plan.current_savings_balance || 0);
   const [mode, setMode] = useState<Mode>(null);
@@ -18,7 +21,7 @@ export function SavingsActions({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (plan.plan_type === "monthly" || available <= 0) {
+  if (!canManage || plan.plan_type === "monthly" || available <= 0) {
     return null;
   }
 
