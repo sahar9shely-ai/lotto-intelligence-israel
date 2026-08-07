@@ -280,20 +280,49 @@ def serialize_payment(payment: Payment) -> dict:
 
 
 def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict:
+    """Investor summary with cash and savings kept as separate money lines.
+
+    monthly_payout / monthly_cash = cash return only (what is paid out monthly).
+    monthly_savings = accrual only (not cash in hand — never mixed into payout).
+    """
     today = today or date.today()
     active_plans = [p for p in investor.plans if p.status == "active"]
-    active_principal = sum(p.principal for p in active_plans)
-    monthly_payout = sum(
-        calc_monthly(
-            p.principal,
-            normalize_plan_rates(
-                getattr(p, "plan_type", None) or "monthly",
-                p.monthly_rate_percent,
-                getattr(p, "savings_rate_percent", 0.0) or 0.0,
-            )[1],
+    active_principal = 0.0
+    monthly_cash = 0.0
+    monthly_savings = 0.0
+    current_savings = 0.0
+    projected_savings = 0.0
+    cash_rate_weight = 0.0
+    savings_rate_weight = 0.0
+    plan_types: list[str] = []
+
+    for p in active_plans:
+        metrics = plan_metrics(p, today)
+        kind, cash_rate, savings_rate = normalize_plan_rates(
+            getattr(p, "plan_type", None) or "monthly",
+            p.monthly_rate_percent,
+            getattr(p, "savings_rate_percent", 0.0) or 0.0,
         )
-        for p in active_plans
-    )
+        principal = float(p.principal or 0)
+        active_principal += principal
+        monthly_cash += metrics["monthly_investor_payout"]
+        monthly_savings += metrics["monthly_savings_accrual"]
+        current_savings += metrics["current_savings_balance"]
+        projected_savings += metrics["projected_savings_balance"]
+        cash_rate_weight += cash_rate * principal
+        savings_rate_weight += savings_rate * principal
+        plan_types.append(kind)
+
+    active_principal = round(active_principal, 2)
+    monthly_cash = round(monthly_cash, 2)
+    monthly_savings = round(monthly_savings, 2)
+    if active_principal > 0:
+        blended_cash_rate = round(cash_rate_weight / active_principal, 4)
+        blended_savings_rate = round(savings_rate_weight / active_principal, 4)
+    else:
+        blended_cash_rate = 0.0
+        blended_savings_rate = 0.0
+
     if active_plans:
         earliest = min(p.start_date for p in active_plans)
         months_in = months_between(earliest, today)
@@ -309,6 +338,8 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
         access_email = user.email
         access_role = user.role
         has_login = bool(user.password_hash) and not user.must_reset_password
+
+    unique_types = sorted(set(plan_types))
     return {
         "id": investor.id,
         "name": investor.name,
@@ -316,8 +347,17 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
         "phone": investor.phone,
         "notes": investor.notes,
         "created_at": investor.created_at,
-        "active_principal": round(active_principal, 2),
-        "monthly_payout": round(monthly_payout, 2),
+        "active_principal": active_principal,
+        "monthly_payout": monthly_cash,
+        "monthly_cash": monthly_cash,
+        "monthly_savings": monthly_savings,
+        "monthly_total": round(monthly_cash + monthly_savings, 2),
+        "cash_rate_percent": blended_cash_rate,
+        "savings_rate_percent": blended_savings_rate,
+        "current_savings_balance": round(current_savings, 2),
+        "projected_savings_balance": round(projected_savings, 2),
+        "active_plans_count": len(active_plans),
+        "plan_types": unique_types,
         "months_in_program": months_in,
         "plans_count": len(investor.plans),
         "access_username": access_username,
@@ -1388,8 +1428,21 @@ def reject_payment_confirmation(db: Session, *, payment: Payment, actor) -> dict
 
 
 def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
+    """Portfolio summary. Cash and savings are never mixed into one payout number.
+
+    monthly_investor_payouts = cash only (paid monthly to investors).
+    monthly_savings_accruals = savings accrual only (separate ledger line).
+    Paid YTD / lifetime come from payment rows (cash only) — no double count.
+    """
     today = date.today()
-    investors_query = db.query(Investor).options(joinedload(Investor.plans)).order_by(Investor.id)
+    investors_query = (
+        db.query(Investor)
+        .options(
+            joinedload(Investor.plans).joinedload(InvestmentPlan.payments),
+            joinedload(Investor.user),
+        )
+        .order_by(Investor.id)
+    )
     if investor_id is not None:
         investors_query = investors_query.filter(Investor.id == investor_id)
     investors = investors_query.all()
@@ -1404,18 +1457,25 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     plans = plans_query.all()
 
     total_principal = 0.0
-    monthly_investor = 0.0
+    monthly_investor_cash = 0.0
+    monthly_investor_savings = 0.0
+    current_savings_total = 0.0
+    projected_savings_total = 0.0
     monthly_manager_fees = 0.0
-    monthly_manager_own = 0.0
+    monthly_manager_own_cash = 0.0
+    monthly_manager_own_savings = 0.0
 
     for plan in plans:
+        metrics = plan_metrics(plan, today)
         total_principal += plan.principal
-        payout = calc_monthly(plan.principal, plan.monthly_rate_percent)
-        fee = calc_monthly(plan.principal, plan.manager_fee_percent)
-        monthly_investor += payout
-        monthly_manager_fees += fee
+        monthly_investor_cash += metrics["monthly_investor_payout"]
+        monthly_investor_savings += metrics["monthly_savings_accrual"]
+        current_savings_total += metrics["current_savings_balance"]
+        projected_savings_total += metrics["projected_savings_balance"]
+        monthly_manager_fees += metrics["monthly_manager_fee"]
         if plan.investor and plan.investor.is_manager:
-            monthly_manager_own += payout
+            monthly_manager_own_cash += metrics["monthly_investor_payout"]
+            monthly_manager_own_savings += metrics["monthly_savings_accrual"]
 
     year_start = date(today.year, 1, 1)
     paid_query = db.query(Payment).filter(
@@ -1452,11 +1512,22 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         recent_query = recent_query.filter(Payment.investor_id == investor_id)
     recent = recent_query.order_by(Payment.paid_at.desc(), Payment.id.desc()).limit(8).all()
 
+    monthly_manager_own = round(monthly_manager_own_cash + monthly_manager_own_savings, 2)
     return {
+        "scope_investor_id": investor_id,
         "total_principal": round(total_principal, 2),
-        "monthly_investor_payouts": round(monthly_investor, 2),
+        "monthly_investor_payouts": round(monthly_investor_cash, 2),
+        "monthly_cash_payouts": round(monthly_investor_cash, 2),
+        "monthly_savings_accruals": round(monthly_investor_savings, 2),
+        "monthly_investor_total": round(
+            monthly_investor_cash + monthly_investor_savings, 2
+        ),
+        "current_savings_total": round(current_savings_total, 2),
+        "projected_savings_total": round(projected_savings_total, 2),
         "monthly_manager_fees": round(monthly_manager_fees, 2),
-        "monthly_manager_own_payout": round(monthly_manager_own, 2),
+        "monthly_manager_own_payout": round(monthly_manager_own_cash, 2),
+        "monthly_manager_own_savings": round(monthly_manager_own_savings, 2),
+        "monthly_manager_own_total": monthly_manager_own,
         "monthly_manager_total": round(monthly_manager_own + monthly_manager_fees, 2),
         "ytd_investor_paid": round(ytd_investor, 2),
         "ytd_manager_earned": round(ytd_manager, 2),

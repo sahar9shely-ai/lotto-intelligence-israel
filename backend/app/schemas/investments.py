@@ -38,6 +38,15 @@ class InvestorOut(BaseModel):
     created_at: datetime
     active_principal: float = 0
     monthly_payout: float = 0
+    monthly_cash: float = 0
+    monthly_savings: float = 0
+    monthly_total: float = 0
+    cash_rate_percent: float = 0
+    savings_rate_percent: float = 0
+    current_savings_balance: float = 0
+    projected_savings_balance: float = 0
+    active_plans_count: int = 0
+    plan_types: list[str] = []
     months_in_program: int = 0
     plans_count: int = 0
     access_username: Optional[str] = None
@@ -225,10 +234,18 @@ class SlackAnnounceOut(BaseModel):
 
 
 class DashboardOut(BaseModel):
+    scope_investor_id: Optional[int] = None
     total_principal: float
     monthly_investor_payouts: float
+    monthly_cash_payouts: float = 0.0
+    monthly_savings_accruals: float = 0.0
+    monthly_investor_total: float = 0.0
+    current_savings_total: float = 0.0
+    projected_savings_total: float = 0.0
     monthly_manager_fees: float
     monthly_manager_own_payout: float
+    monthly_manager_own_savings: float = 0.0
+    monthly_manager_own_total: float = 0.0
     monthly_manager_total: float
     ytd_investor_paid: float
     ytd_manager_earned: float

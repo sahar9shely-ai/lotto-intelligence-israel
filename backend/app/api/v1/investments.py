@@ -73,10 +73,15 @@ def seed(
 
 @router.get("/dashboard", response_model=DashboardOut)
 def dashboard(
+    investor_id: int | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
-    scoped = None if is_manager(user) else user.investor_id
+    # Investors always see themselves. Managers may filter to one investor or all.
+    if is_manager(user):
+        scoped = investor_id
+    else:
+        scoped = user.investor_id
     return svc.get_dashboard(db, investor_id=scoped)
 
 
@@ -248,7 +253,10 @@ def list_investors(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
-    query = db.query(Investor).options(joinedload(Investor.plans), joinedload(Investor.user))
+    query = db.query(Investor).options(
+        joinedload(Investor.plans).joinedload(InvestmentPlan.payments),
+        joinedload(Investor.user),
+    )
     if not is_manager(user):
         query = query.filter(Investor.id == user.investor_id)
     investors = query.order_by(Investor.is_manager.desc(), Investor.name).all()

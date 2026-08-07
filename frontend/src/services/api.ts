@@ -157,7 +157,12 @@ export const api = {
     }),
   emailOutbox: () => request<EmailOutboxItem[]>("/api/v1/auth/email-outbox"),
 
-  dashboard: () => request<Dashboard>("/api/v1/investments/dashboard"),
+  dashboard: (params?: { investor_id?: number | null }) => {
+    const qs = new URLSearchParams();
+    if (params?.investor_id != null) qs.set("investor_id", String(params.investor_id));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return request<Dashboard>(`/api/v1/investments/dashboard${suffix}`);
+  },
   managerIncome: () =>
     request<ManagerIncomeBoard>("/api/v1/investments/manager-income"),
   settings: () => request<Settings>("/api/v1/investments/settings"),

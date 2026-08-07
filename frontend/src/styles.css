@@ -1241,6 +1241,132 @@ textarea {
   line-height: 1.5;
 }
 
+.scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 6px;
+}
+
+.scope-bar__btn {
+  border: 1px solid var(--line);
+  background: rgba(14, 42, 34, 0.04);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.scope-bar__btn.is-active,
+.scope-bar__btn:hover {
+  border-color: rgba(31, 107, 85, 0.4);
+  background: rgba(31, 107, 85, 0.12);
+  color: var(--accent-strong);
+}
+
+.money-ledger {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+
+.money-ledger--compact {
+  margin-bottom: 12px;
+}
+
+.money-ledger__item {
+  display: grid;
+  gap: 4px;
+  padding: 14px 14px 12px;
+  border-radius: 14px;
+  background: rgba(14, 42, 34, 0.04);
+  border: 1px solid transparent;
+}
+
+.money-ledger__item span {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.money-ledger__item strong {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.money-ledger__item em {
+  font-style: normal;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.money-ledger__item--accent {
+  background: rgba(31, 107, 85, 0.1);
+  border-color: rgba(31, 107, 85, 0.18);
+}
+
+.money-ledger__item--accent strong {
+  color: var(--accent-strong);
+}
+
+.money-ledger__item--total {
+  background: rgba(14, 42, 34, 0.07);
+  border-color: rgba(14, 42, 34, 0.12);
+}
+
+.investor-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.investor-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.investor-table th,
+.investor-table td {
+  text-align: right;
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  font-size: 0.92rem;
+}
+
+.investor-table th {
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.investor-table td strong {
+  font-weight: 700;
+}
+
+.tiny {
+  font-size: 0.78rem;
+  margin-top: 2px;
+}
+
+@media (max-width: 720px) {
+  .money-ledger {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .scope-bar__btn {
+    padding: 7px 12px;
+    font-size: 0.84rem;
+  }
+}
+
 .public-link-bar {
   display: flex;
   flex-wrap: wrap;

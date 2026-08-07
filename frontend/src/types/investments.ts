@@ -7,6 +7,15 @@ export type Investor = {
   created_at: string;
   active_principal: number;
   monthly_payout: number;
+  monthly_cash?: number;
+  monthly_savings?: number;
+  monthly_total?: number;
+  cash_rate_percent?: number;
+  savings_rate_percent?: number;
+  current_savings_balance?: number;
+  projected_savings_balance?: number;
+  active_plans_count?: number;
+  plan_types?: string[];
   months_in_program: number;
   plans_count: number;
   access_username?: string | null;
@@ -132,10 +141,18 @@ export type SiteStatus = {
 };
 
 export type Dashboard = {
+  scope_investor_id?: number | null;
   total_principal: number;
   monthly_investor_payouts: number;
+  monthly_cash_payouts?: number;
+  monthly_savings_accruals?: number;
+  monthly_investor_total?: number;
+  current_savings_total?: number;
+  projected_savings_total?: number;
   monthly_manager_fees: number;
   monthly_manager_own_payout: number;
+  monthly_manager_own_savings?: number;
+  monthly_manager_own_total?: number;
   monthly_manager_total: number;
   ytd_investor_paid: number;
   ytd_manager_earned: number;

@@ -8,9 +8,23 @@ import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
-import type { Settings } from "../types/investments";
+import type { Investor, Plan, Settings } from "../types/investments";
 import { formatMoney, formatPercent, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
+
+type Scope = "all" | number;
+
+function cashOf(inv: Investor) {
+  return inv.monthly_cash ?? inv.monthly_payout ?? 0;
+}
+
+function savingsOf(inv: Investor) {
+  return inv.monthly_savings ?? 0;
+}
+
+function totalMonthlyOf(inv: Investor) {
+  return inv.monthly_total ?? cashOf(inv) + savingsOf(inv);
+}
 
 export function InvestorsPage() {
   const { user } = useAuth();
@@ -21,26 +35,52 @@ export function InvestorsPage() {
     [isManager],
   );
   const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [scope, setScope] = useState<Scope | null>(null);
+  const [editingPlanId, setEditingPlanId] = useState<number | null>(null);
+  const [reportPlanId, setReportPlanId] = useState<number | null>(null);
   const [showNewInvestor, setShowNewInvestor] = useState(false);
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
 
-  const selected = useMemo(
-    () => investors?.find((i) => i.id === selectedId) ?? investors?.[0] ?? null,
-    [investors, selectedId],
+  const effectiveScope: Scope = useMemo(() => {
+    if (scope != null) return scope;
+    if (!isManager && investors?.[0]) return investors[0].id;
+    return "all";
+  }, [scope, isManager, investors]);
+
+  const selected = useMemo(() => {
+    if (!investors?.length) return null;
+    if (effectiveScope === "all") return null;
+    return investors.find((i) => i.id === effectiveScope) ?? investors[0] ?? null;
+  }, [investors, effectiveScope]);
+
+  const selectedPlans = useMemo(() => {
+    if (!selected) return [];
+    return (plans ?? []).filter((p) => p.investor_id === selected.id);
+  }, [plans, selected]);
+
+  const activeSelectedPlans = useMemo(
+    () => selectedPlans.filter((p) => p.status === "active"),
+    [selectedPlans],
   );
 
-  const selectedPlans = useMemo(
-    () => (plans ?? []).filter((p) => p.investor_id === selected?.id),
-    [plans, selected],
-  );
+  const portfolio = useMemo(() => {
+    const list = investors ?? [];
+    return {
+      principal: list.reduce((s, i) => s + (i.active_principal || 0), 0),
+      cash: list.reduce((s, i) => s + cashOf(i), 0),
+      savings: list.reduce((s, i) => s + savingsOf(i), 0),
+      savingsBalance: list.reduce((s, i) => s + (i.current_savings_balance || 0), 0),
+      count: list.length,
+      activePlans: list.reduce((s, i) => s + (i.active_plans_count || 0), 0),
+    };
+  }, [investors]);
 
   async function onCreateInvestor(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    await api.createInvestor({
+    const created = await api.createInvestor({
       name: String(fd.get("name") || "").trim(),
       phone: String(fd.get("phone") || "") || undefined,
       notes: String(fd.get("notes") || "") || undefined,
@@ -50,6 +90,7 @@ export function InvestorsPage() {
       is_manager: String(fd.get("role") || "investor") === "manager",
     });
     setShowNewInvestor(false);
+    setScope(created.id);
     setMessage("משקיע חדש נוסף עם שם משתמש וסיסמה");
     reload();
   }
@@ -76,10 +117,10 @@ export function InvestorsPage() {
     reloadPlans();
   }
 
-  async function onUpdatePlan(e: FormEvent<HTMLFormElement>, plan: {
-    id: number;
-    start_date: string;
-  }) {
+  async function onUpdatePlan(
+    e: FormEvent<HTMLFormElement>,
+    plan: { id: number; start_date: string },
+  ) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const nextStart = String(fd.get("start_date") || plan.start_date);
@@ -93,12 +134,12 @@ export function InvestorsPage() {
       status: String(fd.get("status") || "active"),
       regenerate_schedule: true,
     };
-    // Only send start_date when the manager actually changed it — prevents date drift.
     if (nextStart !== plan.start_date) {
       body.start_date = nextStart;
     }
     await api.updatePlan(plan.id, body);
-    setMessage("המסלול עודכן — הסכומים סונכרנו בלי לשנות תאריכים");
+    setEditingPlanId(null);
+    setMessage("המסלול עודכן — מזומן וחיסכון סונכרנו בנפרד");
     reload();
     reloadPlans();
   }
@@ -142,15 +183,20 @@ export function InvestorsPage() {
       </div>
     );
 
+  const planTarget = selected;
+
   return (
     <div className="page">
-      <div className="page-head">
+      <header className="page-intro">
         <div>
-          <h1>{isManager ? "משקיעים ומסלולים" : "המסלול שלי"}</h1>
-          <p className="muted">
+          <p className="page-intro__eyebrow">{isManager ? "ניהול שותפים" : "החשבון שלך"}</p>
+          <h1 className="page-intro__title">
+            {isManager ? "משקיעים — מה מגיע לכל אחד" : "מה מגיע לי"}
+          </h1>
+          <p className="page-intro__lead">
             {isManager
-              ? "החזר חודשי · חיסכון · משולב · משך גמיש"
-              : "צפייה בנתונים שלך בלבד"}
+              ? "בחרו משקיע או סה״כ כולם. מזומן וחיסכון תמיד בשורות נפרדות — בלי כפילויות."
+              : "קרן, החזר חודשי וחיסכון — מסודר וברור."}
           </p>
         </div>
         {isManager ? (
@@ -162,213 +208,213 @@ export function InvestorsPage() {
               type="button"
               className="btn btn--primary"
               onClick={() => setShowNewPlan(true)}
-              disabled={!selected}
+              disabled={!planTarget}
             >
               מסלול חדש
             </button>
           </div>
         ) : null}
-      </div>
+      </header>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
-      <div className="grid-investors">
-        <Panel title="רשימה">
-          <ul className="picker">
-            {investors.map((inv) => (
-              <li key={inv.id}>
+      <div className="scope-bar" role="tablist" aria-label="בחירת משקיע">
+        {isManager ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={effectiveScope === "all"}
+            className={effectiveScope === "all" ? "scope-bar__btn is-active" : "scope-bar__btn"}
+            onClick={() => setScope("all")}
+          >
+            סה״כ כולם
+          </button>
+        ) : null}
+        {investors.map((inv) => (
+          <button
+            key={inv.id}
+            type="button"
+            role="tab"
+            aria-selected={effectiveScope === inv.id}
+            className={effectiveScope === inv.id ? "scope-bar__btn is-active" : "scope-bar__btn"}
+            onClick={() => setScope(inv.id)}
+          >
+            {inv.name}
+            {inv.is_manager ? " · מנהל" : ""}
+          </button>
+        ))}
+      </div>
+
+      {effectiveScope === "all" && isManager ? (
+        <div className="stack">
+          <Panel
+            title="סיכום כל המשקיעים"
+            subtitle={`${portfolio.count} משקיעים · ${portfolio.activePlans} מסלולים פעילים · מזומן ≠ חיסכון`}
+          >
+            <div className="money-ledger">
+              <div className="money-ledger__item money-ledger__item--accent">
+                <span>סך קרן פעילה</span>
+                <strong>{formatMoney(portfolio.principal)}</strong>
+              </div>
+              <div className="money-ledger__item">
+                <span>החזר חודשי (מזומן)</span>
+                <strong>{formatMoney(portfolio.cash)}</strong>
+                <em>משולם כל חודש</em>
+              </div>
+              <div className="money-ledger__item">
+                <span>צבירת חיסכון חודשית</span>
+                <strong>{formatMoney(portfolio.savings)}</strong>
+                <em>לא מזומן — נצבר בנפרד</em>
+              </div>
+              <div className="money-ledger__item">
+                <span>יתרת חיסכון כעת</span>
+                <strong>{formatMoney(portfolio.savingsBalance)}</strong>
+              </div>
+              <div className="money-ledger__item money-ledger__item--total">
+                <span>סה״כ חודשי (מזומן + חיסכון)</span>
+                <strong>{formatMoney(portfolio.cash + portfolio.savings)}</strong>
+                <em>שתי שורות — לא כפילות</em>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel title="פירוט לפי משקיע" subtitle="לחצו על שם כדי לפתוח את הכרטיס המלא">
+            <div className="investor-table-wrap">
+              <table className="investor-table">
+                <thead>
+                  <tr>
+                    <th>משקיע</th>
+                    <th>קרן</th>
+                    <th>% מזומן</th>
+                    <th>% חיסכון</th>
+                    <th>החזר חודשי</th>
+                    <th>חיסכון חודשי</th>
+                    <th>יתרת חיסכון</th>
+                    <th>סה״כ חודשי</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {investors.map((inv) => (
+                    <tr key={inv.id}>
+                      <td>
+                        <button
+                          type="button"
+                          className="text-link"
+                          onClick={() => setScope(inv.id)}
+                        >
+                          {inv.name}
+                          {inv.is_manager ? " · מנהל" : ""}
+                        </button>
+                        <div className="muted tiny">
+                          {(inv.plan_types ?? [])
+                            .map((t) => planTypeLabel(t))
+                            .join(" · ") || "אין מסלול פעיל"}
+                        </div>
+                      </td>
+                      <td>{formatMoney(inv.active_principal)}</td>
+                      <td>{formatPercent(inv.cash_rate_percent ?? 0)}</td>
+                      <td>{formatPercent(inv.savings_rate_percent ?? 0)}</td>
+                      <td>{formatMoney(cashOf(inv))}</td>
+                      <td>{formatMoney(savingsOf(inv))}</td>
+                      <td>{formatMoney(inv.current_savings_balance ?? 0)}</td>
+                      <td>
+                        <strong>{formatMoney(totalMonthlyOf(inv))}</strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+      ) : selected ? (
+        <div className="stack">
+          <Panel
+            title={selected.name}
+            subtitle={
+              selected.is_manager
+                ? "השקעה עצמית · עמלה נפרדת בדשבורד"
+                : `${selected.months_in_program} חודשים בתוכנית · ${selected.active_plans_count ?? activeSelectedPlans.length} מסלולים פעילים`
+            }
+            action={<Link className="text-link" to="/payments">לתשלומים</Link>}
+          >
+            <div className="money-ledger">
+              <div className="money-ledger__item money-ledger__item--accent">
+                <span>קרן פעילה</span>
+                <strong>{formatMoney(selected.active_principal)}</strong>
+              </div>
+              <div className="money-ledger__item">
+                <span>% החזר מזומן</span>
+                <strong>{formatPercent(selected.cash_rate_percent ?? 0)}</strong>
+              </div>
+              <div className="money-ledger__item">
+                <span>% חיסכון</span>
+                <strong>{formatPercent(selected.savings_rate_percent ?? 0)}</strong>
+              </div>
+              <div className="money-ledger__item">
+                <span>החזר חודשי (מזומן)</span>
+                <strong>{formatMoney(cashOf(selected))}</strong>
+                <em>משולם כל חודש</em>
+              </div>
+              <div className="money-ledger__item">
+                <span>צבירת חיסכון חודשית</span>
+                <strong>{formatMoney(savingsOf(selected))}</strong>
+                <em>נצבר בנפרד — לא מזומן</em>
+              </div>
+              <div className="money-ledger__item">
+                <span>יתרת חיסכון כעת</span>
+                <strong>{formatMoney(selected.current_savings_balance ?? 0)}</strong>
+                <em>
+                  צפי לסיום מסלול {formatMoney(selected.projected_savings_balance ?? 0)}
+                </em>
+              </div>
+              <div className="money-ledger__item money-ledger__item--total">
+                <span>סה״כ מגיע חודשי</span>
+                <strong>{formatMoney(totalMonthlyOf(selected))}</strong>
+                <em>
+                  מזומן {formatMoney(cashOf(selected))} + חיסכון{" "}
+                  {formatMoney(savingsOf(selected))}
+                </em>
+              </div>
+            </div>
+          </Panel>
+
+          {selectedPlans.length === 0 ? (
+            <Panel title="אין מסלול עדיין" subtitle="פתחו מסלול כדי להגדיר קרן ואחוזים">
+              <p className="empty">עדיין אין מסלול למשקיע הזה.</p>
+              {isManager ? (
                 <button
                   type="button"
-                  className={
-                    selected?.id === inv.id ? "picker__item is-active" : "picker__item"
-                  }
-                  onClick={() => setSelectedId(inv.id)}
+                  className="btn btn--primary"
+                  onClick={() => setShowNewPlan(true)}
                 >
-                  <span>
-                    {inv.name}
-                    {inv.is_manager ? " · מנהל" : ""}
-                  </span>
-                  <span className="muted">{formatMoney(inv.active_principal)}</span>
+                  פתח מסלול
                 </button>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-
-        <div className="stack">
-          {selected ? (
-            <>
-              <Panel
-                title={selected.name}
-                subtitle={
-                  selected.is_manager
-                    ? "השקעה עצמית + עמלת ניהול נפרדת"
-                    : `${selected.months_in_program} חודשים בתוכנית`
+              ) : null}
+            </Panel>
+          ) : (
+            selectedPlans.map((plan) => (
+              <PlanCard
+                key={plan.id}
+                plan={plan}
+                isManager={isManager}
+                editing={editingPlanId === plan.id}
+                showReport={reportPlanId === plan.id}
+                onToggleEdit={() =>
+                  setEditingPlanId((id) => (id === plan.id ? null : plan.id))
                 }
-                action={<Link className="text-link" to="/payments">תשלומים</Link>}
-              >
-                <div className="kv">
-                  <div>
-                    <span>קרן פעילה</span>
-                    <strong>{formatMoney(selected.active_principal)}</strong>
-                  </div>
-                  <div>
-                    <span>תשלום חודשי</span>
-                    <strong>{formatMoney(selected.monthly_payout)}</strong>
-                  </div>
-                  <div>
-                    <span>מסלולים</span>
-                    <strong>{selected.plans_count}</strong>
-                  </div>
-                </div>
-              </Panel>
-
-              {selectedPlans.length === 0 ? (
-                <Panel title="אין מסלול עדיין" subtitle="כשתמלא את הסכומים — פתח מסלול כאן">
-                  <p className="empty">המספרים יוגדרו בהמשך. בינתיים אפשר לפתוח מסלול עם ערכים זמניים.</p>
-                </Panel>
-              ) : (
-                selectedPlans.map((plan) => (
-                  <Panel
-                    key={plan.id}
-                    title={`מסלול #${plan.id}`}
-                    subtitle={
-                      isManager
-                        ? `${planTypeLabel(plan.plan_type)} · ${plan.duration_months} חודשים · עמלה ${formatPercent(plan.manager_fee_percent)}`
-                        : `${planTypeLabel(plan.plan_type)} · ${plan.duration_months} חודשים`
-                    }
-                    action={
-                      isManager ? (
-                        <button
-                          type="button"
-                          className="btn btn--small btn--ghost btn--danger"
-                          onClick={() => onDeletePlan(plan)}
-                        >
-                          מחק מסלול
-                        </button>
-                      ) : null
-                    }
-                  >
-                    <div className="kv kv--dense">
-                      {plan.plan_type !== "savings" ? (
-                        <div>
-                          <span>חודשי למשקיע (מזומן)</span>
-                          <strong>{formatMoney(plan.monthly_investor_payout, true)}</strong>
-                        </div>
-                      ) : null}
-                      {plan.plan_type !== "monthly" ? (
-                        <div>
-                          <span>צבירת חיסכון חודשית</span>
-                          <strong>{formatMoney(plan.monthly_savings_accrual, true)}</strong>
-                        </div>
-                      ) : null}
-                      {plan.plan_type !== "monthly" ? (
-                        <div>
-                          <span>יתרת חיסכון צפויה</span>
-                          <strong>{formatMoney(plan.projected_savings_balance)}</strong>
-                        </div>
-                      ) : null}
-                      {isManager ? (
-                        <div>
-                          <span>עמלה חודשית</span>
-                          <strong>{formatMoney(plan.monthly_manager_fee, true)}</strong>
-                        </div>
-                      ) : null}
-                      <div>
-                        <span>סה״כ למסלול</span>
-                        <strong>{formatMoney(plan.total_investor_payout)}</strong>
-                      </div>
-                      <div>
-                        <span>שנתי (×12 / שנה א׳)</span>
-                        <strong>{formatMoney(plan.annual_investor_payout)}</strong>
-                      </div>
-                      <div>
-                        <span>התקדמות</span>
-                        <strong>
-                          {plan.months_elapsed}/{plan.duration_months} · נותרו{" "}
-                          {plan.months_remaining}
-                        </strong>
-                      </div>
-                      <div>
-                        <span>שולם בפועל</span>
-                        <strong>
-                          {formatMoney(plan.paid_investor_total)} ({plan.paid_count} תשלומים)
-                        </strong>
-                      </div>
-                    </div>
-
-                    <PlanStatusReportPanel
-                      planId={plan.id}
-                      title={`דוח מצב · ${planTypeLabel(plan.plan_type)} · מתחילת המסלול`}
-                    />
-
-                    {isManager ? (
-                      <form className="form" onSubmit={(e) => onUpdatePlan(e, plan)}>
-                      <div className="form__grid">
-                        <label>
-                          קרן (₪)
-                          <input name="principal" type="number" min="0" step="0.01" defaultValue={plan.principal} />
-                        </label>
-                        <PlanTrackFields
-                          defaultPlanType={plan.plan_type}
-                          defaultMonthlyRate={plan.monthly_rate_percent}
-                          defaultSavingsRate={plan.savings_rate_percent}
-                          defaultPrincipal={plan.principal}
-                        />
-                        <label>
-                          אחוז עמלת ניהול
-                          <input
-                            name="manager_fee_percent"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            defaultValue={plan.manager_fee_percent}
-                          />
-                        </label>
-                        <label>
-                          תאריך התחלה
-                          <input name="start_date" type="date" defaultValue={plan.start_date} />
-                        </label>
-                        <label>
-                          משך (חודשים)
-                          <input
-                            name="duration_months"
-                            type="number"
-                            min="1"
-                            max="120"
-                            defaultValue={plan.duration_months}
-                          />
-                        </label>
-                        <label>
-                          סטטוס
-                          <select name="status" defaultValue={plan.status}>
-                            <option value="active">פעיל</option>
-                            <option value="paused">מושהה</option>
-                            <option value="completed">הסתיים</option>
-                          </select>
-                        </label>
-                      </div>
-                      <div className="page-head__actions">
-                        <button type="submit" className="btn btn--primary">
-                          שמור שינויים
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--danger"
-                          onClick={() => onDeletePlan(plan)}
-                        >
-                          מחק מסלול
-                        </button>
-                      </div>
-                    </form>
-                    ) : null}
-                  </Panel>
-                ))
-              )}
-            </>
-          ) : null}
+                onToggleReport={() =>
+                  setReportPlanId((id) => (id === plan.id ? null : plan.id))
+                }
+                onUpdate={onUpdatePlan}
+                onDelete={onDeletePlan}
+              />
+            ))
+          )}
         </div>
-      </div>
+      ) : (
+        <p className="empty">בחרו משקיע מהרשימה למעלה.</p>
+      )}
 
       {showNewInvestor ? (
         <Modal title="משקיע חדש" onClose={() => setShowNewInvestor(false)}>
@@ -414,12 +460,170 @@ export function InvestorsPage() {
         </Modal>
       ) : null}
 
-      {showNewPlan && selected ? (
-        <Modal title={`מסלול חדש ל-${selected.name}`} onClose={() => setShowNewPlan(false)}>
+      {showNewPlan && planTarget ? (
+        <Modal title={`מסלול חדש ל-${planTarget.name}`} onClose={() => setShowNewPlan(false)}>
           <PlanForm settings={settings} onSubmit={onCreatePlan} />
         </Modal>
       ) : null}
     </div>
+  );
+}
+
+function PlanCard({
+  plan,
+  isManager,
+  editing,
+  showReport,
+  onToggleEdit,
+  onToggleReport,
+  onUpdate,
+  onDelete,
+}: {
+  plan: Plan;
+  isManager: boolean;
+  editing: boolean;
+  showReport: boolean;
+  onToggleEdit: () => void;
+  onToggleReport: () => void;
+  onUpdate: (
+    e: FormEvent<HTMLFormElement>,
+    plan: { id: number; start_date: string },
+  ) => Promise<void>;
+  onDelete: (plan: {
+    id: number;
+    start_date: string;
+    investor_name: string;
+    paid_count: number;
+  }) => Promise<void>;
+}) {
+  const statusLabelHe =
+    plan.status === "active" ? "פעיל" : plan.status === "paused" ? "מושהה" : "הסתיים";
+
+  return (
+    <Panel
+      title={`${planTypeLabel(plan.plan_type)} · מסלול #${plan.id}`}
+      subtitle={`${statusLabelHe} · ${plan.duration_months} חודשים · ${plan.months_elapsed}/${plan.duration_months}`}
+      action={
+        <div className="page-head__actions">
+          <button type="button" className="btn btn--small btn--ghost" onClick={onToggleReport}>
+            {showReport ? "הסתר דוח" : "דוח מצב"}
+          </button>
+          {isManager ? (
+            <button type="button" className="btn btn--small btn--ghost" onClick={onToggleEdit}>
+              {editing ? "סגור עריכה" : "ערוך"}
+            </button>
+          ) : null}
+        </div>
+      }
+    >
+      <div className="money-ledger money-ledger--compact">
+        <div className="money-ledger__item">
+          <span>קרן</span>
+          <strong>{formatMoney(plan.principal)}</strong>
+        </div>
+        {plan.plan_type !== "savings" ? (
+          <div className="money-ledger__item">
+            <span>מזומן {formatPercent(plan.monthly_rate_percent)}</span>
+            <strong>{formatMoney(plan.monthly_investor_payout, true)}</strong>
+            <em>/ חודש</em>
+          </div>
+        ) : null}
+        {plan.plan_type !== "monthly" ? (
+          <div className="money-ledger__item">
+            <span>חיסכון {formatPercent(plan.savings_rate_percent)}</span>
+            <strong>{formatMoney(plan.monthly_savings_accrual, true)}</strong>
+            <em>/ חודש · נצבר</em>
+          </div>
+        ) : null}
+        {plan.plan_type !== "monthly" ? (
+          <div className="money-ledger__item">
+            <span>יתרת חיסכון</span>
+            <strong>{formatMoney(plan.current_savings_balance ?? 0)}</strong>
+            <em>צפי {formatMoney(plan.projected_savings_balance)}</em>
+          </div>
+        ) : null}
+        {isManager ? (
+          <div className="money-ledger__item">
+            <span>עמלת ניהול {formatPercent(plan.manager_fee_percent)}</span>
+            <strong>{formatMoney(plan.monthly_manager_fee, true)}</strong>
+            <em>נוספת — לא מהמשקיע</em>
+          </div>
+        ) : null}
+        <div className="money-ledger__item">
+          <span>שולם בפועל (מזומן)</span>
+          <strong>{formatMoney(plan.paid_investor_total)}</strong>
+          <em>{plan.paid_count} תשלומים</em>
+        </div>
+      </div>
+
+      {showReport ? (
+        <PlanStatusReportPanel
+          planId={plan.id}
+          title={`דוח מצב · ${planTypeLabel(plan.plan_type)}`}
+        />
+      ) : null}
+
+      {isManager && editing ? (
+        <form className="form" onSubmit={(e) => onUpdate(e, plan)}>
+          <div className="form__grid">
+            <label>
+              קרן (₪)
+              <input name="principal" type="number" min="0" step="0.01" defaultValue={plan.principal} />
+            </label>
+            <PlanTrackFields
+              defaultPlanType={plan.plan_type}
+              defaultMonthlyRate={plan.monthly_rate_percent}
+              defaultSavingsRate={plan.savings_rate_percent}
+              defaultPrincipal={plan.principal}
+            />
+            <label>
+              אחוז עמלת ניהול
+              <input
+                name="manager_fee_percent"
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue={plan.manager_fee_percent}
+              />
+            </label>
+            <label>
+              תאריך התחלה
+              <input name="start_date" type="date" defaultValue={plan.start_date} />
+            </label>
+            <label>
+              משך (חודשים)
+              <input
+                name="duration_months"
+                type="number"
+                min="1"
+                max="120"
+                defaultValue={plan.duration_months}
+              />
+            </label>
+            <label>
+              סטטוס
+              <select name="status" defaultValue={plan.status}>
+                <option value="active">פעיל</option>
+                <option value="paused">מושהה</option>
+                <option value="completed">הסתיים</option>
+              </select>
+            </label>
+          </div>
+          <div className="page-head__actions">
+            <button type="submit" className="btn btn--primary">
+              שמור שינויים
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--danger"
+              onClick={() => onDelete(plan)}
+            >
+              מחק מסלול
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </Panel>
   );
 }
 
@@ -478,9 +682,7 @@ function PlanForm({
         </label>
       </div>
       <p className="hint">
-        ברירת המחדל היא 1 בינואר של השנה הנוכחית — כדי שהלוח יהיה שנתי מתחילת השנה ועד סופה.
-        עמלת הניהול מתווספת מעבר לתשלום למשקיע — לא נגזרת מהאחוזים שלו.
-        במסלול חיסכון/משולב הריבית על החיסכון מתרכבת כל 12 חודשים.
+        מזומן וחיסכון נשמרים כשדות נפרדים. עמלת ניהול מתווספת מעבר לתשלום למשקיע.
       </p>
       <button type="submit" className="btn btn--primary">
         צור מסלול + לוח תשלומים
