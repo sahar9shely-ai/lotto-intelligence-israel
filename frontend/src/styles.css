@@ -580,6 +580,46 @@ button.stat {
   align-items: center;
 }
 
+.savings-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.savings-actions__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.savings-actions__form {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  background: color-mix(in srgb, var(--panel) 85%, #eef3f0);
+}
+
+.savings-actions__form-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  align-items: baseline;
+}
+
+.savings-actions__form label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+.savings-actions__form input {
+  max-width: 12rem;
+}
+
 .savings-progress {
   height: 8px;
   border-radius: 999px;

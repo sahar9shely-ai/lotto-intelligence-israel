@@ -103,6 +103,9 @@ class PlanOut(BaseModel):
     monthly_savings_accrual: float = 0.0
     projected_savings_balance: float = 0.0
     current_savings_balance: float = 0.0
+    accrued_savings_balance: float = 0.0
+    savings_redeemed_total: float = 0.0
+    accrual_principal: float = 0.0
     total_cash_payout: float = 0.0
     total_investor_payout: float
     total_manager_fee: float
@@ -114,6 +117,26 @@ class PlanOut(BaseModel):
     paid_manager_total: float
 
     model_config = {"from_attributes": True}
+
+
+class SavingsActionRequest(BaseModel):
+    amount: float = Field(gt=0)
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class SavingsActionOut(BaseModel):
+    id: int
+    action_type: str
+    amount: float
+    principal_after: Optional[float] = None
+    available_after: Optional[float] = None
+    created_at: datetime
+    notes: Optional[str] = None
+
+
+class SavingsActionResult(BaseModel):
+    action: SavingsActionOut
+    plan: PlanOut
 
 
 class PaymentUpdate(BaseModel):

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
+import { SavingsActions } from "../components/SavingsActions";
 import { Stat } from "../components/Stat";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
@@ -1173,6 +1174,16 @@ export function PaymentsPage() {
                             </span>
                           </div>
                         </div>
+
+                        <SavingsActions
+                          plan={p}
+                          onDone={() => {
+                            reloadPlans();
+                            reload();
+                            reloadReport();
+                            reloadYearAll();
+                          }}
+                        />
                       </div>
                     );
                   })}

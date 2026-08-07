@@ -12,6 +12,7 @@ from app.models.investments import (
     InvestmentPlan,
     Payment,
     Quote,
+    SavingsAction,
 )
 
 
@@ -227,10 +228,18 @@ def plan_track_end_date(plan: InvestmentPlan) -> date:
     return add_months(plan.start_date, max(duration, 1) - 1)
 
 
-def current_savings_for_plan(
+def plan_accrual_principal(plan: InvestmentPlan) -> float:
+    """Principal used for savings accrual — stable when savings moves into קרן."""
+    raw = getattr(plan, "accrual_principal", None)
+    if raw is None:
+        return float(plan.principal or 0)
+    return float(raw)
+
+
+def accrued_savings_for_plan(
     plan: InvestmentPlan, today: Optional[date] = None
 ) -> float:
-    """Savings balance accrued so far (through elapsed months), per plan terms."""
+    """Gross savings accrued from terms (before withdrawals/transfers)."""
     today = today or date.today()
     _, _, savings_rate = normalize_plan_rates(
         getattr(plan, "plan_type", None) or "monthly",
@@ -244,7 +253,7 @@ def current_savings_for_plan(
     if elapsed <= 0:
         return 0.0
     rows = month_savings_ledger(
-        principal=plan.principal,
+        principal=plan_accrual_principal(plan),
         savings_rate_percent=savings_rate,
         duration_months=duration,
     )
@@ -252,11 +261,37 @@ def current_savings_for_plan(
     return float(row["cumulative_savings"]) if row else 0.0
 
 
+def available_savings_for_plan(
+    plan: InvestmentPlan, today: Optional[date] = None
+) -> float:
+    """Savings still available to withdraw or move into principal."""
+    accrued = accrued_savings_for_plan(plan, today)
+    redeemed = float(getattr(plan, "savings_redeemed_total", 0.0) or 0.0)
+    return max(0.0, round(accrued - redeemed, 2))
+
+
+def current_savings_for_plan(
+    plan: InvestmentPlan, today: Optional[date] = None
+) -> float:
+    """Public 'current savings' = available balance (after redemptions)."""
+    return available_savings_for_plan(plan, today)
+
+
 def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
     today = today or date.today()
     duration = plan_effective_duration(plan)
+    accrual_principal = plan_accrual_principal(plan)
     track = track_metrics(
         principal=plan.principal,
+        plan_type=getattr(plan, "plan_type", None) or "monthly",
+        monthly_rate_percent=plan.monthly_rate_percent,
+        savings_rate_percent=getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+        manager_fee_percent=plan.manager_fee_percent,
+        duration_months=duration if duration > 0 else plan.duration_months,
+    )
+    # Savings accrual line uses accrual principal (not boosted קרן).
+    savings_track = track_metrics(
+        principal=accrual_principal,
         plan_type=getattr(plan, "plan_type", None) or "monthly",
         monthly_rate_percent=plan.monthly_rate_percent,
         savings_rate_percent=getattr(plan, "savings_rate_percent", 0.0) or 0.0,
@@ -269,12 +304,25 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
     remaining = max((duration if duration > 0 else plan.duration_months) - elapsed, 0)
     payments = plan.payments or []
     paid = [p for p in payments if p.status == "paid"]
+    accrued = accrued_savings_for_plan(plan, today)
+    available = available_savings_for_plan(plan, today)
+    redeemed = float(getattr(plan, "savings_redeemed_total", 0.0) or 0.0)
     return {
         "monthly_investor_payout": track["monthly_investor_payout"],
         "monthly_manager_fee": track["monthly_manager_fee"],
-        "monthly_savings_accrual": track["monthly_savings_accrual"],
-        "projected_savings_balance": track["projected_savings_balance"],
-        "current_savings_balance": current_savings_for_plan(plan, today),
+        "monthly_savings_accrual": savings_track["monthly_savings_accrual"],
+        "projected_savings_balance": round(
+            available
+            + max(
+                0.0,
+                savings_track["projected_savings_balance"] - accrued,
+            ),
+            2,
+        ),
+        "accrued_savings_balance": round(accrued, 2),
+        "current_savings_balance": available,
+        "savings_redeemed_total": round(redeemed, 2),
+        "accrual_principal": round(accrual_principal, 2),
         "track_end_date": plan_track_end_date(plan),
         "total_cash_payout": track["total_cash_payout"],
         "total_investor_payout": track["total_investor_payout"],
@@ -286,6 +334,87 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
         "paid_investor_total": round(sum(p.investor_amount for p in paid), 2),
         "paid_manager_total": round(sum(p.manager_amount for p in paid), 2),
         "effective_duration_months": duration if duration > 0 else plan.duration_months,
+    }
+
+
+def redeem_savings(
+    db: Session,
+    *,
+    plan: InvestmentPlan,
+    action_type: str,
+    amount: float,
+    actor_user_id: Optional[int] = None,
+    notes: Optional[str] = None,
+) -> dict:
+    """Withdraw savings or transfer into principal. Never touches accrual history."""
+    action_type = (action_type or "").strip().lower()
+    if action_type not in {"withdraw", "transfer_to_principal"}:
+        raise ValueError("סוג פעולה לא תקין")
+    amount = round(float(amount or 0), 2)
+    if amount <= 0:
+        raise ValueError("סכום חייב להיות גדול מאפס")
+
+    kind, _, savings_rate = normalize_plan_rates(
+        getattr(plan, "plan_type", None) or "monthly",
+        plan.monthly_rate_percent,
+        getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+    )
+    if kind == "monthly" or savings_rate <= 0:
+        raise ValueError("למסלול הזה אין חיסכון")
+
+    # Ensure accrual principal is frozen before first redemption / principal boost.
+    if getattr(plan, "accrual_principal", None) is None:
+        plan.accrual_principal = float(plan.principal or 0)
+
+    available = available_savings_for_plan(plan)
+    if amount > available + 0.001:
+        raise ValueError(
+            f"אין מספיק חיסכון זמין (יתרה ₪{available:,.2f})"
+        )
+
+    plan.savings_redeemed_total = round(
+        float(getattr(plan, "savings_redeemed_total", 0.0) or 0.0) + amount, 2
+    )
+
+    if action_type == "transfer_to_principal":
+        plan.principal = round(float(plan.principal or 0) + amount, 2)
+        # Future cash payments follow the new קרן.
+        generate_payment_schedule(db, plan, realign_dates=False)
+
+    action = SavingsAction(
+        plan_id=plan.id,
+        investor_id=plan.investor_id,
+        action_type=action_type,
+        amount=amount,
+        principal_after=plan.principal,
+        available_after=available_savings_for_plan(plan),
+        notes=notes,
+        actor_user_id=actor_user_id,
+    )
+    db.add(action)
+    db.commit()
+    db.refresh(plan)
+    plan = (
+        db.query(InvestmentPlan)
+        .options(
+            joinedload(InvestmentPlan.investor),
+            joinedload(InvestmentPlan.payments),
+            joinedload(InvestmentPlan.savings_actions),
+        )
+        .filter(InvestmentPlan.id == plan.id)
+        .one()
+    )
+    return {
+        "action": {
+            "id": action.id,
+            "action_type": action.action_type,
+            "amount": action.amount,
+            "principal_after": action.principal_after,
+            "available_after": action.available_after,
+            "created_at": action.created_at,
+            "notes": action.notes,
+        },
+        "plan": serialize_plan(plan),
     }
 
 

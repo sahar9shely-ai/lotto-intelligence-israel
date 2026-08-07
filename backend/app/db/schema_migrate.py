@@ -24,6 +24,9 @@ def _table_exists(engine: Engine, table: str) -> bool:
 
 
 def ensure_schema(engine: Engine) -> None:
+    # Ensure model tables (including savings_actions) are registered.
+    from app.models import investments as _investment_models  # noqa: F401
+
     InvestmentBase.metadata.create_all(bind=engine)
 
     if _table_exists(engine, "payments"):
@@ -150,6 +153,35 @@ def ensure_schema(engine: Engine) -> None:
                     text(
                         "ALTER TABLE app_settings ADD COLUMN assistant_api_key "
                         "VARCHAR(200)"
+                    )
+                )
+
+    if _table_exists(engine, "investment_plans"):
+        cols = _table_columns(engine, "investment_plans")
+        with engine.begin() as conn:
+            if "accrual_principal" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE investment_plans ADD COLUMN accrual_principal FLOAT"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE investment_plans SET accrual_principal = principal "
+                        "WHERE accrual_principal IS NULL"
+                    )
+                )
+            if "savings_redeemed_total" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE investment_plans ADD COLUMN "
+                        "savings_redeemed_total FLOAT DEFAULT 0"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE investment_plans SET savings_redeemed_total = 0 "
+                        "WHERE savings_redeemed_total IS NULL"
                     )
                 )
 

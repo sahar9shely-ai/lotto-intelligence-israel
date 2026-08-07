@@ -27,6 +27,8 @@ from app.schemas.investments import (
     QuoteCreate,
     QuoteOut,
     QuoteUpdate,
+    SavingsActionRequest,
+    SavingsActionResult,
     SettingsOut,
     SettingsUpdate,
     SiteStatusOut,
@@ -376,6 +378,8 @@ def create_plan(
     data["plan_type"] = kind
     data["monthly_rate_percent"] = monthly_rate
     data["savings_rate_percent"] = savings_rate
+    data["accrual_principal"] = float(data.get("principal") or 0)
+    data["savings_redeemed_total"] = 0.0
     plan = InvestmentPlan(**data)
     db.add(plan)
     db.commit()
@@ -422,6 +426,9 @@ def update_plan(
     plan.plan_type = kind
     plan.monthly_rate_percent = monthly_rate
     plan.savings_rate_percent = savings_rate
+    # Manager principal edit rebases accrual base (full terms change).
+    if "principal" in data:
+        plan.accrual_principal = float(plan.principal or 0)
     db.commit()
 
     start_changed = plan.start_date != old_start
@@ -468,6 +475,81 @@ def delete_plan(
     db.delete(plan)
     db.commit()
     return None
+
+
+def _load_plan_for_savings(db: Session, plan_id: int) -> InvestmentPlan:
+    plan = (
+        db.query(InvestmentPlan)
+        .options(
+            joinedload(InvestmentPlan.investor),
+            joinedload(InvestmentPlan.payments),
+            joinedload(InvestmentPlan.savings_actions),
+        )
+        .filter(InvestmentPlan.id == plan_id)
+        .first()
+    )
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return plan
+
+
+def _assert_plan_access(user: User, plan: InvestmentPlan) -> None:
+    if is_manager(user):
+        return
+    if plan.investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@router.post(
+    "/plans/{plan_id}/savings/withdraw",
+    response_model=SavingsActionResult,
+)
+def withdraw_savings(
+    plan_id: int,
+    payload: SavingsActionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Pull available savings out of the pot (does not change קרן)."""
+    plan = _load_plan_for_savings(db, plan_id)
+    _assert_plan_access(user, plan)
+    try:
+        return svc.redeem_savings(
+            db,
+            plan=plan,
+            action_type="withdraw",
+            amount=payload.amount,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/plans/{plan_id}/savings/transfer-to-principal",
+    response_model=SavingsActionResult,
+)
+def transfer_savings_to_principal(
+    plan_id: int,
+    payload: SavingsActionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Move available savings into קרן — cash return rises; savings pot shrinks."""
+    plan = _load_plan_for_savings(db, plan_id)
+    _assert_plan_access(user, plan)
+    try:
+        return svc.redeem_savings(
+            db,
+            plan=plan,
+            action_type="transfer_to_principal",
+            amount=payload.amount,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/remove-from-calendar-year")

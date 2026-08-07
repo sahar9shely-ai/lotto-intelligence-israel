@@ -4,6 +4,7 @@ import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { PlanTrackFields } from "../components/PlanTrackFields";
+import { SavingsActions } from "../components/SavingsActions";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -408,6 +409,10 @@ export function InvestorsPage() {
                 }
                 onUpdate={onUpdatePlan}
                 onDelete={onDeletePlan}
+                onSavingsChanged={() => {
+                  reload();
+                  reloadPlans();
+                }}
               />
             ))
           )}
@@ -478,6 +483,7 @@ function PlanCard({
   onToggleReport,
   onUpdate,
   onDelete,
+  onSavingsChanged,
 }: {
   plan: Plan;
   isManager: boolean;
@@ -495,6 +501,7 @@ function PlanCard({
     investor_name: string;
     paid_count: number;
   }) => Promise<void>;
+  onSavingsChanged: () => void;
 }) {
   const statusLabelHe =
     plan.status === "active" ? "פעיל" : plan.status === "paused" ? "מושהה" : "הסתיים";
@@ -555,6 +562,8 @@ function PlanCard({
           <em>{plan.paid_count} תשלומים</em>
         </div>
       </div>
+
+      <SavingsActions plan={plan} onDone={onSavingsChanged} />
 
       {showReport ? (
         <PlanStatusReportPanel

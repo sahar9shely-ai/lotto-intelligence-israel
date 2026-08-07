@@ -267,6 +267,41 @@ export const api = {
     request<void>(`/api/v1/investments/plans/${id}`, {
       method: "DELETE",
     }),
+  withdrawSavings: (planId: number, body: { amount: number; notes?: string }) =>
+    request<{
+      action: {
+        id: number;
+        action_type: string;
+        amount: number;
+        principal_after?: number | null;
+        available_after?: number | null;
+        created_at: string;
+        notes?: string | null;
+      };
+      plan: Plan;
+    }>(`/api/v1/investments/plans/${planId}/savings/withdraw`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  transferSavingsToPrincipal: (
+    planId: number,
+    body: { amount: number; notes?: string },
+  ) =>
+    request<{
+      action: {
+        id: number;
+        action_type: string;
+        amount: number;
+        principal_after?: number | null;
+        available_after?: number | null;
+        created_at: string;
+        notes?: string | null;
+      };
+      plan: Plan;
+    }>(`/api/v1/investments/plans/${planId}/savings/transfer-to-principal`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   removeFromCalendarYear: (year: number, investor_id: number) =>
     request<{
       year: number;

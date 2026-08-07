@@ -653,3 +653,97 @@ def test_reporting_board_savings_do_not_overlap_next_year():
         assert board.duration_months == 4
     finally:
         db.close()
+
+
+def test_withdraw_and_transfer_savings_to_principal():
+    """Withdraw shrinks pot; transfer boosts קרן without changing accrual base."""
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+
+    create_inv = client.post(
+        "/api/v1/investments/investors",
+        headers=headers,
+        json={
+            "name": "בדיקת משיכת חיסכון",
+            "username": "savingsredeem",
+            "password": "Password1!",
+        },
+    )
+    assert create_inv.status_code == 201, create_inv.text
+    inv_id = create_inv.json()["id"]
+
+    # 100k @ 1% savings, started 6 months ago → ~6k accrued
+    start = date.today().replace(day=1)
+    # go back 5 months so months_elapsed_inclusive ≈ 6
+    month = start.month - 5
+    year = start.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    start = start.replace(year=year, month=month)
+
+    create_plan = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": inv_id,
+            "principal": 100000,
+            "plan_type": "hybrid",
+            "monthly_rate_percent": 1,
+            "savings_rate_percent": 1,
+            "manager_fee_percent": 0.5,
+            "start_date": start.isoformat(),
+            "duration_months": 12,
+            "generate_schedule": True,
+        },
+    )
+    assert create_plan.status_code == 201, create_plan.text
+    plan = create_plan.json()
+    plan_id = plan["id"]
+    available_before = float(plan["current_savings_balance"])
+    assert available_before >= 5000, plan
+    accrual_before = float(plan.get("accrual_principal") or plan["principal"])
+    assert accrual_before == 100000
+
+    # Partial withdraw
+    withdraw = client.post(
+        f"/api/v1/investments/plans/{plan_id}/savings/withdraw",
+        headers=headers,
+        json={"amount": 1000},
+    )
+    assert withdraw.status_code == 200, withdraw.text
+    w = withdraw.json()
+    assert w["action"]["action_type"] == "withdraw"
+    assert abs(w["action"]["amount"] - 1000) < 0.01
+    assert abs(w["plan"]["principal"] - 100000) < 0.01
+    assert abs(w["plan"]["current_savings_balance"] - (available_before - 1000)) < 0.05
+    assert abs(float(w["plan"]["accrual_principal"]) - 100000) < 0.01
+
+    after_withdraw = float(w["plan"]["current_savings_balance"])
+
+    # Transfer rest of a chunk into קרן
+    transfer_amt = 2000
+    transfer = client.post(
+        f"/api/v1/investments/plans/{plan_id}/savings/transfer-to-principal",
+        headers=headers,
+        json={"amount": transfer_amt},
+    )
+    assert transfer.status_code == 200, transfer.text
+    t = transfer.json()
+    assert t["action"]["action_type"] == "transfer_to_principal"
+    assert abs(t["plan"]["principal"] - 102000) < 0.01
+    assert abs(float(t["plan"]["accrual_principal"]) - 100000) < 0.01
+    assert abs(t["plan"]["current_savings_balance"] - (after_withdraw - transfer_amt)) < 0.05
+    # Cash payout should rise with new principal (1% of 102k)
+    assert abs(t["plan"]["monthly_investor_payout"] - 1020) < 0.01
+    # Monthly savings accrual stays on accrual principal (1% of 100k)
+    assert abs(t["plan"]["monthly_savings_accrual"] - 1000) < 0.01
+
+    # Cannot withdraw more than available
+    too_much = client.post(
+        f"/api/v1/investments/plans/{plan_id}/savings/withdraw",
+        headers=headers,
+        json={"amount": 999999},
+    )
+    assert too_much.status_code == 400
+
+    client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)

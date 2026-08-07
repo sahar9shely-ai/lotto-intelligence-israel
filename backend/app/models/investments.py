@@ -33,6 +33,10 @@ class InvestmentPlan(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), nullable=False)
     principal: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # Principal used for savings accrual history — stays stable when savings → קרן.
+    accrual_principal: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Sum of withdrawals + transfers out of the savings pot.
+    savings_redeemed_total: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     # monthly = החזר חודשי | savings = חיסכון ריבית דריבית | hybrid = משולב
     plan_type: Mapped[str] = mapped_column(String(32), nullable=False, default="monthly")
     monthly_rate_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
@@ -48,6 +52,30 @@ class InvestmentPlan(Base):
     payments: Mapped[list["Payment"]] = relationship(
         back_populates="plan", cascade="all, delete-orphan"
     )
+    savings_actions: Mapped[list["SavingsAction"]] = relationship(
+        back_populates="plan", cascade="all, delete-orphan"
+    )
+
+
+class SavingsAction(Base):
+    """Withdraw savings or move savings into principal — audit trail."""
+
+    __tablename__ = "savings_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("investment_plans.id"), nullable=False)
+    investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), nullable=False)
+    # withdraw | transfer_to_principal
+    action_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    principal_after: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    available_after: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    plan: Mapped["InvestmentPlan"] = relationship(back_populates="savings_actions")
+    investor: Mapped["Investor"] = relationship()
 
 
 class Payment(Base):
