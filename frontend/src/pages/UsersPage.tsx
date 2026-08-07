@@ -266,7 +266,7 @@ export function UsersPage() {
             <header className="modal__head">
               <h2>משתמש חדש</h2>
               <button type="button" className="btn btn--ghost" onClick={() => setShowCreate(false)}>
-                סגרי
+                סגור
               </button>
             </header>
             <form className="form" onSubmit={onCreate}>
@@ -330,7 +330,7 @@ export function UsersPage() {
                   setFulfillPassword("");
                 }}
               >
-                סגרי
+                סגור
               </button>
             </header>
             <form className="form" onSubmit={confirmFulfill}>

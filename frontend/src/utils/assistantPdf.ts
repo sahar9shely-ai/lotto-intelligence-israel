@@ -58,7 +58,7 @@ export async function downloadAssistantPdf(opts: {
     .map(
       (m) => `
       <div class="row">
-        <strong>${m.role === "user" ? "את/ה" : "עוזר אישי"}</strong>
+        <strong>${m.role === "user" ? "אתה" : "עוזר אישי"}</strong>
         <p>${escapeHtml(m.content).replace(/\n/g, "<br/>")}</p>
       </div>`,
     )

@@ -707,7 +707,7 @@ function Modal({
         <header className="modal__head">
           <h2>{title}</h2>
           <button type="button" className="btn btn--ghost" onClick={onClose}>
-            סגרי
+            סגור
           </button>
         </header>
         {children}

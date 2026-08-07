@@ -124,7 +124,7 @@ def end_session(
         return {
             "summary": summary,
             "notified": False,
-            "detail": "שיחת מנהלת — לא נשלח סיכום נוסף",
+            "detail": "שיחת מנהל — לא נשלח סיכום נוסף",
         }
 
     result = asst.notify_manager_of_summary(
