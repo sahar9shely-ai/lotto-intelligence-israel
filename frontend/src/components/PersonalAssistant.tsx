@@ -13,7 +13,7 @@ export function PersonalAssistant() {
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: "assistant",
-      content: "היי 🙂 איך אפשר לעזור לך עם התיק?",
+      content: "היי, מה שלומך? 😊\nאני כאן לעזור לך בכל שאלה על התיק.",
     },
   ]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
