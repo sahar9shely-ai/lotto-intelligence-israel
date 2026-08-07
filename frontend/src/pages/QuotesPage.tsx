@@ -1,6 +1,7 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PlanTrackFields } from "../components/PlanTrackFields";
+import { Toast } from "../components/Toast";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Quote } from "../types/investments";
@@ -17,6 +18,7 @@ export function QuotesPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const clearMessage = useCallback(() => setMessage(null), []);
 
   const preview = useMemo(() => data ?? [], [data]);
   const formOpen = showForm || editing != null;
@@ -138,7 +140,7 @@ export function QuotesPage() {
         </button>
       </div>
 
-      {message ? <p className="toast">{message}</p> : null}
+      {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
       {formOpen ? (
         <Panel

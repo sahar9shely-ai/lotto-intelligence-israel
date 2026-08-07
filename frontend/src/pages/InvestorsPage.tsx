@@ -1,9 +1,10 @@
-import { FormEvent, useMemo, useState, type ReactNode } from "react";
+import { FormEvent, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { PlanTrackFields } from "../components/PlanTrackFields";
+import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
@@ -24,6 +25,7 @@ export function InvestorsPage() {
   const [showNewInvestor, setShowNewInvestor] = useState(false);
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const clearMessage = useCallback(() => setMessage(null), []);
 
   const selected = useMemo(
     () => investors?.find((i) => i.id === selectedId) ?? investors?.[0] ?? null,
@@ -168,7 +170,7 @@ export function InvestorsPage() {
         ) : null}
       </div>
 
-      {message ? <p className="toast">{message}</p> : null}
+      {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
       <div className="grid-investors">
         <Panel title="רשימה">

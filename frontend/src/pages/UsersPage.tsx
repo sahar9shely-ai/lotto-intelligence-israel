@@ -1,6 +1,7 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
+import { Toast } from "../components/Toast";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { AuthUser, PasswordResetRequestItem } from "../types/auth";
@@ -17,6 +18,7 @@ export function UsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [fulfillTarget, setFulfillTarget] = useState<PasswordResetRequestItem | null>(null);
   const [fulfillPassword, setFulfillPassword] = useState("");
+  const clearMessage = useCallback(() => setMessage(null), []);
 
   async function saveUser(user: AuthUser, e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -125,7 +127,7 @@ export function UsersPage() {
         </button>
       </div>
 
-      {message ? <p className="toast">{message}</p> : null}
+      {message ? <Toast message={message} onClear={clearMessage} /> : null}
       {errorMsg ? <p className="form-error">{errorMsg}</p> : null}
 
       {pendingResets.length > 0 ? (

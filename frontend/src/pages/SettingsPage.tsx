@@ -1,6 +1,7 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
+import { Toast } from "../components/Toast";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 
@@ -8,6 +9,7 @@ export function SettingsPage() {
   const { data, error, loading, reload } = useAsync(() => api.settings(), []);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const clearMessage = useCallback(() => setMessage(null), []);
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -64,7 +66,7 @@ export function SettingsPage() {
         </Link>
       </div>
 
-      {message ? <p className="toast">{message}</p> : null}
+      {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
       <Panel
         title="האתר בעדכון"

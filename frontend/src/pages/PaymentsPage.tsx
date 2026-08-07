@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { Stat } from "../components/Stat";
+import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
@@ -99,6 +100,7 @@ export function PaymentsPage() {
   const [allYears, setAllYears] = useState(false);
   const [detailFocus, setDetailFocus] = useState<DetailFocus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const clearMessage = useCallback(() => setMessage(null), []);
   const [markBusyId, setMarkBusyId] = useState<number | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [alignBusy, setAlignBusy] = useState(false);
@@ -108,12 +110,6 @@ export function PaymentsPage() {
   const [removeBusyId, setRemoveBusyId] = useState<number | null>(null);
   const paymentsPanelRef = useRef<HTMLDivElement | null>(null);
   const savingsPanelRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!message) return;
-    const id = window.setTimeout(() => setMessage(null), 4500);
-    return () => window.clearTimeout(id);
-  }, [message]);
 
   const investorFilter = investorId ? Number(investorId) : undefined;
 
@@ -664,11 +660,9 @@ export function PaymentsPage() {
       </div>
     );
 
-  const isToastError = (msg: string) =>
-    /נכשל|שגיאה|אין חיבור|אסור|הרשאה|401|403|failed|error/i.test(msg);
-
   return (
     <div className={`page${refreshing ? " page--refreshing" : ""}`}>
+      <Toast message={message} onClear={clearMessage} />
       <div className="page-head">
         <div>
           <h1>{isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}</h1>
@@ -721,12 +715,6 @@ export function PaymentsPage() {
           </button>
         </div>
       </div>
-
-      {message ? (
-        <p className={`toast ${isToastError(message) ? "toast--error" : ""}`} role="status">
-          {message}
-        </p>
-      ) : null}
 
       {!isManager &&
       payments.some((p) => p.status === "awaiting_confirmation") ? (
