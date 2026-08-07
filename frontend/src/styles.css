@@ -673,6 +673,56 @@ button.stat {
   display: block;
 }
 
+.track-view-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.track-view-switch__btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, #eef1ef);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: right;
+}
+
+.track-view-switch__btn em {
+  font-style: normal;
+  font-weight: 700;
+  min-width: 1.5rem;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 70%, #fff);
+}
+
+.track-view-switch__btn.is-active {
+  border-color: color-mix(in srgb, var(--accent, #1f6b55) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent, #1f6b55) 12%, #fff);
+  font-weight: 600;
+}
+
+.track-view-switch__btn.is-active em {
+  background: color-mix(in srgb, var(--accent, #1f6b55) 20%, #fff);
+  color: var(--accent, #1f6b55);
+}
+
+.track-section__label {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  color: var(--muted, #667);
+}
+
 .savings-actions__form-head {
   display: flex;
   flex-wrap: wrap;

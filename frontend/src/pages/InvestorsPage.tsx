@@ -14,6 +14,7 @@ import { formatMoney, formatPercent, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
 
 type Scope = "all" | number;
+type TrackView = "active" | "closed";
 
 function cashOf(inv: Investor) {
   return inv.monthly_cash ?? inv.monthly_payout ?? 0;
@@ -37,6 +38,7 @@ export function InvestorsPage() {
   );
   const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
   const [scope, setScope] = useState<Scope | null>(null);
+  const [trackView, setTrackView] = useState<TrackView>("active");
   const [editingPlanId, setEditingPlanId] = useState<number | null>(null);
   const [reportPlanId, setReportPlanId] = useState<number | null>(null);
   const [showNewInvestor, setShowNewInvestor] = useState(false);
@@ -236,7 +238,10 @@ export function InvestorsPage() {
             role="tab"
             aria-selected={effectiveScope === "all"}
             className={effectiveScope === "all" ? "scope-bar__btn is-active" : "scope-bar__btn"}
-            onClick={() => setScope("all")}
+            onClick={() => {
+              setScope("all");
+              setTrackView("active");
+            }}
           >
             סה״כ כולם
           </button>
@@ -248,7 +253,10 @@ export function InvestorsPage() {
             role="tab"
             aria-selected={effectiveScope === inv.id}
             className={effectiveScope === inv.id ? "scope-bar__btn is-active" : "scope-bar__btn"}
-            onClick={() => setScope(inv.id)}
+            onClick={() => {
+              setScope(inv.id);
+              setTrackView("active");
+            }}
           >
             {inv.name}
             {inv.is_manager ? " · מנהל" : ""}
@@ -405,61 +413,108 @@ export function InvestorsPage() {
             </Panel>
           ) : (
             <>
-              {activeSelectedPlans.length > 0 || otherSelectedPlans.length > 0 ? (
-                [...activeSelectedPlans, ...otherSelectedPlans].map((plan) => (
-                  <PlanCard
-                    key={plan.id}
-                    plan={plan}
-                    isManager={isManager}
-                    editing={editingPlanId === plan.id}
-                    showReport={reportPlanId === plan.id}
-                    onToggleEdit={() =>
-                      setEditingPlanId((id) => (id === plan.id ? null : plan.id))
-                    }
-                    onToggleReport={() =>
-                      setReportPlanId((id) => (id === plan.id ? null : plan.id))
-                    }
-                    onUpdate={onUpdatePlan}
-                    onDelete={onDeletePlan}
-                    onSavingsChanged={() => {
-                      reload();
-                      reloadPlans();
-                    }}
-                  />
-                ))
-              ) : (
-                <Panel title="אין מסלול פעיל" subtitle="אפשר לפתוח מסלול חדש או לצפות בתיקים סגורים">
-                  <p className="empty">אין מסלול פעיל למשקיע הזה כרגע.</p>
-                  {isManager ? (
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={() => setShowNewPlan(true)}
-                    >
-                      פתח מסלול
-                    </button>
-                  ) : null}
-                </Panel>
-              )}
+              <div className="track-view-switch" role="tablist" aria-label="הפרדת מסלולים">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={trackView === "active"}
+                  className={
+                    trackView === "active"
+                      ? "track-view-switch__btn is-active"
+                      : "track-view-switch__btn"
+                  }
+                  onClick={() => setTrackView("active")}
+                >
+                  מסלולים פעילים
+                  <em>{activeSelectedPlans.length + otherSelectedPlans.length}</em>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={trackView === "closed"}
+                  className={
+                    trackView === "closed"
+                      ? "track-view-switch__btn is-active"
+                      : "track-view-switch__btn"
+                  }
+                  onClick={() => setTrackView("closed")}
+                >
+                  תיקים סגורים
+                  <em>{closedSelectedPlans.length}</em>
+                </button>
+              </div>
 
-              {closedSelectedPlans.length > 0 ? (
+              {trackView === "active" ? (
+                activeSelectedPlans.length > 0 || otherSelectedPlans.length > 0 ? (
+                  <div className="stack track-section track-section--active">
+                    <p className="track-section__label">מסלולים פעילים בלבד</p>
+                    {[...activeSelectedPlans, ...otherSelectedPlans].map((plan) => (
+                      <PlanCard
+                        key={plan.id}
+                        plan={plan}
+                        isManager={isManager}
+                        editing={editingPlanId === plan.id}
+                        showReport={reportPlanId === plan.id}
+                        onToggleEdit={() =>
+                          setEditingPlanId((id) => (id === plan.id ? null : plan.id))
+                        }
+                        onToggleReport={() =>
+                          setReportPlanId((id) => (id === plan.id ? null : plan.id))
+                        }
+                        onUpdate={onUpdatePlan}
+                        onDelete={onDeletePlan}
+                        onSavingsChanged={() => {
+                          reload();
+                          reloadPlans();
+                          setTrackView("active");
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <Panel
+                    title="אין מסלול פעיל"
+                    subtitle="המסלולים הסגורים נמצאים בלשונית תיקים סגורים"
+                  >
+                    <p className="empty">אין מסלול פעיל למשקיע הזה כרגע.</p>
+                    {closedSelectedPlans.length > 0 ? (
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => setTrackView("closed")}
+                      >
+                        מעבר לתיקים סגורים ({closedSelectedPlans.length})
+                      </button>
+                    ) : null}
+                    {isManager ? (
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => setShowNewPlan(true)}
+                      >
+                        פתח מסלול
+                      </button>
+                    ) : null}
+                  </Panel>
+                )
+              ) : closedSelectedPlans.length > 0 ? (
                 <Panel
                   title="תיקים סגורים"
-                  subtitle={`${closedSelectedPlans.length} מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה`}
+                  subtitle="מופרדים מהפעילים · מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה"
                 >
                   <div className="closed-plans">
                     {closedSelectedPlans.map((plan) => (
                       <div key={plan.id} className="closed-plan-row">
                         <div>
                           <strong>
-                            מסלול #{plan.id} · {planTypeLabel(plan.plan_type)}
+                            מסלול #{plan.id} · {planTypeLabel(plan.plan_type)} · סגור
                           </strong>
                           <span className="muted">
                             קרן {formatMoney(plan.principal)} ·{" "}
                             {plan.start_date} · {plan.duration_months} ח׳
                             {plan.successor_plan_id
                               ? ` · המשך במסלול #${plan.successor_plan_id}`
-                              : ""}
+                              : " · נסגר ללא המשך"}
                           </span>
                           {plan.notes ? (
                             <span className="muted" style={{ display: "block" }}>
@@ -488,7 +543,18 @@ export function InvestorsPage() {
                     ))}
                   </div>
                 </Panel>
-              ) : null}
+              ) : (
+                <Panel title="אין תיקים סגורים" subtitle="עדיין לא נסגר אף מסלול למשקיע הזה">
+                  <p className="empty">אין תיקים סגורים.</p>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => setTrackView("active")}
+                  >
+                    חזרה למסלולים פעילים
+                  </button>
+                </Panel>
+              )}
             </>
           )}
         </div>

@@ -219,12 +219,24 @@ export function PaymentsPage() {
     );
   }, [plans, yearInvestors, investorFilter, isManager, user?.investor_id, year]);
 
+  const activeSavingsPlans = useMemo(
+    () => savingsPlansInView.filter((p) => p.status !== "completed"),
+    [savingsPlansInView],
+  );
+  const closedSavingsPlans = useMemo(
+    () =>
+      savingsPlansInView
+        .filter((p) => p.status === "completed")
+        .sort((a, b) => (a.start_date < b.start_date ? 1 : -1)),
+    [savingsPlansInView],
+  );
+
   const savingsTotals = useMemo(() => {
     let cashToDate = 0;
     let savingsToDate = 0;
     let savingsAtEnd = 0;
     let totalAtEnd = 0;
-    for (const p of savingsPlansInView) {
+    for (const p of activeSavingsPlans) {
       cashToDate += planCashToDate(p);
       savingsToDate += Number(p.current_savings_balance || 0);
       savingsAtEnd += Number(p.projected_savings_balance || 0);
@@ -237,14 +249,14 @@ export function PaymentsPage() {
       savingsAtEnd: round2(savingsAtEnd),
       totalAtEnd: round2(totalAtEnd),
     };
-  }, [savingsPlansInView]);
+  }, [activeSavingsPlans]);
 
   const savingsByInvestorCards = useMemo(() => {
     const map = new Map<
       number,
       { id: number; name: string; plans: Plan[] }
     >();
-    for (const p of savingsPlansInView) {
+    for (const p of activeSavingsPlans) {
       const cur = map.get(p.investor_id);
       if (cur) cur.plans.push(p);
       else {
@@ -279,17 +291,17 @@ export function PaymentsPage() {
         ),
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "he"));
-  }, [savingsPlansInView]);
+  }, [activeSavingsPlans]);
 
   const savingsByInvestor = useMemo(() => {
-    const map = new Map<number, (typeof savingsPlansInView)[number][]>();
-    for (const plan of savingsPlansInView) {
+    const map = new Map<number, (typeof activeSavingsPlans)[number][]>();
+    for (const plan of activeSavingsPlans) {
       const list = map.get(plan.investor_id) ?? [];
       list.push(plan);
       map.set(plan.investor_id, list);
     }
     return map;
-  }, [savingsPlansInView]);
+  }, [activeSavingsPlans]);
 
   const statusReportPlans = useMemo(() => {
     const all = plans ?? [];
@@ -989,7 +1001,7 @@ export function PaymentsPage() {
         </Panel>
       ) : null}
 
-      {savingsPlansInView.length > 0 ? (
+      {activeSavingsPlans.length > 0 ? (
         <div
           ref={savingsPanelRef}
           className={
@@ -1005,9 +1017,9 @@ export function PaymentsPage() {
                 ? "פירוט · חיסכון עד עכשיו"
                 : detailFocus === "lifetime-savings-end"
                   ? "פירוט · חיסכון עד סוף מסלול"
-                  : "חיסכון · לפי תנאי מסלול"
+                  : "חיסכון פעיל · לפי תנאי מסלול"
             }
-            subtitle="כל משקיע בנפרד · כמה קיבל במזומן, כמה נצבר בחיסכון, ומה הסה״כ עד עכשיו"
+            subtitle="מסלולים פעילים בלבד · כמה קיבל במזומן, כמה נצבר בחיסכון, ומה הסה״כ עד עכשיו"
           >
             {savingsByInvestorCards.length > 1 ? (
               <div className="savings-grand-total">
@@ -1193,6 +1205,40 @@ export function PaymentsPage() {
             </div>
           </Panel>
         </div>
+      ) : null}
+
+      {closedSavingsPlans.length > 0 ? (
+        <Panel
+          title="תיקי חיסכון סגורים"
+          subtitle="מופרדים מהפעילים · מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה"
+        >
+          <div className="closed-plans">
+            {closedSavingsPlans.map((p) => (
+              <div key={p.id} className="closed-plan-row">
+                <div>
+                  <strong>
+                    {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)} · סגור
+                  </strong>
+                  <span className="muted">
+                    קרן {formatMoney(p.principal)} · מזומן עד אז{" "}
+                    {formatMoney(planCashToDate(p))} · חיסכון שנותר{" "}
+                    {formatMoney(Number(p.current_savings_balance || 0))}
+                    {p.successor_plan_id
+                      ? ` · המשך במסלול #${p.successor_plan_id}`
+                      : ""}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--small btn--ghost"
+                  onClick={() => focusStatusReport(p.id)}
+                >
+                  פירוט חודשי
+                </button>
+              </div>
+            ))}
+          </div>
+        </Panel>
       ) : null}
 
       {statusReportPlans.length > 0 ? (
