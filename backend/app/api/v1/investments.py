@@ -122,6 +122,15 @@ def update_settings(
 ):
     settings = svc.ensure_settings(db)
     data = payload.model_dump(exclude_unset=True)
+    # Empty string clears the assistant key; omit field to leave unchanged.
+    if "assistant_api_key" in data and data["assistant_api_key"] is not None:
+        raw = str(data["assistant_api_key"]).strip()
+        data["assistant_api_key"] = raw or None
+    if "assistant_provider" in data and data["assistant_provider"]:
+        prov = str(data["assistant_provider"]).strip().lower()
+        if prov not in {"gemini", "openai"}:
+            raise HTTPException(status_code=400, detail="ספק לא נתמך")
+        data["assistant_provider"] = prov
     for key, value in data.items():
         setattr(settings, key, value)
     if "manager_display_name" in data:
@@ -134,6 +143,7 @@ def update_settings(
 
 
 def _serialize_settings(settings) -> dict:
+    key = (getattr(settings, "assistant_api_key", None) or "").strip()
     return {
         "default_monthly_rate_percent": settings.default_monthly_rate_percent,
         "default_manager_fee_percent": settings.default_manager_fee_percent,
@@ -144,6 +154,9 @@ def _serialize_settings(settings) -> dict:
         "site_updating_message": getattr(settings, "site_updating_message", None)
         or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
         "slack_webhook_url": getattr(settings, "slack_webhook_url", None) or None,
+        "assistant_provider": getattr(settings, "assistant_provider", None) or "gemini",
+        "assistant_api_key_set": bool(key),
+        "assistant_api_key_hint": (f"…{key[-4:]}" if len(key) >= 4 else None) if key else None,
     }
 
 

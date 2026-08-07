@@ -132,6 +132,9 @@ export type Settings = {
   site_updating: boolean;
   site_updating_message: string;
   slack_webhook_url?: string | null;
+  assistant_provider?: string;
+  assistant_api_key_set?: boolean;
+  assistant_api_key_hint?: string | null;
 };
 
 export type SiteStatus = {

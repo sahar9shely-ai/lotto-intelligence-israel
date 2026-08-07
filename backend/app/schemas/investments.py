@@ -206,6 +206,8 @@ class SettingsUpdate(BaseModel):
     site_updating: Optional[bool] = None
     site_updating_message: Optional[str] = Field(default=None, max_length=240)
     slack_webhook_url: Optional[str] = Field(default=None, max_length=500)
+    assistant_provider: Optional[str] = Field(default=None, max_length=32)
+    assistant_api_key: Optional[str] = Field(default=None, max_length=200)
 
 
 class SettingsOut(BaseModel):
@@ -217,6 +219,9 @@ class SettingsOut(BaseModel):
     site_updating: bool = False
     site_updating_message: str = "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה."
     slack_webhook_url: Optional[str] = None
+    assistant_provider: str = "gemini"
+    assistant_api_key_set: bool = False
+    assistant_api_key_hint: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

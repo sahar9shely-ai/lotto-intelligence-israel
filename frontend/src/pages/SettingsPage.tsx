@@ -149,6 +149,62 @@ export function SettingsPage() {
       </Panel>
 
       <Panel
+        title="עוזר אישי · מודל"
+        subtitle={
+          data.assistant_api_key_set
+            ? `מפתח מוגדר (${data.assistant_api_key_hint || "****"}) · ${data.assistant_provider || "gemini"}`
+            : "בלי מפתח — חישובים מהתיק עובדים; שיחה חופשית דורשת Gemini חינמי"
+        }
+      >
+        <p className="hint">
+          המפתח נשמר רק אצלך במערכת ולא חוזר במלואו למסך. מומלץ Gemini (חינם) מ־
+          <a
+            className="text-link"
+            href="https://aistudio.google.com/apikey"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Google AI Studio
+          </a>
+          . העוזר לא חושף דמי ניהול ולא רואה משקיעים אחרים.
+        </p>
+        <form
+          className="form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            await api.updateSettings({
+              assistant_provider: String(fd.get("assistant_provider") || "gemini"),
+              assistant_api_key: String(fd.get("assistant_api_key") || "").trim() || undefined,
+            });
+            setMessage("הגדרות העוזר האישי נשמרו");
+            reload();
+          }}
+        >
+          <label>
+            ספק
+            <select name="assistant_provider" defaultValue={data.assistant_provider || "gemini"}>
+              <option value="gemini">Gemini (מומלץ · חינם)</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </label>
+          <label>
+            מפתח API {data.assistant_api_key_set ? "(השאירי ריק כדי לא לשנות)" : ""}
+            <input
+              name="assistant_api_key"
+              type="password"
+              autoComplete="off"
+              placeholder={data.assistant_api_key_set ? "••••••••" : "הדביקי מפתח כאן"}
+              dir="ltr"
+            />
+          </label>
+          <button type="submit" className="btn btn--primary">
+            שמור מפתח עוזר אישי
+          </button>
+        </form>
+      </Panel>
+
+      <Panel
         title="אחוזים ומשך"
         subtitle="לא משנים מסלולים קיימים אוטומטית — רק ערכי פתיחה"
       >

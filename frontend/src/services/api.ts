@@ -172,7 +172,12 @@ export const api = {
       "/api/v1/investments/announce-public-url",
       { method: "POST" },
     ),
-  updateSettings: (body: Partial<Settings>) =>
+  updateSettings: (
+    body: Partial<Settings> & {
+      assistant_api_key?: string | null;
+      assistant_provider?: string;
+    },
+  ) =>
     request<Settings>("/api/v1/investments/settings", {
       method: "PATCH",
       body: JSON.stringify(body),
@@ -389,5 +394,62 @@ export const api = {
     request<Plan>(`/api/v1/investments/quotes/${id}/convert`, {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+
+  assistantStatus: () =>
+    request<{
+      configured: boolean;
+      provider: string;
+      api_key_set: boolean;
+      api_key_hint?: string | null;
+    }>("/api/v1/assistant/status"),
+  assistantChat: (body: {
+    message: string;
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+  }) =>
+    request<{
+      reply: string;
+      pdf_suggested: boolean;
+      what_if?: Record<string, unknown> | null;
+      configured: boolean;
+    }>("/api/v1/assistant/chat", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  assistantEndSession: (body: {
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+  }) =>
+    request<{ summary: string; notified: boolean; detail: string }>(
+      "/api/v1/assistant/end-session",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  assistantPortfolioBrief: () =>
+    request<{
+      investor_name: string;
+      active_principal: number;
+      monthly_cash: number;
+      monthly_savings: number;
+      current_savings_balance: number;
+      lifetime_cash_paid: number;
+      cash_rate_percent: number;
+      savings_rate_percent: number;
+      plans: Array<{
+        plan_id: number;
+        status: string;
+        plan_type: string;
+        principal: number;
+        cash_rate_percent: number;
+        savings_rate_percent: number;
+        monthly_cash: number;
+        monthly_savings: number;
+        current_savings: number;
+        months_elapsed: number;
+        duration_months: number;
+      }>;
+    }>("/api/v1/assistant/portfolio-brief"),
+  assistantWhatIf: (extra_principal: number) =>
+    request<Record<string, unknown>>("/api/v1/assistant/what-if", {
+      method: "POST",
+      body: JSON.stringify({ extra_principal }),
     }),
 };

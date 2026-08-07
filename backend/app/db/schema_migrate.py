@@ -132,6 +132,26 @@ def ensure_schema(engine: Engine) -> None:
                         "VARCHAR(500)"
                     )
                 )
+            if "assistant_provider" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE app_settings ADD COLUMN assistant_provider "
+                        "VARCHAR(32) DEFAULT 'gemini'"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE app_settings SET assistant_provider = 'gemini' "
+                        "WHERE assistant_provider IS NULL OR assistant_provider = ''"
+                    )
+                )
+            if "assistant_api_key" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE app_settings ADD COLUMN assistant_api_key "
+                        "VARCHAR(200)"
+                    )
+                )
 
     if not _table_exists(engine, "users"):
         return
