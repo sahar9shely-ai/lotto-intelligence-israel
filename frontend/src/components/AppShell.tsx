@@ -51,57 +51,78 @@ export function AppShell() {
           <span>{siteStatus.site_updating_message}</span>
         </div>
       ) : null}
-      <div className="app">
-        {isManager && siteStatus?.public_url ? (
-          <div className="public-link-bar" role="status">
-            <span className="public-link-bar__label">קישור ציבורי פעיל</span>
-            <a
-              className="public-link-bar__url"
-              href={siteStatus.public_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {siteStatus.public_url.replace(/^https?:\/\//, "")}
-            </a>
-            <button type="button" className="btn btn--small btn--ghost" onClick={copyPublicUrl}>
-              {copied ? "הועתק" : "העתק"}
-            </button>
-          </div>
-        ) : null}
-        <header className="topbar">
-          <div className="brand">
-            <span className="brand__mark">תזרים</span>
-            <span className="brand__tag">
-              {user?.investor_name || "מעקב השקעות שותפים"}
-            </span>
-          </div>
-          <nav className="nav" aria-label="ניווט ראשי">
-            {links.map((link) => (
-              <NavLink
-                key={link.to}
-                to={link.to}
-                end={link.end}
-                className={({ isActive }) => (isActive ? "nav__link is-active" : "nav__link")}
+
+      <div className="chrome" role="banner">
+        <div className="chrome__inner">
+          {isManager && siteStatus?.public_url ? (
+            <div className="public-link-bar" role="status">
+              <span className="public-link-bar__label">קישור ציבורי פעיל</span>
+              <a
+                className="public-link-bar__url"
+                href={siteStatus.public_url}
+                target="_blank"
+                rel="noreferrer"
               >
-                {link.label}
-              </NavLink>
-            ))}
-            <button
-              type="button"
-              className="nav__link nav__logout"
-              onClick={() => {
-                logout();
-                navigate("/login", { replace: true });
-              }}
-            >
-              יציאה
-            </button>
-          </nav>
-        </header>
+                {siteStatus.public_url.replace(/^https?:\/\//, "")}
+              </a>
+              <button type="button" className="btn btn--small btn--ghost" onClick={copyPublicUrl}>
+                {copied ? "הועתק" : "העתק"}
+              </button>
+            </div>
+          ) : null}
+
+          <header className="topbar">
+            <div className="brand">
+              <span className="brand__mark">תזרים</span>
+              <span className="brand__tag">
+                {user?.investor_name || "מעקב השקעות שותפים"}
+              </span>
+            </div>
+            <nav className="nav" aria-label="ניווט ראשי">
+              {links.map((link) => (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  end={link.end}
+                  className={({ isActive }) => (isActive ? "nav__link is-active" : "nav__link")}
+                >
+                  {link.label}
+                </NavLink>
+              ))}
+              <button
+                type="button"
+                className="nav__link nav__logout"
+                onClick={() => {
+                  logout();
+                  navigate("/login", { replace: true });
+                }}
+              >
+                יציאה
+              </button>
+            </nav>
+          </header>
+        </div>
+      </div>
+
+      <div className="app">
         <main className="main">
           <Outlet />
         </main>
       </div>
+
+      {/* Mobile thumb dock — always reachable */}
+      <nav className="dock" aria-label="ניווט מהיר">
+        {links.map((link) => (
+          <NavLink
+            key={`dock-${link.to}`}
+            to={link.to}
+            end={link.end}
+            className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
+          >
+            {link.label}
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }
