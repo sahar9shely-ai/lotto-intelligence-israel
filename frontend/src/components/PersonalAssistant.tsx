@@ -13,15 +13,15 @@ export function PersonalAssistant() {
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: "assistant",
-      content:
-        "היי, אני העוזר האישי שלך לתיק. אפשר לשאול על הקרן, ההחזר החודשי, החיסכון, או לחשב מה קורה אם מוסיפים סכום.",
+      content: "היי 🙂 איך אפשר לעזור לך עם התיק?",
     },
   ]);
-  const [note, setNote] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!open) return;
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, open]);
 
   if (!user) return null;
@@ -34,13 +34,9 @@ export function PersonalAssistant() {
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setBusy(true);
-    setNote(null);
     try {
       const res = await api.assistantChat({ message: text, history });
       setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
-      if (res.pdf_suggested) {
-        setNote("אפשר להוריד סיכום PDF מהכפתור למטה");
-      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -60,8 +56,7 @@ export function PersonalAssistant() {
       const history = messages
         .filter((m) => m.content)
         .map((m) => ({ role: m.role, content: m.content }));
-      const res = await api.assistantEndSession({ history });
-      setNote(res.detail || "השיחה נסגרה");
+      await api.assistantEndSession({ history });
     } catch {
       /* ignore */
     } finally {
@@ -79,9 +74,8 @@ export function PersonalAssistant() {
         brief,
         transcript: messages,
       });
-      setNote("ה־PDF ירד למכשיר");
-    } catch (err) {
-      setNote(err instanceof Error ? err.message : "הורדת PDF נכשלה");
+    } catch {
+      /* silent — keep the chat clean */
     } finally {
       setBusy(false);
     }
@@ -107,14 +101,15 @@ export function PersonalAssistant() {
           aria-label="עוזר אישי"
         >
           <header className="assistant-panel__head">
-            <div>
-              <strong>עוזר אישי</strong>
-              <span className="muted">
-                {user.investor_name || user.username} · רק התיק שלך
-              </span>
-            </div>
+            <h2 className="assistant-panel__title">עוזר אישי</h2>
             <div className="assistant-panel__head-actions">
-              <button type="button" className="btn btn--small btn--ghost" onClick={exportPdf} disabled={busy}>
+              <button
+                type="button"
+                className="btn btn--small btn--ghost"
+                onClick={exportPdf}
+                disabled={busy}
+                title="הורדת סיכום"
+              >
                 PDF
               </button>
               <button
@@ -128,7 +123,7 @@ export function PersonalAssistant() {
             </div>
           </header>
 
-          <div className="assistant-panel__messages">
+          <div className="assistant-panel__messages" ref={listRef}>
             {messages.map((m, i) => (
               <div
                 key={`${m.role}-${i}`}
@@ -143,26 +138,32 @@ export function PersonalAssistant() {
                 ))}
               </div>
             ))}
+            {busy ? (
+              <div className="assistant-bubble assistant-bubble--bot assistant-typing" aria-hidden>
+                <span />
+                <span />
+                <span />
+              </div>
+            ) : null}
             <div ref={bottomRef} />
           </div>
-
-          {note ? <p className="assistant-panel__note">{note}</p> : null}
 
           <form className="assistant-panel__form" onSubmit={send}>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="למשל: מה הקרן שלי? או אם אוסיף 10000 כמה יוצא?"
+              placeholder="כתבו כאן…"
               disabled={busy}
               aria-label="הודעה לעוזר האישי"
             />
-            <button type="submit" className="btn btn--primary" disabled={busy || !input.trim()}>
-              {busy ? "..." : "שלח"}
+            <button
+              type="submit"
+              className="btn btn--primary assistant-send"
+              disabled={busy || !input.trim()}
+            >
+              שלח
             </button>
           </form>
-          <p className="assistant-panel__hint muted">
-            מזומן וחיסכון בנפרד · בלי שינוי במערכת · רק התיק שלך
-          </p>
         </section>
       ) : null}
     </>
