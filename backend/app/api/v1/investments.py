@@ -518,7 +518,7 @@ def sync_all_payment_amounts(
     db: Session = Depends(get_investment_db),
 ):
     """Sync cash amounts on payments to current plan rates without moving dates."""
-    # Restore mid-year boards to full track duration (plan terms, not Dec cutoff).
+    # Clip mid-year reporting boards to December so savings don't overlap next year.
     restored = svc.repair_midyear_reporting_plans(db)
     query = db.query(InvestmentPlan).options(
         joinedload(InvestmentPlan.payments),

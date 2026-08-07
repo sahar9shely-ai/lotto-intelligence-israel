@@ -28,6 +28,52 @@ def add_months(start: date, months: int) -> date:
     return date(year, month, day)
 
 
+def months_elapsed_inclusive(start: date, today: date, *, cap: int) -> int:
+    """Count due months from start through today (inclusive), capped at track length.
+
+    Example: start=2026-01-01, today=2026-08-07 → 8 (Jan…Aug), not 7.
+    """
+    if cap <= 0 or today < start:
+        return 0
+    diff = months_between(start, today)
+    due_for_month = add_months(start, diff)
+    elapsed = diff + 1 if today >= due_for_month else diff
+    return min(max(elapsed, 0), cap)
+
+
+def reporting_year_from_notes(notes: Optional[str]) -> Optional[int]:
+    import re
+
+    match = re.search(r"לוח דיווח לשנת (\d{4})", notes or "")
+    return int(match.group(1)) if match else None
+
+
+def plan_effective_duration(plan: InvestmentPlan) -> int:
+    """Months this plan may accrue — payment span + no overlap past reporting Dec.
+
+    'לוח דיווח לשנת YYYY' boards that started mid-year must stop in December of
+    that year. Otherwise a 2025 board with duration=12 keeps accruing into 2026
+    and double-counts savings against the next active plan (~₪1,100 twice).
+    """
+    stored = max(int(plan.duration_months or 0), 0)
+    payments = list(plan.payments or [])
+    schedule_len = 0
+    if payments:
+        schedule_len = max((p.month_number or 0) for p in payments)
+
+    year = reporting_year_from_notes(getattr(plan, "notes", None))
+    if year and plan.start_date and plan.start_date.year == year:
+        year_span = months_through_december(plan.start_date)
+        if schedule_len > 0:
+            return max(1, min(schedule_len, year_span))
+        return max(1, min(stored or year_span, year_span))
+
+    if plan.status == "completed" and schedule_len > 0:
+        return max(1, schedule_len)
+
+    return max(stored, schedule_len, 0)
+
+
 def calc_monthly(principal: float, rate_percent: float) -> float:
     return round(principal * (rate_percent / 100.0), 2)
 
@@ -176,8 +222,9 @@ def seed_defaults(db: Session) -> dict:
 
 
 def plan_track_end_date(plan: InvestmentPlan) -> date:
-    """Last calendar month of the track (start + duration − 1), by plan terms."""
-    return add_months(plan.start_date, max(plan.duration_months, 1) - 1)
+    """Last calendar month of the track (start + effective duration − 1)."""
+    duration = plan_effective_duration(plan) or max(plan.duration_months, 1)
+    return add_months(plan.start_date, max(duration, 1) - 1)
 
 
 def current_savings_for_plan(
@@ -190,15 +237,16 @@ def current_savings_for_plan(
         plan.monthly_rate_percent,
         getattr(plan, "savings_rate_percent", 0.0) or 0.0,
     )
-    if savings_rate <= 0 or plan.duration_months <= 0:
+    duration = plan_effective_duration(plan)
+    if savings_rate <= 0 or duration <= 0:
         return 0.0
-    elapsed = min(months_between(plan.start_date, today), plan.duration_months)
+    elapsed = months_elapsed_inclusive(plan.start_date, today, cap=duration)
     if elapsed <= 0:
         return 0.0
     rows = month_savings_ledger(
         principal=plan.principal,
         savings_rate_percent=savings_rate,
-        duration_months=plan.duration_months,
+        duration_months=duration,
     )
     row = next((r for r in rows if r["month_number"] == elapsed), None)
     return float(row["cumulative_savings"]) if row else 0.0
@@ -206,16 +254,19 @@ def current_savings_for_plan(
 
 def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
     today = today or date.today()
+    duration = plan_effective_duration(plan)
     track = track_metrics(
         principal=plan.principal,
         plan_type=getattr(plan, "plan_type", None) or "monthly",
         monthly_rate_percent=plan.monthly_rate_percent,
         savings_rate_percent=getattr(plan, "savings_rate_percent", 0.0) or 0.0,
         manager_fee_percent=plan.manager_fee_percent,
-        duration_months=plan.duration_months,
+        duration_months=duration if duration > 0 else plan.duration_months,
     )
-    elapsed = min(months_between(plan.start_date, today), plan.duration_months)
-    remaining = max(plan.duration_months - elapsed, 0)
+    elapsed = months_elapsed_inclusive(
+        plan.start_date, today, cap=duration if duration > 0 else plan.duration_months
+    )
+    remaining = max((duration if duration > 0 else plan.duration_months) - elapsed, 0)
     payments = plan.payments or []
     paid = [p for p in payments if p.status == "paid"]
     return {
@@ -234,6 +285,7 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
         "paid_count": len(paid),
         "paid_investor_total": round(sum(p.investor_amount for p in paid), 2),
         "paid_manager_total": round(sum(p.manager_amount for p in paid), 2),
+        "effective_duration_months": duration if duration > 0 else plan.duration_months,
     }
 
 
@@ -244,6 +296,7 @@ def serialize_plan(plan: InvestmentPlan) -> dict:
         plan.monthly_rate_percent,
         getattr(plan, "savings_rate_percent", 0.0) or 0.0,
     )
+    duration = metrics.get("effective_duration_months") or plan.duration_months
     return {
         "id": plan.id,
         "investor_id": plan.investor_id,
@@ -255,11 +308,11 @@ def serialize_plan(plan: InvestmentPlan) -> dict:
         "manager_fee_percent": plan.manager_fee_percent,
         "start_date": plan.start_date,
         "track_end_date": metrics["track_end_date"],
-        "duration_months": plan.duration_months,
+        "duration_months": duration,
         "status": plan.status,
         "notes": plan.notes,
         "created_at": plan.created_at,
-        **metrics,
+        **{k: v for k, v in metrics.items() if k != "effective_duration_months"},
     }
 
 
@@ -283,10 +336,12 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
     """Investor summary with cash and savings kept as separate money lines.
 
     monthly_payout / monthly_cash = cash return only (what is paid out monthly).
-    monthly_savings = accrual only (not cash in hand — never mixed into payout).
+    monthly_savings = accrual only from *active* plans (not cash in hand).
+    current_savings_balance = lifetime accrued across all tracks, without overlap.
     """
     today = today or date.today()
-    active_plans = [p for p in investor.plans if p.status == "active"]
+    all_plans = list(investor.plans or [])
+    active_plans = [p for p in all_plans if p.status == "active"]
     active_principal = 0.0
     monthly_cash = 0.0
     monthly_savings = 0.0
@@ -307,11 +362,26 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
         active_principal += principal
         monthly_cash += metrics["monthly_investor_payout"]
         monthly_savings += metrics["monthly_savings_accrual"]
-        current_savings += metrics["current_savings_balance"]
-        projected_savings += metrics["projected_savings_balance"]
         cash_rate_weight += cash_rate * principal
         savings_rate_weight += savings_rate * principal
         plan_types.append(kind)
+        projected_savings += metrics["projected_savings_balance"]
+
+    # Lifetime savings: every track with savings, each capped so periods don't overlap.
+    for p in all_plans:
+        kind, _, savings_rate = normalize_plan_rates(
+            getattr(p, "plan_type", None) or "monthly",
+            p.monthly_rate_percent,
+            getattr(p, "savings_rate_percent", 0.0) or 0.0,
+        )
+        if kind == "monthly" or savings_rate <= 0:
+            continue
+        metrics = plan_metrics(p, today)
+        current_savings += metrics["current_savings_balance"]
+        if p.status != "active":
+            # Completed tracks still contribute their frozen projected end balance
+            # only via current; don't add their projected into active projection.
+            pass
 
     active_principal = round(active_principal, 2)
     monthly_cash = round(monthly_cash, 2)
@@ -325,7 +395,12 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
 
     if active_plans:
         earliest = min(p.start_date for p in active_plans)
-        months_in = months_between(earliest, today)
+        months_in = months_elapsed_inclusive(
+            earliest, today, cap=max(p.duration_months for p in active_plans) * 2
+        )
+    elif all_plans:
+        earliest = min(p.start_date for p in all_plans if p.start_date)
+        months_in = months_between(earliest, today) if earliest else 0
     else:
         months_in = 0
     access_username = None
@@ -359,7 +434,7 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
         "active_plans_count": len(active_plans),
         "plan_types": unique_types,
         "months_in_program": months_in,
-        "plans_count": len(investor.plans),
+        "plans_count": len(all_plans),
         "access_username": access_username,
         "access_email": access_email,
         "access_role": access_role,
@@ -513,6 +588,7 @@ def build_plan_status_report(
         plan.monthly_rate_percent,
         getattr(plan, "savings_rate_percent", 0.0) or 0.0,
     )
+    duration = plan_effective_duration(plan) or plan.duration_months
     cash_monthly = calc_monthly(plan.principal, monthly_rate)
     manager_monthly = calc_monthly(plan.principal, plan.manager_fee_percent)
     savings_rows = {
@@ -520,7 +596,7 @@ def build_plan_status_report(
         for r in month_savings_ledger(
             principal=plan.principal,
             savings_rate_percent=savings_rate,
-            duration_months=plan.duration_months,
+            duration_months=duration,
         )
     }
     payments_by_month = {
@@ -528,7 +604,7 @@ def build_plan_status_report(
     }
     months: list[dict] = []
     cumulative_cash = 0.0
-    for month in range(1, plan.duration_months + 1):
+    for month in range(1, duration + 1):
         payment = payments_by_month.get(month)
         cash = float(payment.investor_amount) if payment is not None else cash_monthly
         if kind == "savings":
@@ -578,13 +654,13 @@ def build_plan_status_report(
         "plan_type": kind,
         "principal": plan.principal,
         "start_date": plan.start_date,
-        "duration_months": plan.duration_months,
+        "duration_months": duration,
         "monthly_cash": cash_monthly,
         "monthly_savings_accrual": calc_monthly(plan.principal, savings_rate)
         if savings_rate
         else 0.0,
         "projected_savings_balance": (
-            savings_rows.get(plan.duration_months, {}).get("cumulative_savings", 0.0)
+            savings_rows.get(duration, {}).get("cumulative_savings", 0.0)
             if savings_rows
             else 0.0
         ),
@@ -868,19 +944,19 @@ def repair_duplicate_payments(db: Session) -> dict:
 
 
 def repair_reporting_year_plans(db: Session) -> dict:
-    """Startup safety: remove payment duplicates and restore mid-year track lengths.
+    """Startup safety: remove payment duplicates and clip reporting boards to Dec.
 
-    Never rewrite client start_dates to January — only ensure reporting boards
-    keep full track duration from plan terms (not truncated to December).
+    Mid-year 'לוח דיווח' boards must not run into the next calendar year — that
+    overlaps the next active plan and double-counts monthly savings.
     """
     dupes = dedupe_all_payments(db)
-    restored = restore_midyear_reporting_plan_durations(db)
+    clipped = clip_reporting_year_plan_spans(db)
     return {
         "duplicate_payments_removed": dupes["removed"],
         "plans_realigned": 0,
         "active_starts_fixed": 0,
-        "reporting_plans_clipped": 0,
-        "reporting_plans_restored": restored["restored"],
+        "reporting_plans_clipped": clipped["clipped"],
+        "reporting_plans_restored": 0,
     }
 
 
@@ -993,32 +1069,24 @@ def _payment_totals(payments: list[Payment]) -> dict:
 def _plans_for_savings_summary(
     db: Session, *, investor_id: Optional[int] = None
 ) -> list[InvestmentPlan]:
-    """Active plans preferred; if none for an investor, fall back to latest completed."""
+    """All savings/hybrid tracks for lifetime totals (each capped — no overlap)."""
     query = db.query(InvestmentPlan).options(
         joinedload(InvestmentPlan.investor),
         joinedload(InvestmentPlan.payments),
     )
     if investor_id is not None:
         query = query.filter(InvestmentPlan.investor_id == investor_id)
-    plans = query.order_by(InvestmentPlan.id).all()
-    by_investor: dict[int, list[InvestmentPlan]] = {}
-    for plan in plans:
-        by_investor.setdefault(plan.investor_id, []).append(plan)
-
+    plans = query.order_by(InvestmentPlan.start_date, InvestmentPlan.id).all()
     chosen: list[InvestmentPlan] = []
-    for inv_plans in by_investor.values():
-        active = [p for p in inv_plans if p.status == "active"]
-        if active:
-            chosen.extend(active)
-            continue
-        # Latest by start_date for completed-only investors
-        inv_plans_sorted = sorted(
-            inv_plans,
-            key=lambda p: (p.start_date or date.min, p.id),
-            reverse=True,
+    for plan in plans:
+        kind, _, savings_rate = normalize_plan_rates(
+            getattr(plan, "plan_type", None) or "monthly",
+            plan.monthly_rate_percent,
+            getattr(plan, "savings_rate_percent", 0.0) or 0.0,
         )
-        if inv_plans_sorted:
-            chosen.append(inv_plans_sorted[0])
+        if kind == "monthly" or savings_rate <= 0:
+            continue
+        chosen.append(plan)
     return chosen
 
 
@@ -1080,69 +1148,77 @@ def months_through_december(start: date) -> int:
 
 
 def clip_plan_to_calendar_year(db: Session, plan: InvestmentPlan, year: int) -> bool:
-    """No-op: tracks follow plan duration, not calendar-year truncation."""
-    del db, plan, year
-    return False
+    """Clip a reporting board so it ends in December of `year`."""
+    if not plan.start_date or plan.start_date.year != year:
+        return False
+    target = months_through_december(plan.start_date)
+    changed = False
+    if plan.duration_months != target:
+        plan.duration_months = target
+        changed = True
+    year_end = date(year, 12, 31)
+    removed = 0
+    for payment in list(plan.payments or []):
+        overdue = payment.due_date and payment.due_date > year_end
+        over_month = (payment.month_number or 0) > target
+        if overdue or over_month:
+            if payment.status in {"paid", "awaiting_confirmation"}:
+                continue
+            db.delete(payment)
+            removed += 1
+            changed = True
+    if changed:
+        db.commit()
+        if removed or not (plan.payments or []):
+            generate_payment_schedule(db, plan, realign_dates=False)
+    return changed
+
+
+def clip_reporting_year_plan_spans(db: Session) -> dict:
+    """Clip 'לוח דיווח לשנת YYYY' plans to December of that year.
+
+    Prevents a Sep-2025 board with duration=12 from accruing savings through
+    Aug-2026 on top of the investor's 2026 active plan (double ~₪1,100/mo).
+    """
+    clipped = 0
+    plans = (
+        db.query(InvestmentPlan)
+        .options(joinedload(InvestmentPlan.payments))
+        .all()
+    )
+    for plan in plans:
+        year = reporting_year_from_notes(plan.notes)
+        if not year or not plan.start_date or plan.start_date.year != year:
+            continue
+        target = months_through_december(plan.start_date)
+        if plan.duration_months == target:
+            # Still drop any stray payments past December.
+            year_end = date(year, 12, 31)
+            stray = [
+                p
+                for p in (plan.payments or [])
+                if (p.due_date and p.due_date > year_end)
+                or (p.month_number or 0) > target
+            ]
+            if not stray:
+                continue
+        if clip_plan_to_calendar_year(db, plan, year):
+            clipped += 1
+    return {"clipped": clipped}
 
 
 def restore_midyear_reporting_plan_durations(db: Session) -> dict:
-    """Restore 'לוח דיווח' plans truncated to Dec back to full track length.
+    """Deprecated: expanding mid-year boards caused savings double-counts.
 
-    Uses the investor's active (or latest) plan duration as the track terms.
-    Keeps the actual start_date — never invents months before the investor joined.
+    Kept as a no-op alias so old callers stay safe; use clip instead.
     """
-    import re
-
-    restored = 0
-    plans = (
-        db.query(InvestmentPlan)
-        .options(joinedload(InvestmentPlan.investor))
-        .all()
-    )
-    by_investor: dict[int, list[InvestmentPlan]] = {}
-    for plan in plans:
-        by_investor.setdefault(plan.investor_id, []).append(plan)
-
-    for plan in plans:
-        notes = plan.notes or ""
-        match = re.search(r"לוח דיווח לשנת (\d{4})", notes)
-        if not match or not plan.start_date:
-            continue
-        year = int(match.group(1))
-        if plan.start_date.year != year:
-            continue
-        siblings = by_investor.get(plan.investor_id, [])
-        template = next(
-            (p for p in siblings if p.status == "active" and p.id != plan.id),
-            None,
-        )
-        if template is None:
-            others = [p for p in siblings if p.id != plan.id]
-            others = sorted(
-                others,
-                key=lambda p: (p.start_date or date.min, p.id),
-                reverse=True,
-            )
-            template = others[0] if others else None
-        target_duration = (
-            template.duration_months if template is not None else plan.duration_months
-        )
-        # At least cover through December of the reporting year, but prefer full track.
-        min_for_year = months_through_december(plan.start_date)
-        target_duration = max(int(target_duration or 0), min_for_year)
-        if plan.duration_months >= target_duration:
-            continue
-        plan.duration_months = target_duration
-        db.commit()
-        generate_payment_schedule(db, plan, realign_dates=False)
-        restored += 1
-    return {"restored": restored}
+    return clip_reporting_year_plan_spans(db)
 
 
 def repair_midyear_reporting_plans(db: Session) -> dict:
-    """Compatibility alias — restores full track durations instead of clipping."""
-    result = restore_midyear_reporting_plan_durations(db)
-    return {"clipped": 0, "restored": result["restored"]}
+    """Clip overlapping reporting-year boards (do not expand them)."""
+    result = clip_reporting_year_plan_spans(db)
+    return {"clipped": result["clipped"], "restored": 0}
 
 
 def open_calendar_year_plans(db: Session, *, year: int) -> dict:
@@ -1199,7 +1275,9 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
         if start > year_end:
             skipped.append({"investor_id": investor.id, "reason": "starts_after_year"})
             continue
-        duration = max(int(template.duration_months or 12), 1)
+        # Reporting boards stop in December of that year — never spill into the next
+        # plan's months (that was the Bar ~₪1,100 savings double-count).
+        duration = months_through_december(start)
 
         plan = InvestmentPlan(
             investor_id=investor.id,
@@ -1459,7 +1537,6 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     total_principal = 0.0
     monthly_investor_cash = 0.0
     monthly_investor_savings = 0.0
-    current_savings_total = 0.0
     projected_savings_total = 0.0
     monthly_manager_fees = 0.0
     monthly_manager_own_cash = 0.0
@@ -1470,12 +1547,18 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         total_principal += plan.principal
         monthly_investor_cash += metrics["monthly_investor_payout"]
         monthly_investor_savings += metrics["monthly_savings_accrual"]
-        current_savings_total += metrics["current_savings_balance"]
         projected_savings_total += metrics["projected_savings_balance"]
         monthly_manager_fees += metrics["monthly_manager_fee"]
         if plan.investor and plan.investor.is_manager:
             monthly_manager_own_cash += metrics["monthly_investor_payout"]
             monthly_manager_own_savings += metrics["monthly_savings_accrual"]
+
+    investors_summary = [serialize_investor(i, today) for i in investors]
+    # Lifetime savings across all tracks (completed + active), already de-overlapped.
+    current_savings_total = round(
+        sum(float(s.get("current_savings_balance") or 0) for s in investors_summary),
+        2,
+    )
 
     year_start = date(today.year, 1, 1)
     paid_query = db.query(Payment).filter(
@@ -1522,7 +1605,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         "monthly_investor_total": round(
             monthly_investor_cash + monthly_investor_savings, 2
         ),
-        "current_savings_total": round(current_savings_total, 2),
+        "current_savings_total": current_savings_total,
         "projected_savings_total": round(projected_savings_total, 2),
         "monthly_manager_fees": round(monthly_manager_fees, 2),
         "monthly_manager_own_payout": round(monthly_manager_own_cash, 2),
@@ -1537,7 +1620,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         "active_plans": len(plans),
         "upcoming_payments": [serialize_payment(p) for p in upcoming],
         "recent_payments": [serialize_payment(p) for p in recent],
-        "investors_summary": [serialize_investor(i, today) for i in investors],
+        "investors_summary": investors_summary,
     }
 
 

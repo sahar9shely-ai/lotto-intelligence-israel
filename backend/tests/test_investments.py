@@ -522,3 +522,134 @@ def test_hybrid_and_savings_plan_types_available_without_seeding():
 
     # Cleanup quote leftover
     client.delete(f"/api/v1/investments/quotes/{savings_quote.json()['id']}", headers=headers)
+
+
+def test_reporting_board_savings_do_not_overlap_next_year():
+    """Mid-year לוח דיווח must not accrue savings into the next active plan."""
+    from datetime import date as date_cls
+
+    from app.db.investment_session import InvestmentSessionLocal
+    from app.models.investments import Investor, InvestmentPlan, Payment
+    from app.services import investment_service as svc
+
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    # Create isolated investor via API
+    created = client.post(
+        "/api/v1/investments/investors",
+        headers=headers,
+        json={
+            "name": "בדיקת כפילות חיסכון",
+            "username": "dupsave",
+            "password": "DupSave12!",
+            "is_manager": False,
+        },
+    )
+    assert created.status_code == 201, created.text
+    inv_id = created.json()["id"]
+
+    db = InvestmentSessionLocal()
+    try:
+        # 2025 reporting board: Sep–Dec only (4 months), ~1100 savings/mo on 30k@3.6667
+        board = InvestmentPlan(
+            investor_id=inv_id,
+            principal=30000,
+            plan_type="hybrid",
+            monthly_rate_percent=8.3333,
+            savings_rate_percent=3.6667,
+            manager_fee_percent=0,
+            start_date=date_cls(2025, 9, 1),
+            duration_months=12,  # buggy stored duration — must be clipped by effective logic
+            status="completed",
+            notes="לוח דיווח לשנת 2025",
+        )
+        db.add(board)
+        db.flush()
+        for i, due in enumerate(
+            [
+                date_cls(2025, 9, 1),
+                date_cls(2025, 10, 1),
+                date_cls(2025, 11, 1),
+                date_cls(2025, 12, 1),
+            ],
+            start=1,
+        ):
+            db.add(
+                Payment(
+                    plan_id=board.id,
+                    investor_id=inv_id,
+                    month_number=i,
+                    due_date=due,
+                    investor_amount=2499.99,
+                    manager_amount=0,
+                    status="paid",
+                    paid_at=date_cls(2025, 12, 31),
+                )
+            )
+        # 2026 active plan: also ~1100 savings/mo
+        active = InvestmentPlan(
+            investor_id=inv_id,
+            principal=43000,
+            plan_type="hybrid",
+            monthly_rate_percent=8.8372,
+            savings_rate_percent=2.5581,
+            manager_fee_percent=0,
+            start_date=date_cls(2026, 1, 1),
+            duration_months=12,
+            status="active",
+            notes="מסלול 2026",
+        )
+        db.add(active)
+        db.commit()
+        db.refresh(board)
+        db.refresh(active)
+        board = (
+            db.query(InvestmentPlan)
+            .filter(InvestmentPlan.id == board.id)
+            .one()
+        )
+        # Attach payments for effective duration
+        board = (
+            db.query(InvestmentPlan)
+            .options(__import__("sqlalchemy.orm", fromlist=["joinedload"]).joinedload(InvestmentPlan.payments))
+            .filter(InvestmentPlan.id == board.id)
+            .one()
+        )
+        active = (
+            db.query(InvestmentPlan)
+            .options(__import__("sqlalchemy.orm", fromlist=["joinedload"]).joinedload(InvestmentPlan.payments))
+            .filter(InvestmentPlan.id == active.id)
+            .one()
+        )
+
+        today = date_cls(2026, 8, 7)
+        assert svc.plan_effective_duration(board) == 4
+        m_board = svc.plan_metrics(board, today)
+        m_active = svc.plan_metrics(active, today)
+        assert m_board["months_elapsed"] == 4
+        assert abs(m_board["current_savings_balance"] - 4400.04) < 0.05
+        assert m_active["months_elapsed"] == 8
+        assert abs(m_active["current_savings_balance"] - 8799.84) < 0.05
+
+        investor = (
+            db.query(Investor)
+            .options(
+                __import__("sqlalchemy.orm", fromlist=["joinedload"]).joinedload(Investor.plans).joinedload(
+                    InvestmentPlan.payments
+                )
+            )
+            .filter(Investor.id == inv_id)
+            .one()
+        )
+        summary = svc.serialize_investor(investor, today)
+        # Monthly line is active-only (no double 1100)
+        assert abs(summary["monthly_savings"] - 1099.98) < 0.05
+        # Lifetime = 4×1100 + 8×1100
+        assert abs(summary["current_savings_balance"] - 13199.88) < 0.1
+
+        clipped = svc.clip_reporting_year_plan_spans(db)
+        assert clipped["clipped"] >= 1
+        db.refresh(board)
+        assert board.duration_months == 4
+    finally:
+        db.close()

@@ -1098,6 +1098,7 @@ export function PaymentsPage() {
                           <div>
                             <strong>
                               מסלול #{p.id} · {planTypeLabel(p.plan_type)}
+                              {p.status === "active" ? " · פעיל" : " · הסתיים"}
                             </strong>
                             <div className="muted">
                               {formatCalendarMonth(p.start_date)}{" "}
@@ -1107,7 +1108,9 @@ export function PaymentsPage() {
                               {planTrackEnd(p).slice(0, 4)}
                               {" · "}
                               {p.months_elapsed}/{p.duration_months} חודשים
-                              {p.status === "active" ? " · פעיל" : ""}
+                              {p.status !== "active"
+                                ? " · חיסכון חודשי בזמנו (לא נוסף על הפעיל)"
+                                : ""}
                             </div>
                           </div>
                           <button
