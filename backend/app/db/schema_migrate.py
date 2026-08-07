@@ -125,6 +125,13 @@ def ensure_schema(engine: Engine) -> None:
                         "WHERE site_updating_message IS NULL OR site_updating_message = ''"
                     )
                 )
+            if "slack_webhook_url" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE app_settings ADD COLUMN slack_webhook_url "
+                        "VARCHAR(500)"
+                    )
+                )
 
     if not _table_exists(engine, "users"):
         return

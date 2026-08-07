@@ -25,8 +25,20 @@ export function SettingsPage() {
         fd.get("site_updating_message") ||
           "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
       ),
+      slack_webhook_url:
+        data?.slack_webhook_url != null ? data.slack_webhook_url : undefined,
     });
     setMessage("ההגדרות נשמרו");
+    reload();
+  }
+
+  async function onSaveSlack(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    await api.updateSettings({
+      slack_webhook_url: String(fd.get("slack_webhook_url") || "").trim() || null,
+    });
+    setMessage("חיבור Slack נשמר");
     reload();
   }
 
@@ -109,6 +121,31 @@ export function SettingsPage() {
           </Link>
           .
         </p>
+      </Panel>
+
+      <Panel
+        title="צ'אט עבודה · Slack"
+        subtitle="פתיחה מהירה של תזרים מהערוץ — כפתור אחד"
+      >
+        <p className="hint">
+          צרו Incoming Webhook ב-Slack (Apps → Incoming Webhooks), הדביקו כאן, ושמרו.
+          אחר כך אפשר ללחוץ «שלח ל-Slack» בסרגל העליון — או שהמערכת תשלח אוטומטית כשהקישור הציבורי מתחלף.
+        </p>
+        <form className="form" onSubmit={onSaveSlack}>
+          <label>
+            Slack Webhook URL
+            <input
+              name="slack_webhook_url"
+              type="url"
+              placeholder="https://hooks.slack.com/services/..."
+              defaultValue={data.slack_webhook_url ?? ""}
+              dir="ltr"
+            />
+          </label>
+          <button type="submit" className="btn btn--primary">
+            שמור חיבור Slack
+          </button>
+        </form>
       </Panel>
 
       <Panel

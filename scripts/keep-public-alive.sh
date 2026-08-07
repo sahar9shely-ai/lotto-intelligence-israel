@@ -98,6 +98,10 @@ publish_url() {
   printf '%s\n' "$url" >"$BACKUP_FILE"
   GRACE_UNTIL=$(( $(now) + 120 ))
   log "קישור פעיל: $url (grace 120s)"
+  # Push one-click open button to Slack work chat (if webhook configured)
+  if [[ -x "$ROOT/scripts/notify-slack.sh" ]]; then
+    "$ROOT/scripts/notify-slack.sh" "$url" >/dev/null 2>&1 || true
+  fi
 }
 
 current_url() {

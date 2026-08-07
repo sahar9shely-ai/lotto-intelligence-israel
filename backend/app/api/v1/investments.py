@@ -30,6 +30,7 @@ from app.schemas.investments import (
     SettingsOut,
     SettingsUpdate,
     SiteStatusOut,
+    SlackAnnounceOut,
 )
 from app.security.auth import get_current_user, is_manager, require_manager
 from app.services import auth_service as auth_svc
@@ -93,26 +94,13 @@ def get_site_status(
     db: Session = Depends(get_investment_db),
 ):
     """Readable by every logged-in user — drives the global update banner."""
-    from pathlib import Path
-
     settings = svc.ensure_settings(db)
     public_url = None
     # Managers see the live tunnel URL so bookmarks stay current after free-tunnel rotates.
     if getattr(user, "role", None) == "manager" or bool(
         getattr(getattr(user, "investor", None), "is_manager", False)
     ):
-        for candidate in (
-            Path("/workspace/.public-url"),
-            Path(__file__).resolve().parents[4] / ".public-url",
-            Path.cwd() / ".public-url",
-        ):
-            try:
-                if candidate.is_file():
-                    public_url = candidate.read_text(encoding="utf-8").strip() or None
-                    if public_url:
-                        break
-            except OSError:
-                continue
+        public_url = _read_public_url()
     return {
         "site_updating": bool(getattr(settings, "site_updating", False)),
         "site_updating_message": getattr(settings, "site_updating_message", None)
@@ -150,7 +138,109 @@ def _serialize_settings(settings) -> dict:
         "site_updating": bool(getattr(settings, "site_updating", False)),
         "site_updating_message": getattr(settings, "site_updating_message", None)
         or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
+        "slack_webhook_url": getattr(settings, "slack_webhook_url", None) or None,
     }
+
+
+def _read_public_url() -> str | None:
+    from pathlib import Path
+
+    for candidate in (
+        Path("/workspace/.public-url"),
+        Path(__file__).resolve().parents[4] / ".public-url",
+        Path.cwd() / ".public-url",
+    ):
+        try:
+            if candidate.is_file():
+                value = candidate.read_text(encoding="utf-8").strip() or None
+                if value:
+                    return value
+        except OSError:
+            continue
+    return None
+
+
+def _post_slack_open_link(webhook: str, public_url: str) -> tuple[bool, str]:
+    import json
+    import urllib.error
+    import urllib.request
+
+    text = (
+        "*תזרים — כניסה מהירה*\n"
+        f"<{public_url}|לחצו כאן לפתיחת המערכת>\n"
+        f"`{public_url}`"
+    )
+    payload = {
+        "text": text,
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*תזרים — כניסה מהירה לעבודה*",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "פתח את תזרים", "emoji": True},
+                        "url": public_url,
+                        "style": "primary",
+                    }
+                ],
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"קישור חי: `{public_url}`",
+                    }
+                ],
+            },
+        ],
+    }
+    req = urllib.request.Request(
+        webhook,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            if resp.status < 300:
+                return True, "נשלח ל-Slack"
+            return False, body or f"HTTP {resp.status}"
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        return False, detail or str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+@router.post("/announce-public-url", response_model=SlackAnnounceOut)
+def announce_public_url(
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Post the live public URL to Slack for one-click open from work chat."""
+    settings = svc.ensure_settings(db)
+    webhook = (getattr(settings, "slack_webhook_url", None) or "").strip()
+    public_url = _read_public_url()
+    if not public_url:
+        raise HTTPException(status_code=400, detail="אין קישור ציבורי פעיל כרגע")
+    if not webhook:
+        raise HTTPException(
+            status_code=400,
+            detail="חסר Slack Webhook — הגדירו בהגדרות כדי לשתף לצ'אט העבודה",
+        )
+    ok, detail = _post_slack_open_link(webhook, public_url)
+    if not ok:
+        raise HTTPException(status_code=502, detail=f"שליחה ל-Slack נכשלה: {detail}")
+    return {"sent": True, "detail": detail, "public_url": public_url}
 
 
 @router.get("/investors", response_model=list[InvestorOut])

@@ -162,6 +162,11 @@ export const api = {
     request<ManagerIncomeBoard>("/api/v1/investments/manager-income"),
   settings: () => request<Settings>("/api/v1/investments/settings"),
   siteStatus: () => request<SiteStatus>("/api/v1/investments/site-status"),
+  announcePublicUrl: () =>
+    request<{ sent: boolean; detail: string; public_url?: string | null }>(
+      "/api/v1/investments/announce-public-url",
+      { method: "POST" },
+    ),
   updateSettings: (body: Partial<Settings>) =>
     request<Settings>("/api/v1/investments/settings", {
       method: "PATCH",

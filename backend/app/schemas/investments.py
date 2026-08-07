@@ -196,6 +196,7 @@ class SettingsUpdate(BaseModel):
     manager_display_name: Optional[str] = None
     site_updating: Optional[bool] = None
     site_updating_message: Optional[str] = Field(default=None, max_length=240)
+    slack_webhook_url: Optional[str] = Field(default=None, max_length=500)
 
 
 class SettingsOut(BaseModel):
@@ -206,6 +207,7 @@ class SettingsOut(BaseModel):
     manager_display_name: str
     site_updating: bool = False
     site_updating_message: str = "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה."
+    slack_webhook_url: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -213,6 +215,12 @@ class SettingsOut(BaseModel):
 class SiteStatusOut(BaseModel):
     site_updating: bool
     site_updating_message: str
+    public_url: Optional[str] = None
+
+
+class SlackAnnounceOut(BaseModel):
+    sent: bool
+    detail: str
     public_url: Optional[str] = None
 
 

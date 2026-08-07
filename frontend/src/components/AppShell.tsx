@@ -13,6 +13,9 @@ export function AppShell() {
     [user?.id],
   );
   const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
+  const [slackBusy, setSlackBusy] = useState(false);
+  const [slackNote, setSlackNote] = useState<string | null>(null);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -42,6 +45,33 @@ export function AppShell() {
     }
   }
 
+  async function copyChatMessage() {
+    const url = siteStatus?.public_url;
+    if (!url) return;
+    const text = `תזרים — כניסה מהירה לעבודה\n${url}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setShared(true);
+      window.setTimeout(() => setShared(false), 2200);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function sendToSlack() {
+    setSlackBusy(true);
+    setSlackNote(null);
+    try {
+      const res = await api.announcePublicUrl();
+      setSlackNote(res.detail || "נשלח ל-Slack");
+    } catch (err) {
+      setSlackNote(err instanceof Error ? err.message : "שליחה ל-Slack נכשלה");
+    } finally {
+      setSlackBusy(false);
+      window.setTimeout(() => setSlackNote(null), 4500);
+    }
+  }
+
   return (
     <div className="shell">
       <div className="atmosphere" aria-hidden="true" />
@@ -56,7 +86,7 @@ export function AppShell() {
         <div className="chrome__inner">
           {isManager && siteStatus?.public_url ? (
             <div className="public-link-bar" role="status">
-              <span className="public-link-bar__label">קישור ציבורי פעיל</span>
+              <span className="public-link-bar__label">כניסה מהירה</span>
               <a
                 className="public-link-bar__url"
                 href={siteStatus.public_url}
@@ -65,9 +95,23 @@ export function AppShell() {
               >
                 {siteStatus.public_url.replace(/^https?:\/\//, "")}
               </a>
-              <button type="button" className="btn btn--small btn--ghost" onClick={copyPublicUrl}>
-                {copied ? "הועתק" : "העתק"}
-              </button>
+              <div className="public-link-bar__actions">
+                <button type="button" className="btn btn--small btn--ghost" onClick={copyPublicUrl}>
+                  {copied ? "הועתק" : "העתק קישור"}
+                </button>
+                <button type="button" className="btn btn--small btn--ghost" onClick={copyChatMessage}>
+                  {shared ? "מוכן לצ'אט" : "העתק לצ'אט"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--small btn--primary"
+                  disabled={slackBusy}
+                  onClick={sendToSlack}
+                >
+                  {slackBusy ? "שולח..." : "שלח ל-Slack"}
+                </button>
+              </div>
+              {slackNote ? <span className="public-link-bar__note">{slackNote}</span> : null}
             </div>
           ) : null}
 
@@ -110,7 +154,6 @@ export function AppShell() {
         </main>
       </div>
 
-      {/* Mobile thumb dock — always reachable */}
       <nav className="dock" aria-label="ניווט מהיר">
         {links.map((link) => (
           <NavLink

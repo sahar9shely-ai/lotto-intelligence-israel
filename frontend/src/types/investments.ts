@@ -122,6 +122,7 @@ export type Settings = {
   manager_display_name: string;
   site_updating: boolean;
   site_updating_message: string;
+  slack_webhook_url?: string | null;
 };
 
 export type SiteStatus = {

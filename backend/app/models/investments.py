@@ -106,3 +106,4 @@ class AppSettings(Base):
         default="האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
         nullable=False,
     )
+    slack_webhook_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
