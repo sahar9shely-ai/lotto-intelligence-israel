@@ -16,6 +16,7 @@ cd "$ROOT/backend"
 export PYTHONPATH="$ROOT/backend"
 export FRONTEND_DIST="$ROOT/frontend/dist"
 export APP_PUBLIC_URL="${APP_PUBLIC_URL:-http://localhost:${PORT}}"
-export INVESTMENTS_DB_PATH="${INVESTMENTS_DB_PATH:-$ROOT/backend/app/data/investments.db}"
+# Always production DB (ignore polluted shell env from tests).
+export INVESTMENTS_DB_PATH="$ROOT/backend/app/data/investments.db"
 
 exec uvicorn app.main:app --host "$HOST" --port "$PORT"

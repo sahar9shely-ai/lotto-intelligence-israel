@@ -48,7 +48,8 @@ ensure_uvicorn() {
     cd "$ROOT/backend"
     export PYTHONPATH="$ROOT/backend"
     export FRONTEND_DIST="$ROOT/frontend/dist"
-    export INVESTMENTS_DB_PATH="${INVESTMENTS_DB_PATH:-$ROOT/backend/app/data/investments.db}"
+    # Always the production DB — never inherit pytest /tmp paths from the shell.
+    export INVESTMENTS_DB_PATH="$ROOT/backend/app/data/investments.db"
     nohup uvicorn app.main:app --host 127.0.0.1 --port "$PORT" >>"$UV_LOG" 2>&1 &
   )
   for _ in $(seq 1 50); do
