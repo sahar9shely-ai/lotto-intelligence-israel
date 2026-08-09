@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Lightweight SQLite schema patches for evolving investment/auth tables."""
+"""Lightweight schema patches for evolving investment/auth tables (SQLite + Postgres)."""
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -8,24 +8,60 @@ from sqlalchemy.engine import Engine
 from app.db.investment_base import InvestmentBase
 
 
+def _dialect(engine: Engine) -> str:
+    return engine.dialect.name
+
+
 def _table_columns(engine: Engine, table: str) -> set[str]:
     with engine.connect() as conn:
-        rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    return {row[1] for row in rows}
+        if _dialect(engine) == "sqlite":
+            rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+            return {row[1] for row in rows}
+        rows = conn.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = :t
+                """
+            ),
+            {"t": table},
+        ).fetchall()
+    return {row[0] for row in rows}
 
 
 def _table_exists(engine: Engine, table: str) -> bool:
     with engine.connect() as conn:
+        if _dialect(engine) == "sqlite":
+            row = conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=:n"
+                ),
+                {"n": table},
+            ).fetchone()
+            return row is not None
         row = conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name=:n"),
+            text(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = :n
+                """
+            ),
             {"n": table},
         ).fetchone()
     return row is not None
 
 
+def _add_column(conn, table: str, column_sql: str) -> None:
+    """column_sql example: 'plan_type VARCHAR(32) DEFAULT \\'monthly\\''"""
+    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column_sql}"))
+
+
 def ensure_schema(engine: Engine) -> None:
     # Ensure model tables (including savings_actions) are registered.
     from app.models import investments as _investment_models  # noqa: F401
+    from app.models import auth as _auth_models  # noqa: F401
 
     InvestmentBase.metadata.create_all(bind=engine)
 
@@ -71,12 +107,7 @@ def ensure_schema(engine: Engine) -> None:
         cols = _table_columns(engine, table)
         with engine.begin() as conn:
             if "plan_type" not in cols:
-                conn.execute(
-                    text(
-                        f"ALTER TABLE {table} ADD COLUMN plan_type VARCHAR(32) "
-                        "DEFAULT 'monthly'"
-                    )
-                )
+                _add_column(conn, table, "plan_type VARCHAR(32) DEFAULT 'monthly'")
                 conn.execute(
                     text(
                         f"UPDATE {table} SET plan_type = 'monthly' "
@@ -84,12 +115,7 @@ def ensure_schema(engine: Engine) -> None:
                     )
                 )
             if "savings_rate_percent" not in cols:
-                conn.execute(
-                    text(
-                        f"ALTER TABLE {table} ADD COLUMN savings_rate_percent FLOAT "
-                        "DEFAULT 0"
-                    )
-                )
+                _add_column(conn, table, "savings_rate_percent FLOAT DEFAULT 0")
                 conn.execute(
                     text(
                         f"UPDATE {table} SET savings_rate_percent = 0 "
@@ -101,25 +127,24 @@ def ensure_schema(engine: Engine) -> None:
         cols = _table_columns(engine, "app_settings")
         with engine.begin() as conn:
             if "site_updating" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE app_settings ADD COLUMN site_updating BOOLEAN "
-                        "DEFAULT 0"
-                    )
+                default_bool = "FALSE" if _dialect(engine) != "sqlite" else "0"
+                _add_column(
+                    conn,
+                    "app_settings",
+                    f"site_updating BOOLEAN DEFAULT {default_bool}",
                 )
                 conn.execute(
                     text(
-                        "UPDATE app_settings SET site_updating = 0 "
-                        "WHERE site_updating IS NULL"
+                        "UPDATE app_settings SET site_updating = "
+                        f"{default_bool} WHERE site_updating IS NULL"
                     )
                 )
             if "site_updating_message" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE app_settings ADD COLUMN site_updating_message "
-                        "VARCHAR(240) DEFAULT "
-                        "'האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.'"
-                    )
+                _add_column(
+                    conn,
+                    "app_settings",
+                    "site_updating_message VARCHAR(240) DEFAULT "
+                    "'האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.'",
                 )
                 conn.execute(
                     text(
@@ -129,18 +154,12 @@ def ensure_schema(engine: Engine) -> None:
                     )
                 )
             if "slack_webhook_url" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE app_settings ADD COLUMN slack_webhook_url "
-                        "VARCHAR(500)"
-                    )
-                )
+                _add_column(conn, "app_settings", "slack_webhook_url VARCHAR(500)")
             if "assistant_provider" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE app_settings ADD COLUMN assistant_provider "
-                        "VARCHAR(32) DEFAULT 'gemini'"
-                    )
+                _add_column(
+                    conn,
+                    "app_settings",
+                    "assistant_provider VARCHAR(32) DEFAULT 'gemini'",
                 )
                 conn.execute(
                     text(
@@ -149,22 +168,13 @@ def ensure_schema(engine: Engine) -> None:
                     )
                 )
             if "assistant_api_key" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE app_settings ADD COLUMN assistant_api_key "
-                        "VARCHAR(200)"
-                    )
-                )
+                _add_column(conn, "app_settings", "assistant_api_key VARCHAR(200)")
 
     if _table_exists(engine, "investment_plans"):
         cols = _table_columns(engine, "investment_plans")
         with engine.begin() as conn:
             if "accrual_principal" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE investment_plans ADD COLUMN accrual_principal FLOAT"
-                    )
-                )
+                _add_column(conn, "investment_plans", "accrual_principal FLOAT")
                 conn.execute(
                     text(
                         "UPDATE investment_plans SET accrual_principal = principal "
@@ -172,11 +182,10 @@ def ensure_schema(engine: Engine) -> None:
                     )
                 )
             if "savings_redeemed_total" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE investment_plans ADD COLUMN "
-                        "savings_redeemed_total FLOAT DEFAULT 0"
-                    )
+                _add_column(
+                    conn,
+                    "investment_plans",
+                    "savings_redeemed_total FLOAT DEFAULT 0",
                 )
                 conn.execute(
                     text(
@@ -185,12 +194,7 @@ def ensure_schema(engine: Engine) -> None:
                     )
                 )
             if "successor_plan_id" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE investment_plans ADD COLUMN "
-                        "successor_plan_id INTEGER"
-                    )
-                )
+                _add_column(conn, "investment_plans", "successor_plan_id INTEGER")
 
     if not _table_exists(engine, "users"):
         return
@@ -198,45 +202,33 @@ def ensure_schema(engine: Engine) -> None:
     cols = _table_columns(engine, "users")
     with engine.begin() as conn:
         if "username" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR(64)"))
-            # Backfill from email local-part or user id
-            conn.execute(
-                text(
-                    """
-                    UPDATE users
-                    SET username = lower(
-                        CASE
-                          WHEN email IS NOT NULL AND instr(email, '@') > 1
-                            THEN substr(email, 1, instr(email, '@') - 1)
-                          ELSE 'user' || id
-                        END
-                    )
-                    WHERE username IS NULL OR username = ''
-                    """
-                )
-            )
-            # Deduplicate usernames if needed
+            _add_column(conn, "users", "username VARCHAR(64)")
             rows = conn.execute(
-                text("SELECT id, username FROM users ORDER BY id")
+                text("SELECT id, email, username FROM users ORDER BY id")
             ).fetchall()
             seen: set[str] = set()
-            for uid, uname in rows:
-                base = (uname or f"user{uid}").lower()
-                candidate = base
+            for uid, email, uname in rows:
+                if uname:
+                    base = str(uname).lower()
+                elif email and "@" in str(email):
+                    base = str(email).split("@", 1)[0].lower()
+                else:
+                    base = f"user{uid}"
+                candidate = base or f"user{uid}"
                 n = 1
                 while candidate in seen:
                     n += 1
                     candidate = f"{base}{n}"
                 seen.add(candidate)
-                if candidate != uname:
-                    conn.execute(
-                        text("UPDATE users SET username = :u WHERE id = :id"),
-                        {"u": candidate, "id": uid},
-                    )
+                conn.execute(
+                    text("UPDATE users SET username = :u WHERE id = :id"),
+                    {"u": candidate, "id": uid},
+                )
 
         # Unique index for username (safe if already present)
         conn.execute(
             text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username_unique ON users(username)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username_unique "
+                "ON users(username)"
             )
         )

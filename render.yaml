@@ -1,23 +1,28 @@
-# Example Render Blueprint — one web service for תזרים
-# Connect the GitHub repo in Render and use this file, or deploy the root Dockerfile manually.
+# Free forever stack for תזרים:
+# - Web service on Render Free (sleeps after ~15 min idle — first open may take ~1 min)
+# - Postgres data on Neon Free (persistent — survives sleep/redeploy)
+#
+# Setup:
+# 1) Create a free Neon DB: https://console.neon.tech
+# 2) Copy the connection string
+# 3) In Render → New → Blueprint → this repo
+# 4) Set DATABASE_URL to the Neon string (and APP_PUBLIC_URL after first deploy)
 services:
   - type: web
     name: tazrim
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: starter
+    plan: free
     healthCheckPath: /health
     envVars:
       - key: JWT_SECRET
         generateValue: true
       - key: APP_PUBLIC_URL
         sync: false
-      - key: INVESTMENTS_DB_PATH
-        value: /data/investments.db
+      - key: DATABASE_URL
+        sync: false
       - key: FRONTEND_DIST
         value: /app/frontend/dist
-    disk:
-      name: tazrim-data
-      mountPath: /data
-      sizeGB: 1
+      - key: LOG_LEVEL
+        value: INFO

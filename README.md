@@ -39,21 +39,21 @@ chmod +x scripts/share-public.sh
 
 > הקישור חי כל עוד תהליך `cloudflared` רץ. אל תעצרו אותו אם כבר עדכנתם לקוחות.
 
-### אפשרות קבועה — העלאה לענן (כתובת קבועה)
+### אפשרות קבועה חינמית — Render + Neon (מומלץ)
 
-להרצה 24/7 עם כתובת קבועה:
+האתר חי ברשת גם כשהמחשב כבוי, **בלי תשלום**:
+
+ראה מדריך מלא: [`docs/DEPLOY_FREE.md`](docs/DEPLOY_FREE.md)
+
+בקצרה: Neon Free למסד נתונים + Render Free לאפליקציה (`render.yaml`).
+
+### אפשרות קבועה בתשלום קטן — דיסק ב־Render
 
 ```bash
 docker compose -f docker/docker-compose.prod.yml up --build -d
 ```
 
-ואז מעלים את ה־`Dockerfile` שבשורש הפרויקט ל־Render / Railway / VPS.
-מגדירים:
-
-- `JWT_SECRET` — מחרוזת סודית ארוכה
-- `APP_PUBLIC_URL` — הכתובת הציבורית (למשל `https://tazrim.onrender.com`)
-
-יש גם `render.yaml` מוכן לפריסה ב־Render.
+ואז מעלים את ה־`Dockerfile` ל־Render Starter (~$7/חודש) עם דיסק קבוע.
 
 ### באותה רשת Wi‑Fi בלבד
 
