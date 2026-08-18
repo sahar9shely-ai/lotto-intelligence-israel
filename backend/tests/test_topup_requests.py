@@ -292,3 +292,85 @@ def test_cooling_off_deadline_is_three_business_days():
     assert israel_business_days_remaining(deadline, now=last_day) == 1
     too_late = datetime(2026, 8, 19, 0, 0, tzinfo=timezone.utc)
     assert israel_business_days_remaining(deadline, now=too_late) == 0
+
+
+def test_investor_can_sign_first_then_manager_executes():
+    manager, _ = _login("sahar9shely@gmail.com", "ManagerPass1!")
+    investor, investor_id = _login("bar050297@gmail.com", "InvestorPass1!")
+    _clear_open(investor_id)
+    created = client.post(
+        "/api/v1/investments/investment-requests",
+        headers=investor,
+        json={"amount": 15000},
+    )
+    assert created.status_code == 201, created.text
+    request_id = created.json()["id"]
+    offered = client.post(
+        f"/api/v1/investments/investment-requests/{request_id}/approve",
+        headers=manager,
+        json=_offer_terms(),
+    )
+    assert offered.status_code == 200
+    first = _sign(investor, request_id, "בר משקיע")
+    assert first.status_code == 200, first.text
+    assert first.json()["status"] == "contract"
+    assert first.json()["created_plan_id"] is None
+    second = _sign(manager, request_id, "סהר מנהל")
+    assert second.status_code == 200, second.text
+    assert second.json()["status"] == "executed"
+    assert second.json()["created_plan_id"]
+
+
+def test_cancel_contract_before_signatures_does_not_create_plan():
+    manager, _ = _login("sahar9shely@gmail.com", "ManagerPass1!")
+    investor, investor_id = _login("bar050297@gmail.com", "InvestorPass1!")
+    _clear_open(investor_id)
+    created = client.post(
+        "/api/v1/investments/investment-requests",
+        headers=investor,
+        json={"amount": 9000},
+    )
+    request_id = created.json()["id"]
+    offered = client.post(
+        f"/api/v1/investments/investment-requests/{request_id}/approve",
+        headers=manager,
+        json=_offer_terms(),
+    )
+    assert offered.json()["status"] == "contract"
+    cancelled = client.post(
+        f"/api/v1/investments/investment-requests/{request_id}/cancel",
+        headers=investor,
+        json={},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["created_plan_id"] is None
+
+
+def test_investor_contract_detail_hides_management_fee():
+    manager, _ = _login("sahar9shely@gmail.com", "ManagerPass1!")
+    investor, investor_id = _login("bar050297@gmail.com", "InvestorPass1!")
+    _clear_open(investor_id)
+    created = client.post(
+        "/api/v1/investments/investment-requests",
+        headers=investor,
+        json={"amount": 11000},
+    )
+    request_id = created.json()["id"]
+    client.post(
+        f"/api/v1/investments/investment-requests/{request_id}/approve",
+        headers=manager,
+        json=_offer_terms(),
+    )
+    detail = client.get(
+        f"/api/v1/investments/investment-requests/{request_id}",
+        headers=investor,
+    )
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert "manager_fee_percent" not in body
+    assert "manager_fee" not in str(body)
+    assert body["monthly_rate_percent"] == 1.5
+    assert body["start_date"] == "2041-06-01"
+    assert body["end_date"] == "2042-05-31"
+

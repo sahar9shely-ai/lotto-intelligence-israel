@@ -4,8 +4,8 @@ type Point = { x: number; y: number };
 
 function pointerPoint(canvas: HTMLCanvasElement, event: PointerEvent): Point {
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
+  const scaleX = canvas.width / Math.max(rect.width, 1);
+  const scaleY = canvas.height / Math.max(rect.height, 1);
   return {
     x: (event.clientX - rect.left) * scaleX,
     y: (event.clientY - rect.top) * scaleY,
@@ -24,14 +24,15 @@ export function SignaturePad({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const last = useRef<Point | null>(null);
+  const hasInk = useRef(false);
   const [empty, setEmpty] = useState(true);
 
-  const resize = useCallback(() => {
+  const paintBlank = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ratio = Math.max(window.devicePixelRatio || 1, 1);
-    const width = canvas.clientWidth || 320;
-    const height = canvas.clientHeight || 140;
+    const width = Math.max(canvas.clientWidth || 0, 280);
+    const height = Math.max(canvas.clientHeight || 0, 140);
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(height * ratio);
     const ctx = canvas.getContext("2d");
@@ -42,17 +43,30 @@ export function SignaturePad({
     ctx.lineWidth = 2.2 * ratio;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    setEmpty(true);
-    onChangeRef.current("");
   }, []);
 
+  const reset = useCallback(() => {
+    hasInk.current = false;
+    setEmpty(true);
+    paintBlank();
+    onChangeRef.current("");
+  }, [paintBlank]);
+
   useEffect(() => {
-    resize();
-  }, [resize]);
+    reset();
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (hasInk.current) return;
+      reset();
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [reset]);
 
   function emit() {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !hasInk.current) return;
     onChangeRef.current(canvas.toDataURL("image/png"));
   }
 
@@ -76,6 +90,7 @@ export function SignaturePad({
     ctx.lineTo(next.x, next.y);
     ctx.stroke();
     last.current = next;
+    hasInk.current = true;
     setEmpty(false);
   }
 
@@ -83,12 +98,7 @@ export function SignaturePad({
     if (!drawing.current) return;
     drawing.current = false;
     last.current = null;
-    if (!empty) emit();
-    else emit();
-  }
-
-  function clear() {
-    resize();
+    emit();
   }
 
   return (
@@ -104,7 +114,7 @@ export function SignaturePad({
       />
       <div className="sign-pad__bar">
         <span className="muted">{empty ? "חתמו כאן בעכבר או באצבע" : "החתימה נשמרה"}</span>
-        <button type="button" className="btn btn--ghost btn--small" onClick={clear} disabled={disabled || empty}>
+        <button type="button" className="btn btn--ghost btn--small" onClick={reset} disabled={disabled || empty}>
           נקה
         </button>
       </div>

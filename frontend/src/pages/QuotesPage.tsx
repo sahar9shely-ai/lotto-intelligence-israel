@@ -8,7 +8,7 @@ import type { Quote } from "../types/investments";
 import { buildMonthSchedule, downloadQuotePdf } from "../utils/quotePdf";
 import { formatMoney, formatPercent, statusLabel, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
-import { formatPhoneDisplay, openWhatsAppOffer, toWhatsAppNumber } from "../utils/whatsapp";
+import { formatPhoneDisplay, openWhatsAppOffer, toWhatsAppNumber, whatsAppOfferUrl } from "../utils/whatsapp";
 
 export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
@@ -99,9 +99,19 @@ export function QuotesPage() {
     reload();
   }
 
+  async function markQuoteSent(quote: Quote) {
+    if (quote.status !== "draft") return;
+    try {
+      await api.updateQuote(quote.id, { status: "sent" });
+      reload();
+    } catch {
+      // The chat still opened; status update is secondary.
+    }
+  }
+
   async function sendWhatsApp(quote: Quote) {
     if (!toWhatsAppNumber(quote.phone)) {
-      setMessage("הוסיפו מספר טלפון להצעה כדי לשלוח בוואטסאפ");
+      setMessage("הוסיפו מספר טלפון תקין להצעה כדי לשלוח בוואטסאפ");
       setEditing(quote);
       setShowForm(false);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -112,14 +122,7 @@ export function QuotesPage() {
       setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
       return;
     }
-    if (quote.status === "draft") {
-      try {
-        await api.updateQuote(quote.id, { status: "sent" });
-        reload();
-      } catch {
-        // The chat still opened; status update is secondary.
-      }
-    }
+    await markQuoteSent(quote);
     setMessage(`נפתח וואטסאפ אל ${quote.prospect_name}`);
   }
 
@@ -253,6 +256,7 @@ export function QuotesPage() {
             const rows = buildMonthSchedule(q);
             const open = expandedId === q.id;
             const canEdit = q.status !== "converted";
+            const waUrl = whatsAppOfferUrl(q);
             return (
               <article key={q.id} className="quote-card">
                 <header>
@@ -356,13 +360,23 @@ export function QuotesPage() {
                 ) : null}
 
                 <div className="page-head__actions">
-                  <button
-                    type="button"
-                    className="btn btn--whatsapp"
-                    onClick={() => sendWhatsApp(q)}
-                  >
-                    שליחה בוואטסאפ
-                  </button>
+                  {waUrl ? (
+                    <a
+                      className="btn btn--whatsapp"
+                      href={waUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => {
+                        void markQuoteSent(q);
+                      }}
+                    >
+                      שליחה בוואטסאפ
+                    </a>
+                  ) : (
+                    <button type="button" className="btn btn--whatsapp" onClick={() => sendWhatsApp(q)}>
+                      שליחה בוואטסאפ
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn btn--ghost"

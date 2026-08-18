@@ -8,10 +8,12 @@ export function toWhatsAppNumber(phone?: string | null): string | null {
   if (!raw) return null;
   let digits = raw.replace(/[^\d]/g, "");
   if (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.startsWith("972") && digits.length >= 11) return digits;
-  if (digits.startsWith("0") && digits.length >= 9) return `972${digits.slice(1)}`;
+  if (digits.startsWith("972")) {
+    return digits.length >= 11 && digits.length <= 15 ? digits : null;
+  }
+  if (digits.startsWith("0") && digits.length === 10) return `972${digits.slice(1)}`;
   if (digits.length === 9 && digits.startsWith("5")) return `972${digits}`;
-  return digits.length >= 9 ? digits : null;
+  return null;
 }
 
 export function formatPhoneDisplay(phone?: string | null): string {
