@@ -63,8 +63,8 @@ export function DashboardPage() {
             {isManager
               ? scopeName
                 ? `סיכום של ${scopeName} — מזומן וחיסכון בנפרד.`
-                : "סיכום כולם — מזומן וחיסכון בנפרד, בלי כפילויות."
-              : "קרן, החזר חודשי וחיסכון שלך."}
+                : "סיכום כולם — מזומן וחיסכון בנפרד. לחצו על משקיע ברשימה כדי לצמצם."
+              : "קרן, החזר חודשי וחיסכון שלך — בלי עמלות ובלי נתונים של אחרים."}
           </p>
         </div>
         <div className="page-head__actions">
@@ -219,7 +219,11 @@ export function DashboardPage() {
               <ul className="list">
                 {data.investors_summary.map((inv) => (
                   <li key={inv.id} className="list__row">
-                    <div>
+                    <button
+                      type="button"
+                      className="list__pick"
+                      onClick={() => setFilterId(inv.id)}
+                    >
                       <strong>
                         {inv.name}
                         {inv.is_manager ? <span className="chip">מנהל</span> : null}
@@ -230,7 +234,7 @@ export function DashboardPage() {
                           ? ` · חיסכון ${formatPercent(inv.savings_rate_percent ?? 0)}`
                           : ""}
                       </span>
-                    </div>
+                    </button>
                     <div className="list__meta">
                       <span>{formatMoney(inv.active_principal)}</span>
                       <span className="muted">

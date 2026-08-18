@@ -43,7 +43,7 @@ export function LoginPage() {
       <div className="auth-card">
         <p className="auth-card__eyebrow">כניסה למערכת</p>
         <h1 className="auth-card__brand">תזרים</h1>
-        <p className="muted">הזן את פרטי הכניסה שלך כדי להמשיך.</p>
+        <p className="muted">שם משתמש וסיסמה שקיבלת מהמנהל.</p>
 
         <form className="form" onSubmit={onSubmit} autoComplete="on">
           <label>

@@ -5,6 +5,8 @@ import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 
+const PRIMARY_PATHS = new Set(["/", "/investors", "/payments"]);
+
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -18,6 +20,7 @@ export function AppShell() {
   const [slackBusy, setSlackBusy] = useState(false);
   const [slackNote, setSlackNote] = useState<string | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -29,11 +32,15 @@ export function AppShell() {
   const links = [
     { to: "/", label: "לוח בקרה", end: true, managerOnly: false },
     { to: "/investors", label: isManager ? "משקיעים" : "המסלול שלי", managerOnly: false },
-    { to: "/payments", label: "תשלומים", managerOnly: false },
+    { to: "/payments", label: isManager ? "תשלומים" : "התשלומים שלי", managerOnly: false },
     { to: "/quotes", label: "הצעות", managerOnly: true },
     { to: "/users", label: "משתמשים", managerOnly: true },
     { to: "/settings", label: "הגדרות", managerOnly: true },
   ].filter((l) => !l.managerOnly || isManager);
+
+  const primaryLinks = links.filter((l) => PRIMARY_PATHS.has(l.to));
+  const moreLinks = links.filter((l) => !PRIMARY_PATHS.has(l.to));
+  const displayName = user?.investor_name || user?.username || "";
 
   async function copyPublicUrl() {
     const url = siteStatus?.public_url;
@@ -72,6 +79,12 @@ export function AppShell() {
       setSlackBusy(false);
       window.setTimeout(() => setSlackNote(null), 4500);
     }
+  }
+
+  function signOut() {
+    setMoreOpen(false);
+    logout();
+    navigate("/login", { replace: true });
   }
 
   return (
@@ -133,7 +146,10 @@ export function AppShell() {
             <div className="brand">
               <span className="brand__mark">תזרים</span>
               <span className="brand__tag">
-                {user?.investor_name || "מעקב השקעות שותפים"}
+                {displayName}
+                <span className={isManager ? "role-chip" : "role-chip role-chip--investor"}>
+                  {isManager ? "מנהל" : "משקיע"}
+                </span>
               </span>
             </div>
             <nav className="nav" aria-label="ניווט ראשי">
@@ -148,14 +164,7 @@ export function AppShell() {
                 </NavLink>
               ))}
             </nav>
-            <button
-              type="button"
-              className="topbar__logout"
-              onClick={() => {
-                logout();
-                navigate("/login", { replace: true });
-              }}
-            >
+            <button type="button" className="topbar__logout" onClick={signOut}>
               יציאה
             </button>
           </header>
@@ -168,18 +177,56 @@ export function AppShell() {
         </main>
       </div>
 
-      <nav className="dock" aria-label="ניווט מהיר">
-        {links.map((link) => (
+      <nav className="dock" aria-label="ניווט ראשי בטלפון">
+        {primaryLinks.map((link) => (
           <NavLink
             key={`dock-${link.to}`}
             to={link.to}
             end={link.end}
             className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
+            onClick={() => setMoreOpen(false)}
           >
             {link.label}
           </NavLink>
         ))}
+        {moreLinks.length > 0 ? (
+          <button
+            type="button"
+            className={moreOpen ? "dock__link is-active" : "dock__link"}
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            עוד
+          </button>
+        ) : null}
       </nav>
+
+      {moreOpen ? (
+        <div className="more-sheet" role="dialog" aria-label="עוד פעולות">
+          <button
+            type="button"
+            className="more-sheet__backdrop"
+            aria-label="סגור"
+            onClick={() => setMoreOpen(false)}
+          />
+          <div className="more-sheet__panel">
+            <p className="more-sheet__title">עוד</p>
+            {moreLinks.map((link) => (
+              <NavLink
+                key={`more-${link.to}`}
+                to={link.to}
+                className="more-sheet__link"
+                onClick={() => setMoreOpen(false)}
+              >
+                {link.label}
+              </NavLink>
+            ))}
+            <button type="button" className="more-sheet__link more-sheet__link--danger" onClick={signOut}>
+              יציאה
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <PersonalAssistant />
     </div>

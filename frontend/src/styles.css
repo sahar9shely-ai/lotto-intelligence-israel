@@ -135,11 +135,31 @@ a {
 }
 
 .brand__tag {
-  display: block;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 4px;
   color: var(--ink-soft);
   font-size: 0.82rem;
   font-weight: 400;
+}
+
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.role-chip--investor {
+  background: color-mix(in srgb, var(--gold-soft) 80%, #fff);
+  color: #7a5a16;
 }
 
 .nav {
@@ -184,7 +204,7 @@ a {
 }
 
 /* Bottom dock — mobile / narrow screens */
-.dock {
+.more-sheet {
   display: none;
 }
 
@@ -351,6 +371,11 @@ button.stat {
   background: linear-gradient(165deg, rgba(61, 107, 102, 0.14), #fff 78%);
   border-color: var(--manager);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--manager) 22%, transparent);
+}
+
+.stat--empty .stat__value {
+  color: color-mix(in srgb, var(--ink-soft) 70%, #fff);
+  font-weight: 600;
 }
 
 .stat__label,
@@ -892,6 +917,35 @@ button.stat {
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+
+.list__row--selected {
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  margin-inline: -10px;
+  padding-inline: 10px;
+  border-radius: 12px;
+  border-bottom-color: transparent;
+}
+
+.list__pick {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  text-align: inherit;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+  flex: 1;
+}
+
+.list__pick:hover strong {
+  color: var(--accent-strong);
 }
 
 .list__row:last-child {
@@ -899,7 +953,8 @@ button.stat {
   padding-bottom: 0;
 }
 
-.list__row > div:first-child {
+.list__row > div:first-child,
+.list__row > .list__pick {
   display: grid;
   gap: 4px;
 }
@@ -1127,6 +1182,54 @@ textarea {
 
 .filters label {
   min-width: 140px;
+}
+
+.tools-menu {
+  position: relative;
+}
+
+.tools-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.tools-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tools-menu__list {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 14rem;
+  display: grid;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.tools-menu__item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: right;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.tools-menu__item:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.tools-menu__item:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .table-wrap {
@@ -1823,6 +1926,66 @@ textarea {
   .dock__link.is-active {
     background: var(--accent);
     color: #f7fbf9;
+  }
+
+  .more-sheet {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+  }
+
+  .more-sheet__backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(16, 36, 28, 0.28);
+  }
+
+  .more-sheet__panel {
+    position: absolute;
+    inset-inline: 10px;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    display: grid;
+    gap: 4px;
+    padding: 12px;
+    border-radius: 18px;
+    background: #fff;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+  }
+
+  .more-sheet__title {
+    margin: 0 4px 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--ink-soft);
+  }
+
+  .more-sheet__link {
+    display: block;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-weight: 600;
+    background: transparent;
+    border: 0;
+    text-align: right;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+
+  .more-sheet__link:hover,
+  .more-sheet__link.is-active {
+    background: var(--accent-soft);
+  }
+
+  .more-sheet__link--danger {
+    color: var(--danger);
+  }
+
+  .tools-menu__list {
+    inset-inline: 0;
   }
 
   .stats-grid,

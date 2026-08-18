@@ -18,11 +18,17 @@ export function Stat({
   active = false,
   title,
 }: StatProps) {
+  const looksEmpty =
+    !active &&
+    (value === "0" ||
+      /^₪\s*0([.,]0+)?$/.test(value.replace(/,/g, "")) ||
+      value.replace(/\s/g, "") === "₪0");
   const className = [
     "stat",
     `tone-${tone}`,
     onClick ? "stat--clickable" : "",
     active ? "stat--active" : "",
+    looksEmpty ? "stat--empty" : "",
   ]
     .filter(Boolean)
     .join(" ");

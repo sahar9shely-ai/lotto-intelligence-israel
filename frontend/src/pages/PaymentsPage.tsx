@@ -109,6 +109,7 @@ export function PaymentsPage() {
   const [markBusy, setMarkBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [removeBusyId, setRemoveBusyId] = useState<number | null>(null);
+  const [manageYear, setManageYear] = useState(false);
   const paymentsPanelRef = useRef<HTMLDivElement | null>(null);
   const savingsPanelRef = useRef<HTMLDivElement | null>(null);
 
@@ -676,48 +677,25 @@ export function PaymentsPage() {
   return (
     <div className={`page${refreshing ? " page--refreshing" : ""}`}>
       <Toast message={message} onClear={clearMessage} />
-      <div className="page-head">
+      <header className="page-intro">
         <div>
-          <h1>{isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}</h1>
-          <p className="muted">
+          <p className="page-intro__eyebrow">
+            {isManager ? "ניהול תשלומים" : "החשבון שלך"}
+          </p>
+          <h1 className="page-intro__title">
+            {isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}
+          </h1>
+          <p className="page-intro__lead">
             {isManager
-              ? selectedTrackPlan
-                ? `דוח שנתי · ${selectedInvestorName ?? "משקיע"} · תחילת מסלול ${formatCalendarMonth(selectedTrackPlan.start_date)} ${selectedTrackPlan.start_date.slice(0, 4)} עד סוף מסלול ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))} ${planTrackEnd(selectedTrackPlan).slice(0, 4)} (${selectedTrackPlan.duration_months} חודשים)`
-                : `דוח שנתי · שליחה לאישור משקיע · שנת ${year} · לכל משקיע לפי תחילת וסוף המסלול שלו`
+              ? selectedTrackPlan && selectedInvestorName
+                ? `${selectedInvestorName} · ${formatCalendarMonth(selectedTrackPlan.start_date)} ${selectedTrackPlan.start_date.slice(0, 4)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))} ${planTrackEnd(selectedTrackPlan).slice(0, 4)}`
+                : `שנת ${year} · בחרו משקיע למעלה כדי לראות מסלול אחד בבירור.`
               : selectedTrackPlan
-                ? `המסלול שלך · ${formatCalendarMonth(selectedTrackPlan.start_date)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))} · שנת ${year}`
-                : `התשלומים שלך · אשר קבלה כשמגיעה בקשה · שנת ${year}`}
+                ? `המסלול שלך · ${formatCalendarMonth(selectedTrackPlan.start_date)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))}`
+                : "כאן מאשרים קבלה ורואים מה שולם ומה מתוכנן."}
           </p>
         </div>
         <div className="page-head__actions">
-          {isManager ? (
-            <>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                disabled={syncBusy}
-                onClick={syncYearAmounts}
-              >
-                {syncBusy ? "מסנכרנים..." : `סנכרון סכומי ${year}`}
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                disabled={openBusy}
-                onClick={openReportingYear}
-              >
-                {openBusy ? "פותחים..." : `פתח לוח ${year}`}
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                disabled={alignBusy}
-                onClick={alignToCalendarYear}
-              >
-                {alignBusy ? "מיישרים..." : "יישור לתחילת שנה"}
-              </button>
-            </>
-          ) : null}
           <button
             type="button"
             className="btn btn--primary"
@@ -726,8 +704,39 @@ export function PaymentsPage() {
           >
             {pdfBusy ? "מכינים PDF..." : `הורדת דוח ${year}`}
           </button>
+          {isManager ? (
+            <details className="tools-menu">
+              <summary className="btn btn--ghost">פעולות ניהול</summary>
+              <div className="tools-menu__list">
+                <button
+                  type="button"
+                  className="tools-menu__item"
+                  disabled={syncBusy}
+                  onClick={syncYearAmounts}
+                >
+                  {syncBusy ? "מסנכרנים..." : `סנכרון סכומי ${year}`}
+                </button>
+                <button
+                  type="button"
+                  className="tools-menu__item"
+                  disabled={openBusy}
+                  onClick={openReportingYear}
+                >
+                  {openBusy ? "פותחים..." : `פתח לוח ${year}`}
+                </button>
+                <button
+                  type="button"
+                  className="tools-menu__item"
+                  disabled={alignBusy}
+                  onClick={alignToCalendarYear}
+                >
+                  {alignBusy ? "מיישרים..." : "יישור לתחילת שנה"}
+                </button>
+              </div>
+            </details>
+          ) : null}
         </div>
-      </div>
+      </header>
 
       {!isManager &&
       payments.some((p) => p.status === "awaiting_confirmation") ? (
@@ -949,51 +958,64 @@ export function PaymentsPage() {
       {isManager && yearInvestors.length > 0 ? (
         <Panel
           title={`מי בלוח ${year}`}
-          subtitle="לכל משקיע — תחילת מסלול וסוף מסלול לפי תנאי המסלול (לא בהכרח עד סוף השנה)"
+          subtitle="לחצו על שם כדי לראות רק אותו. הסרה מהשנה נמצאת תחת עריכה."
+          action={
+            <button
+              type="button"
+              className={manageYear ? "btn btn--small btn--ghost btn--danger" : "btn btn--small btn--ghost"}
+              onClick={() => setManageYear((v) => !v)}
+            >
+              {manageYear ? "סיום עריכה" : "עריכת לוח"}
+            </button>
+          }
         >
           <ul className="list">
             {yearInvestors.map((inv) => {
               const savings = savingsByInvestor.get(inv.id) ?? [];
               const track = primaryPlanForInvestor(plans, inv.id, year);
               const end = track ? planTrackEnd(track) : null;
+              const selected = investorId === String(inv.id);
               return (
-                <li key={inv.id} className="list__row">
-                  <div>
-                    <strong>{inv.name}</strong>
+                <li key={inv.id} className={selected ? "list__row list__row--selected" : "list__row"}>
+                  <button
+                    type="button"
+                    className="list__pick"
+                    onClick={() => {
+                      setInvestorId((cur) => (cur === String(inv.id) ? "" : String(inv.id)));
+                      setDetailFocus(null);
+                    }}
+                  >
+                    <strong>
+                      {inv.name}
+                      {selected ? <span className="chip">נבחר</span> : null}
+                    </strong>
                     {track ? (
                       <span className="muted">
-                        {" "}
-                        · תחילת מסלול: {formatCalendarMonth(track.start_date)}{" "}
-                        {track.start_date.slice(0, 4)}
+                        {formatCalendarMonth(track.start_date)} {track.start_date.slice(0, 4)}
+                        {" → "}
+                        {formatCalendarMonth(end)} {end?.slice(0, 4)}
                         {" · "}
-                        סוף מסלול: {formatCalendarMonth(end)} {end?.slice(0, 4)}
-                        {" · "}
-                        {track.duration_months} חודשים
+                        {track.duration_months} ח׳
                       </span>
                     ) : (
                       <span className="muted">מופיע בדוח {year}</span>
                     )}
                     {savings.length > 0 ? (
                       <span className="muted">
-                        {" "}
-                        · חיסכון:{" "}
-                        {savings
-                          .map(
-                            (p) =>
-                              `${planTypeLabel(p.plan_type)} עד עכשיו ${formatMoney(p.current_savings_balance ?? 0)} / עד סוף ${formatMoney(p.projected_savings_balance)}`,
-                          )
-                          .join(" · ")}
+                        חיסכון {formatMoney(savings[0].current_savings_balance ?? 0)}
                       </span>
                     ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn--small btn--ghost btn--danger"
-                    disabled={removeBusyId === inv.id}
-                    onClick={() => removeInvestorFromYear(inv)}
-                  >
-                    {removeBusyId === inv.id ? "מסירים..." : "הסר מהשנה"}
                   </button>
+                  {manageYear ? (
+                    <button
+                      type="button"
+                      className="btn btn--small btn--ghost btn--danger"
+                      disabled={removeBusyId === inv.id}
+                      onClick={() => removeInvestorFromYear(inv)}
+                    >
+                      {removeBusyId === inv.id ? "מסירים..." : "הסר מהשנה"}
+                    </button>
+                  ) : null}
                 </li>
               );
             })}
