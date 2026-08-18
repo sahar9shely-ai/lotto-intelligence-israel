@@ -125,9 +125,15 @@ def ensure_schema(engine: Engine) -> None:
 
     if _table_exists(engine, "quotes"):
         cols = _table_columns(engine, "quotes")
-        if "phone" not in cols:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if "phone" not in cols:
                 _add_column(conn, "quotes", "phone VARCHAR(40)")
+            if "access_username" not in cols:
+                _add_column(conn, "quotes", "access_username VARCHAR(64)")
+            if "access_password" not in cols:
+                _add_column(conn, "quotes", "access_password VARCHAR(128)")
+            if "start_date" not in cols:
+                _add_column(conn, "quotes", "start_date DATE")
 
     if _table_exists(engine, "app_settings"):
         cols = _table_columns(engine, "app_settings")

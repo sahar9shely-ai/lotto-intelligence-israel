@@ -224,6 +224,41 @@ export const PDF_BASE_STYLES = `
   .pdf-table tr.even td { background: #fafcfb; }
   .pdf-table .col-num { font-variant-numeric: tabular-nums; font-weight: 600; }
   .pdf-table .muted { color: #5a7369; font-weight: 500; }
+  .pdf-access {
+    margin: 0 0 22px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: #f4faf7;
+    border: 1px solid #d5e5db;
+  }
+  .pdf-access .pdf-section-title { margin-bottom: 12px; }
+  .pdf-access__grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+  }
+  .pdf-access__item {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid #e4eee8;
+  }
+  .pdf-access__item span {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: #5a7369;
+  }
+  .pdf-access__item strong {
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .pdf-access__item .ltr {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-family: ui-monospace, "Courier New", monospace;
+    letter-spacing: 0.02em;
+  }
   .pdf-totals {
     margin-top: 16px;
     border-radius: 12px;

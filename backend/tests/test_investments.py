@@ -130,6 +130,123 @@ def test_plan_payment_and_quote_flow():
     assert noa["phone"] == "050-1234567"
 
 
+def test_convert_quote_uses_stored_login_and_creates_user():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    start = date.today().isoformat()
+    quote = client.post(
+        "/api/v1/investments/quotes",
+        headers=headers,
+        json={
+            "prospect_name": "רויטל",
+            "phone": "052-535-7071",
+            "access_username": "revitalq",
+            "access_password": "Revital1234!",
+            "start_date": start,
+            "principal": 10000,
+            "monthly_rate_percent": 5,
+            "manager_fee_percent": 0,
+            "duration_months": 12,
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    body = quote.json()
+    assert body["access_username"] == "revitalq"
+    assert body["access_password"] == "Revital1234!"
+    assert body["start_date"] == start
+
+    converted = client.post(
+        f"/api/v1/investments/quotes/{body['id']}/convert",
+        headers=headers,
+        json={},
+    )
+    assert converted.status_code == 200, converted.text
+    plan = converted.json()
+    assert plan["investor_name"] == "רויטל"
+    assert plan["status"] == "active"
+    assert plan["start_date"] == start
+    payments = client.get(
+        f"/api/v1/investments/payments?plan_id={plan['id']}", headers=headers
+    ).json()
+    assert len(payments) == 12
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "revitalq", "password": "Revital1234!"},
+    )
+    assert login.status_code == 200, login.text
+
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    revital = next(i for i in investors if i["name"] == "רויטל")
+    assert revital["phone"] == "052-535-7071"
+    assert revital.get("access_username") == "revitalq"
+
+    again = client.post(
+        f"/api/v1/investments/quotes/{body['id']}/convert",
+        headers=headers,
+        json={"username": "revitalq2", "password": "Revital1234!"},
+    )
+    assert again.status_code == 400
+
+
+def test_convert_quote_rejects_hebrew_or_taken_username():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    quote = client.post(
+        "/api/v1/investments/quotes",
+        headers=headers,
+        json={
+            "prospect_name": "מועמדת",
+            "principal": 8000,
+            "monthly_rate_percent": 3,
+            "manager_fee_percent": 0,
+            "duration_months": 12,
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    quote_id = quote.json()["id"]
+
+    hebrew = client.post(
+        f"/api/v1/investments/quotes/{quote_id}/convert",
+        headers=headers,
+        json={
+            "start_date": date.today().isoformat(),
+            "username": "רויטל",
+            "password": "Revital1234!",
+        },
+    )
+    assert hebrew.status_code == 400, hebrew.text
+    assert "אנגלית" in hebrew.json()["detail"]
+
+    still = client.get("/api/v1/investments/quotes", headers=headers).json()
+    match = next(q for q in still if q["id"] == quote_id)
+    assert match["status"] != "converted"
+
+    taken = client.post(
+        f"/api/v1/investments/quotes/{quote_id}/convert",
+        headers=headers,
+        json={
+            "start_date": date.today().isoformat(),
+            "username": "sahar",
+            "password": "Revital1234!",
+        },
+    )
+    assert taken.status_code == 400, taken.text
+    assert "תפוס" in taken.json()["detail"]
+
+    saved = client.post(
+        "/api/v1/investments/quotes",
+        headers=headers,
+        json={
+            "prospect_name": "שם עברי",
+            "access_username": "עברית",
+            "principal": 1000,
+            "monthly_rate_percent": 1,
+            "manager_fee_percent": 0,
+            "duration_months": 12,
+        },
+    )
+    assert saved.status_code == 400
+
+
 def test_settings_update():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     res = client.patch(

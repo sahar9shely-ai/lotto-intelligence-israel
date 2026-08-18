@@ -1,5 +1,5 @@
 import type { Quote } from "../types/investments";
-import { formatMoney, formatPercent } from "./format";
+import { formatDate, formatMoney, formatPercent } from "./format";
 import { planTypeLabel } from "./planTypes";
 
 /** Digits only, Israeli mobiles become 9725XXXXXXXX. */
@@ -55,6 +55,17 @@ export function buildQuoteWhatsAppMessage(quote: Quote): string {
   }
   lines.push(`סה״כ רווח בסיום: ${formatMoney(quote.total_investor_payout)}`);
   lines.push(`קרן + רווח בסיום: ${formatMoney(quote.principal + quote.total_investor_payout)}`);
+  if (quote.start_date) {
+    lines.push(`תחילת מסלול: ${formatDate(quote.start_date)}`);
+  }
+  if (quote.access_username && quote.access_password) {
+    lines.push(
+      "",
+      "כניסה לאתר תזרים:",
+      `שם משתמש: ${quote.access_username}`,
+      `סיסמה: ${quote.access_password}`,
+    );
+  }
   if (quote.notes) {
     lines.push("", quote.notes);
   }

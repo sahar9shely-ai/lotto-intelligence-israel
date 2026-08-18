@@ -1,14 +1,17 @@
-import { FormEvent, useCallback, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
+import { PasswordField } from "../components/PasswordField";
 import { PlanTrackFields } from "../components/PlanTrackFields";
 import { Toast } from "../components/Toast";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Quote } from "../types/investments";
+import { suggestPassword, suggestUsername } from "../utils/quoteAccess";
 import { buildMonthSchedule, downloadQuotePdf } from "../utils/quotePdf";
-import { formatMoney, formatPercent, statusLabel, yearStartISO } from "../utils/format";
+import { formatDate, formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
-import { formatPhoneDisplay, openWhatsAppOffer, toWhatsAppNumber, whatsAppOfferUrl } from "../utils/whatsapp";
+import { formatPhoneDisplay, openWhatsAppOffer, toWhatsAppNumber } from "../utils/whatsapp";
 
 export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
@@ -18,11 +21,49 @@ export function QuotesPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<number | null>(null);
+  const [converting, setConverting] = useState<Quote | null>(null);
+  const [convertError, setConvertError] = useState<string | null>(null);
+  const [draftPassword] = useState(() => suggestPassword());
   const [busy, setBusy] = useState(false);
   const clearMessage = useCallback(() => setMessage(null), []);
 
   const preview = useMemo(() => data ?? [], [data]);
   const formOpen = showForm || editing != null;
+  const backfilling = useRef(false);
+  const accessAttempted = useRef(new Set<number>());
+
+  const persistQuoteAccess = useCallback(async (quote: Quote): Promise<Quote> => {
+    if (quote.status === "converted") return quote;
+    if (quote.access_username && quote.access_password && quote.start_date) return quote;
+    return api.updateQuote(quote.id, {
+      access_username: quote.access_username || suggestUsername(quote.prospect_name, quote.phone),
+      access_password: quote.access_password || suggestPassword(),
+      start_date: quote.start_date || todayISO(),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!data || backfilling.current) return;
+    const missing = data.filter(
+      (q) =>
+        q.status !== "converted" &&
+        !accessAttempted.current.has(q.id) &&
+        (!q.access_username || !q.access_password || !q.start_date),
+    );
+    if (missing.length === 0) return;
+    backfilling.current = true;
+    for (const quote of missing) accessAttempted.current.add(quote.id);
+    void (async () => {
+      try {
+        for (const quote of missing) {
+          await persistQuoteAccess(quote);
+        }
+        reload();
+      } finally {
+        backfilling.current = false;
+      }
+    })();
+  }, [data, persistQuoteAccess, reload]);
 
   function closeForm() {
     setShowForm(false);
@@ -34,9 +75,16 @@ export function QuotesPage() {
     setBusy(true);
     setMessage(null);
     const fd = new FormData(e.currentTarget);
+    const name = String(fd.get("prospect_name") || "").trim();
+    const phone = String(fd.get("phone") || "").trim() || undefined;
     const body = {
-      prospect_name: String(fd.get("prospect_name") || "").trim(),
-      phone: String(fd.get("phone") || "").trim() || undefined,
+      prospect_name: name,
+      phone,
+      access_username:
+        String(fd.get("access_username") || "").trim().toLowerCase() ||
+        suggestUsername(name, phone),
+      access_password: String(fd.get("access_password") || "").trim() || suggestPassword(),
+      start_date: String(fd.get("start_date") || todayISO()),
       principal: Number(fd.get("principal") || 0),
       plan_type: String(fd.get("plan_type") || "monthly"),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
@@ -81,22 +129,32 @@ export function QuotesPage() {
     }
   }
 
-  async function convert(id: number, name: string) {
-    const start = window.prompt(`תאריך התחלה ל-${name} (YYYY-MM-DD)`, yearStartISO());
-    if (!start) return;
-    const username = window.prompt(`שם משתמש לגישה של ${name}`, "")?.trim();
-    if (!username) {
-      setMessage("לא ניתן להמיר בלי שם משתמש — אפשר גם ליצור משתמש ממסך משתמשים והרשאות");
-      return;
+  async function convertQuote(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!converting) return;
+    const fd = new FormData(e.currentTarget);
+    const start_date = String(fd.get("start_date") || todayISO());
+    const username = String(fd.get("username") || "").trim().toLowerCase();
+    const password = String(fd.get("password") || "").trim();
+    setConvertError(null);
+    setBusy(true);
+    try {
+      const plan = await api.convertQuote(converting.id, {
+        start_date,
+        username,
+        password,
+        phone: converting.phone || undefined,
+      });
+      setConverting(null);
+      setMessage(
+        `${plan.investor_name} נוסף למשקיעים עם מסלול פעיל. כניסה: ${username}`,
+      );
+      reload();
+    } catch (err) {
+      setConvertError(err instanceof Error ? err.message : "הוספת המשקיע נכשלה");
+    } finally {
+      setBusy(false);
     }
-    const password = window.prompt(`סיסמה התחלתית ל-${name} (לפחות 8 תווים)`, "")?.trim();
-    if (!password || password.length < 8) {
-      setMessage("סיסמה חייבת להכיל לפחות 8 תווים");
-      return;
-    }
-    await api.convertQuote(id, { start_date: start, username, password });
-    setMessage(`${name} הומר למשקיע חדש — התחברות: ${username}`);
-    reload();
   }
 
   async function markQuoteSent(quote: Quote) {
@@ -117,21 +175,29 @@ export function QuotesPage() {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
-    const opened = openWhatsAppOffer(quote);
-    if (!opened) {
-      setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
-      return;
+    try {
+      const ready = await persistQuoteAccess(quote);
+      const opened = openWhatsAppOffer(ready);
+      if (!opened) {
+        setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
+        return;
+      }
+      await markQuoteSent(ready);
+      setMessage(`נפתח וואטסאפ אל ${ready.prospect_name}`);
+      reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "שליחה בוואטסאפ נכשלה");
     }
-    await markQuoteSent(quote);
-    setMessage(`נפתח וואטסאפ אל ${quote.prospect_name}`);
   }
 
   async function exportPdf(quote: Quote) {
     setPdfBusyId(quote.id);
     setMessage(null);
     try {
-      await downloadQuotePdf(quote);
-      setMessage(`הקובץ PDF עבור ${quote.prospect_name} ירד בהצלחה`);
+      const ready = await persistQuoteAccess(quote);
+      await downloadQuotePdf(ready);
+      setMessage(`הקובץ PDF עבור ${ready.prospect_name} ירד בהצלחה`);
+      reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "ייצוא PDF נכשל");
     } finally {
@@ -200,6 +266,42 @@ export function QuotesPage() {
                 />
               </label>
               <label>
+                תחילת המסלול
+                <input
+                  name="start_date"
+                  type="date"
+                  dir="ltr"
+                  required
+                  defaultValue={editing?.start_date ?? todayISO()}
+                />
+              </label>
+              <label>
+                שם משתמש לכניסה
+                <input
+                  name="access_username"
+                  required
+                  minLength={2}
+                  maxLength={64}
+                  dir="ltr"
+                  autoComplete="off"
+                  pattern="[A-Za-z0-9._\\-]{2,64}"
+                  title="אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון"
+                  placeholder="באנגלית, למשל revital"
+                  defaultValue={
+                    editing?.access_username ?? suggestUsername(editing?.prospect_name ?? "")
+                  }
+                />
+              </label>
+              <PasswordField
+                name="access_password"
+                label="סיסמה לכניסה"
+                required
+                minLength={8}
+                dir="ltr"
+                autoComplete="new-password"
+                defaultValue={editing?.access_password ?? draftPassword}
+              />
+              <label>
                 קרן מוצעת (₪)
                 <input
                   name="principal"
@@ -256,7 +358,6 @@ export function QuotesPage() {
             const rows = buildMonthSchedule(q);
             const open = expandedId === q.id;
             const canEdit = q.status !== "converted";
-            const waUrl = whatsAppOfferUrl(q);
             return (
               <article key={q.id} className="quote-card">
                 <header>
@@ -269,6 +370,9 @@ export function QuotesPage() {
                     ) : (
                       <p className="quote-card__phone muted">אין מספר טלפון</p>
                     )}
+                    {q.start_date ? (
+                      <p className="quote-card__phone muted">תחילת מסלול {formatDate(q.start_date)}</p>
+                    ) : null}
                   </div>
                   <span className={`badge badge--${q.status}`}>{statusLabel(q.status)}</span>
                 </header>
@@ -309,6 +413,25 @@ export function QuotesPage() {
                     <dd>{formatMoney(q.principal + q.total_investor_payout)}</dd>
                   </div>
                 </dl>
+                {q.access_username || q.access_password ? (
+                  <div className="quote-access">
+                    <p className="quote-access__label">כניסה לאתר תזרים</p>
+                    <dl>
+                      {q.access_username ? (
+                        <div>
+                          <dt>שם משתמש</dt>
+                          <dd className="ltr">{q.access_username}</dd>
+                        </div>
+                      ) : null}
+                      {q.access_password ? (
+                        <div>
+                          <dt>סיסמה</dt>
+                          <dd className="ltr">{q.access_password}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </div>
+                ) : null}
 
                 <button
                   type="button"
@@ -360,23 +483,9 @@ export function QuotesPage() {
                 ) : null}
 
                 <div className="page-head__actions">
-                  {waUrl ? (
-                    <a
-                      className="btn btn--whatsapp"
-                      href={waUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() => {
-                        void markQuoteSent(q);
-                      }}
-                    >
-                      שליחה בוואטסאפ
-                    </a>
-                  ) : (
-                    <button type="button" className="btn btn--whatsapp" onClick={() => sendWhatsApp(q)}>
-                      שליחה בוואטסאפ
-                    </button>
-                  )}
+                  <button type="button" className="btn btn--whatsapp" onClick={() => sendWhatsApp(q)}>
+                    שליחה בוואטסאפ
+                  </button>
                   <button
                     type="button"
                     className="btn btn--ghost"
@@ -408,13 +517,19 @@ export function QuotesPage() {
                       <button
                         type="button"
                         className="btn btn--primary"
-                        onClick={() => convert(q.id, q.prospect_name)}
+                        onClick={() => {
+                          setConvertError(null);
+                          setConverting(q);
+                        }}
                       >
                         הכנס כמשקיע חדש
                       </button>
                     </>
                   ) : (
-                    <p className="muted">כבר הומר למשקיע #{q.converted_investor_id}</p>
+                    <p className="muted">
+                      כבר במערכת כמשקיע #{q.converted_investor_id}{" "}
+                      <Link to="/investors">למסך משקיעים</Link>
+                    </p>
                   )}
                 </div>
               </article>
@@ -422,6 +537,79 @@ export function QuotesPage() {
           })
         )}
       </div>
+
+      {converting ? (
+        <div className="modal" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="modal__backdrop"
+            aria-label="סגירה"
+            onClick={() => setConverting(null)}
+          />
+          <div className="modal__sheet request-sheet">
+            <header className="modal__head">
+              <div>
+                <p className="contract-kicker">קליטת משקיע</p>
+                <h2>{converting.prospect_name}</h2>
+              </div>
+              <button type="button" className="modal__close" aria-label="סגירה" onClick={() => setConverting(null)}>
+                ×
+              </button>
+            </header>
+            <form className="request-form" onSubmit={convertQuote}>
+              <p className="request-form__lead">
+                {planTypeLabel(converting.plan_type)} · קרן {formatMoney(converting.principal)} ·{" "}
+                {converting.duration_months} חודשים. ייפתח משקיע חדש עם מסלול פעיל לפי ההצעה.
+              </p>
+              {convertError ? <p className="form-error">{convertError}</p> : null}
+              <label>
+                תחילת המסלול
+                <input
+                  name="start_date"
+                  type="date"
+                  dir="ltr"
+                  required
+                  defaultValue={converting.start_date ?? todayISO()}
+                />
+              </label>
+              <label>
+                שם משתמש לכניסה (אנגלית)
+                <input
+                  name="username"
+                  required
+                  minLength={2}
+                  maxLength={64}
+                  dir="ltr"
+                  autoComplete="off"
+                  pattern="[A-Za-z0-9._\\-]{2,64}"
+                  title="אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון"
+                  defaultValue={
+                    converting.access_username ||
+                    suggestUsername(converting.prospect_name, converting.phone)
+                  }
+                />
+              </label>
+              <PasswordField
+                name="password"
+                label="סיסמה"
+                required
+                minLength={8}
+                dir="ltr"
+                autoComplete="new-password"
+                defaultValue={converting.access_password || draftPassword}
+              />
+              <div className="request-form__actions">
+                <button type="button" className="btn btn--ghost" onClick={() => setConverting(null)} disabled={busy}>
+                  ביטול
+                </button>
+                <button type="submit" className="btn btn--primary" disabled={busy}>
+                  {busy ? "מוסיף..." : "הוספה למשקיעים"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

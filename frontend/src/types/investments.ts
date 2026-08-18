@@ -111,6 +111,9 @@ export type Quote = {
   id: number;
   prospect_name: string;
   phone?: string | null;
+  access_username?: string | null;
+  access_password?: string | null;
+  start_date?: string | null;
   principal: number;
   plan_type: PlanType | string;
   monthly_rate_percent: number;

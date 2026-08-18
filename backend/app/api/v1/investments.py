@@ -1103,6 +1103,16 @@ def list_quotes(
     return [svc.serialize_quote(q) for q in quotes]
 
 
+def _quote_access_username(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return auth_svc.validate_username(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
 def create_quote(
     payload: QuoteCreate,
@@ -1119,6 +1129,8 @@ def create_quote(
     data["monthly_rate_percent"] = monthly_rate
     data["savings_rate_percent"] = savings_rate
     data["phone"] = (data.get("phone") or "").strip() or None
+    data["access_username"] = _quote_access_username(data.get("access_username"))
+    data["access_password"] = (data.get("access_password") or "").strip() or None
     quote = Quote(**data)
     db.add(quote)
     db.commit()
@@ -1137,7 +1149,9 @@ def update_quote(
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     for key, value in payload.model_dump(exclude_unset=True).items():
-        if key == "phone":
+        if key == "access_username":
+            value = _quote_access_username(value if isinstance(value, str) else None)
+        elif key in {"phone", "access_password"}:
             value = (value or "").strip() or None
         setattr(quote, key, value)
     kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
@@ -1181,9 +1195,27 @@ def convert_quote(
 ):
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
-        raise HTTPException(status_code=404, detail="Quote not found")
+        raise HTTPException(status_code=404, detail="ההצעה לא נמצאה")
     if quote.status == "converted":
-        raise HTTPException(status_code=400, detail="Quote already converted")
+        raise HTTPException(status_code=400, detail="ההצעה כבר הומרה למשקיע")
+
+    start_date = payload.start_date or quote.start_date
+    if start_date is None:
+        raise HTTPException(status_code=400, detail="יש לבחור תאריך התחלת מסלול")
+    username_raw = (payload.username or quote.access_username or "").strip()
+    password = (payload.password or quote.access_password or "").strip()
+    try:
+        username = auth_svc.validate_username(username_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="הסיסמה חייבת להכיל לפחות 8 תווים")
+    taken = db.query(User).filter(User.username == username).first()
+    if taken:
+        raise HTTPException(
+            status_code=400,
+            detail=f"שם המשתמש {username} כבר תפוס — בחרו שם אחר",
+        )
 
     investor = Investor(
         name=quote.prospect_name,
@@ -1200,25 +1232,38 @@ def convert_quote(
         monthly_rate_percent=quote.monthly_rate_percent,
         savings_rate_percent=getattr(quote, "savings_rate_percent", 0.0) or 0.0,
         manager_fee_percent=quote.manager_fee_percent,
-        start_date=payload.start_date,
+        start_date=start_date,
         duration_months=quote.duration_months,
         notes=quote.notes,
         status="active",
     )
     db.add(plan)
+    db.flush()
     quote.status = "converted"
     quote.converted_investor_id = investor.id
-    auth_svc.ensure_user_for_investor(
-        db,
-        investor,
-        username=payload.username,
-        email=payload.email,
-        password=payload.password,
-    )
-    db.commit()
-    db.refresh(plan)
+    quote.start_date = start_date
+    quote.access_username = username
+    quote.access_password = password
+    try:
+        auth_svc.ensure_user_for_investor(
+            db,
+            investor,
+            username=username,
+            email=payload.email,
+            password=password,
+        )
+        svc.generate_payment_schedule(db, plan, commit=False)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="לא ניתן להוסיף את המשקיע — בדקו שם משתמש, סיסמה ותאריך התחלה",
+        ) from exc
 
-    svc.generate_payment_schedule(db, plan)
     plan = (
         db.query(InvestmentPlan)
         .options(joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments))

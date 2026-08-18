@@ -15,6 +15,55 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function formatQuoteDate(value?: string | null): string {
+  if (!value) return "";
+  const parsed = new Date(`${value.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("he-IL", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function accessSectionHtml(quote: Quote): string {
+  const start = quote.start_date ? formatQuoteDate(quote.start_date) : "";
+  if (!quote.access_username && !quote.access_password && !start) return "";
+  return `
+    <section class="pdf-access">
+      <div class="pdf-section-title">
+        <h2>כניסה למערכת תזרים</h2>
+        <p>פרטי הגישה נשלחים יחד עם ההצעה — אפשר להתחבר מיד אחרי האישור</p>
+      </div>
+      <div class="pdf-access__grid">
+        ${
+          start
+            ? `<div class="pdf-access__item">
+          <span>תחילת מסלול</span>
+          <strong>${escapeHtml(start)}</strong>
+        </div>`
+            : ""
+        }
+        ${
+          quote.access_username
+            ? `<div class="pdf-access__item">
+          <span>שם משתמש</span>
+          <strong class="ltr">${escapeHtml(quote.access_username)}</strong>
+        </div>`
+            : ""
+        }
+        ${
+          quote.access_password
+            ? `<div class="pdf-access__item">
+          <span>סיסמה</span>
+          <strong class="ltr">${escapeHtml(quote.access_password)}</strong>
+        </div>`
+            : ""
+        }
+      </div>
+    </section>`;
+}
+
 function buildQuoteDocumentHtml(quote: Quote): string {
   const rows = buildMonthSchedule(quote);
   const totalProfit = quote.total_investor_payout;
@@ -98,6 +147,8 @@ function buildQuoteDocumentHtml(quote: Quote): string {
         <strong class="pdf-kpi__value">${formatMoney(endBalance)}</strong>
       </div>
     </section>
+
+    ${accessSectionHtml(quote)}
 
     <section class="pdf-table-wrap">
       <div class="pdf-section-title">

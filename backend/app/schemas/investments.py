@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, field_validator, model_serializer
 
 
 PlanStatus = Literal["active", "completed", "paused"]
@@ -212,6 +212,9 @@ class PaymentOut(BaseModel):
 class QuoteCreate(BaseModel):
     prospect_name: str = Field(min_length=1, max_length=120)
     phone: Optional[str] = Field(default=None, max_length=40)
+    access_username: Optional[str] = Field(default=None, max_length=64)
+    access_password: Optional[str] = Field(default=None, max_length=128)
+    start_date: Optional[date] = None
     principal: float = Field(ge=0)
     plan_type: PlanType = "monthly"
     monthly_rate_percent: float = Field(ge=0, default=0)
@@ -224,6 +227,9 @@ class QuoteCreate(BaseModel):
 class QuoteUpdate(BaseModel):
     prospect_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     phone: Optional[str] = Field(default=None, max_length=40)
+    access_username: Optional[str] = Field(default=None, max_length=64)
+    access_password: Optional[str] = Field(default=None, max_length=128)
+    start_date: Optional[date] = None
     principal: Optional[float] = Field(default=None, ge=0)
     plan_type: Optional[PlanType] = None
     monthly_rate_percent: Optional[float] = Field(default=None, ge=0)
@@ -235,18 +241,28 @@ class QuoteUpdate(BaseModel):
 
 
 class QuoteConvert(BaseModel):
-    start_date: date
+    start_date: Optional[date] = None
     phone: Optional[str] = None
     notes: Optional[str] = None
-    username: str = Field(min_length=2, max_length=64)
-    password: str = Field(min_length=8, max_length=128)
+    username: Optional[str] = Field(default=None, min_length=2, max_length=64)
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     email: Optional[str] = None
+
+    @field_validator("username", "password", "phone", "notes", "email", mode="before")
+    @classmethod
+    def blank_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class QuoteOut(BaseModel):
     id: int
     prospect_name: str
     phone: Optional[str] = None
+    access_username: Optional[str] = None
+    access_password: Optional[str] = None
+    start_date: Optional[date] = None
     principal: float
     plan_type: str = "monthly"
     monthly_rate_percent: float

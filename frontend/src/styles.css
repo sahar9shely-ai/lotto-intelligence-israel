@@ -1734,6 +1734,65 @@ textarea {
   background: rgba(14, 42, 34, 0.06);
 }
 
+.quote-access {
+  margin: 4px 0 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f4faf7, #eef6f2);
+  border: 1px solid #d5e5db;
+}
+
+.quote-access__label {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent-strong);
+}
+
+.quote-access dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.quote-access dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quote-access dt {
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.quote-access dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.quote-access .ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+input[dir="ltr"]:not([type="date"]) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+input[type="date"] {
+  min-height: 46px;
+  font-variant-numeric: tabular-nums;
+  color-scheme: light;
+}
+
 .modal {
   position: fixed;
   inset: 0;

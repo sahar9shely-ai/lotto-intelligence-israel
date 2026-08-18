@@ -478,6 +478,9 @@ export const api = {
   createQuote: (body: {
     prospect_name: string;
     phone?: string;
+    access_username?: string;
+    access_password?: string;
+    start_date?: string;
     principal: number;
     plan_type?: string;
     monthly_rate_percent: number;
@@ -495,6 +498,9 @@ export const api = {
     body: Partial<{
       prospect_name: string;
       phone: string | null;
+      access_username: string | null;
+      access_password: string | null;
+      start_date: string | null;
       principal: number;
       plan_type: string;
       monthly_rate_percent: number;
@@ -516,11 +522,11 @@ export const api = {
   convertQuote: (
     id: number,
     body: {
-      start_date: string;
+      start_date?: string;
       phone?: string;
       notes?: string;
-      username: string;
-      password: string;
+      username?: string;
+      password?: string;
       email?: string;
     },
   ) =>
