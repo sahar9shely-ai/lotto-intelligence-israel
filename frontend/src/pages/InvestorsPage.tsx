@@ -202,15 +202,9 @@ export function InvestorsPage() {
     <div className="page">
       <header className="page-intro">
         <div>
-          <p className="page-intro__eyebrow">{isManager ? "ניהול שותפים" : "החשבון שלך"}</p>
           <h1 className="page-intro__title">
-            {isManager ? "משקיעים — מה מגיע לכל אחד" : "מה מגיע לי"}
+            {isManager ? "משקיעים" : "המסלול שלי"}
           </h1>
-          <p className="page-intro__lead">
-            {isManager
-              ? "בחרו משקיע או סה״כ כולם. מזומן וחיסכון תמיד בשורות נפרדות — בלי כפילויות."
-              : "קרן, החזר חודשי וחיסכון — מסודר וברור."}
-          </p>
         </div>
         {isManager ? (
           <div className="page-head__actions">
