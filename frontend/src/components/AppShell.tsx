@@ -147,9 +147,7 @@ export function AppShell() {
               <span className="brand__mark">תזרים</span>
               <span className="brand__tag">
                 {displayName}
-                <span className={isManager ? "role-chip" : "role-chip role-chip--investor"}>
-                  {isManager ? "מנהל" : "משקיע"}
-                </span>
+                {isManager ? <span className="role-chip">מנהל</span> : null}
               </span>
             </div>
             <nav className="nav" aria-label="ניווט ראשי">
