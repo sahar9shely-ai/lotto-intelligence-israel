@@ -271,13 +271,7 @@ export function TopupRequestsPanel({
 
       {showInvestorCta ? (
         <div className="topup-cta-bar">
-          <div>
-            <strong>רוצה להוסיף להשקעה?</strong>
-            <span>
-              שולח בקשה עם הסכום. אחרי אישור נוסף לך מסלול חדש, עם אפשרות ביטול עד 3 ימי
-              עסקים.
-            </span>
-          </div>
+          <strong>רוצה להוסיף להשקעה?</strong>
           <button type="button" className="btn btn--primary" onClick={() => setShowCreate(true)}>
             בקשת תוספת להשקעה
           </button>
