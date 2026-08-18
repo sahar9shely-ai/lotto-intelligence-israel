@@ -10,6 +10,7 @@ from app.services import investment_service as inv_svc
 from app.services.investment_service import (
     add_israel_business_days,
     cooling_off_deadline_utc,
+    israel_business_days_remaining,
     is_israel_business_day,
 )
 
@@ -225,3 +226,8 @@ def test_cooling_off_deadline_is_three_business_days():
     deadline = cooling_off_deadline_utc(approved)
     # End of Tuesday 18 Aug 2026 Israel time → UTC same calendar day evening.
     assert deadline.date() == date(2026, 8, 18)
+    assert israel_business_days_remaining(deadline, now=approved) == 3
+    last_day = datetime(2026, 8, 18, 8, 0, tzinfo=timezone.utc)
+    assert israel_business_days_remaining(deadline, now=last_day) == 1
+    too_late = datetime(2026, 8, 19, 0, 0, tzinfo=timezone.utc)
+    assert israel_business_days_remaining(deadline, now=too_late) == 0

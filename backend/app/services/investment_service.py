@@ -75,17 +75,25 @@ def cooling_off_deadline_utc(approved_at: datetime, *, business_days: int = TOPU
 
 
 def israel_business_days_remaining(until: datetime, *, now: Optional[datetime] = None) -> int:
-    now_local = _as_utc(now or datetime.now(timezone.utc)).astimezone(ISRAEL_TZ).date()
-    end_local = _as_utc(until).astimezone(ISRAEL_TZ).date()
-    if now_local > end_local:
+    """Business days left in the cooling-off window.
+
+    Counts days *after today* through the deadline, so approval day shows 3
+    (the promised window) rather than 4. On the last business day returns 1
+    while the window is still open.
+    """
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
+    until_utc = _as_utc(until)
+    if now_utc > until_utc:
         return 0
+    now_local = now_utc.astimezone(ISRAEL_TZ).date()
+    end_local = until_utc.astimezone(ISRAEL_TZ).date()
     remaining = 0
-    day = now_local
+    day = now_local + timedelta(days=1)
     while day <= end_local:
         if is_israel_business_day(day):
             remaining += 1
         day += timedelta(days=1)
-    return remaining
+    return remaining if remaining > 0 else 1
 
 
 def redact_manager_fees(payload: dict) -> dict:
@@ -718,13 +726,14 @@ def _cooling_off_fields(plan: InvestmentPlan, *, now: Optional[datetime] = None)
             "cooling_off_days_left": 0,
             "can_cancel_investment": False,
         }
-    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
-    active = plan.status == "active" and now <= request.cancel_until
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
+    until_utc = _as_utc(request.cancel_until)
+    active = plan.status == "active" and now_utc <= until_utc
     return {
         "source_request_id": request.id,
         "cooling_off_until": request.cancel_until,
-        "cooling_off_days_left": israel_business_days_remaining(request.cancel_until, now=now)
-        if now <= request.cancel_until
+        "cooling_off_days_left": israel_business_days_remaining(request.cancel_until, now=now_utc)
+        if active
         else 0,
         "can_cancel_investment": active,
     }
@@ -2161,18 +2170,18 @@ def serialize_topup_request(
     hide_fees: bool = True,
     now: Optional[datetime] = None,
 ) -> dict:
-    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
     plan = request.created_plan
     cancel_until = request.cancel_until
     within_cooling = (
         request.status == "approved"
         and cancel_until is not None
-        and now <= cancel_until
+        and now_utc <= _as_utc(cancel_until)
         and plan is not None
         and plan.status == "active"
     )
     days_left = (
-        israel_business_days_remaining(cancel_until, now=now)
+        israel_business_days_remaining(cancel_until, now=now_utc)
         if within_cooling and cancel_until is not None
         else 0
     )
@@ -2377,10 +2386,10 @@ def reverse_topup_investment(
     notes: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> InvestmentTopupRequest:
-    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
     if request.status != "approved":
         raise ValueError("אפשר לבטל השקעה רק אחרי אישור, ובתוך 3 ימי עסקים")
-    if not request.cancel_until or now > request.cancel_until:
+    if not request.cancel_until or now_utc > _as_utc(request.cancel_until):
         raise ValueError("חלון הביטול של 3 ימי עסקים הסתיים")
     plan = request.created_plan
     if plan is None and request.created_plan_id:

@@ -236,11 +236,14 @@ export function InvestorsPage() {
       <TopupRequestsPanel
         isManager={isManager}
         investorId={effectiveScope === "all" ? null : selected?.id ?? null}
-        investorName={selected?.name}
         settings={settings}
         requests={topupRequests ?? []}
         onChanged={refreshAll}
         onMessage={setMessage}
+        onFocusInvestor={(id) => {
+          setScope(id);
+          setTrackView("active");
+        }}
       />
 
       <div className="scope-bar" role="tablist" aria-label="בחירת משקיע">

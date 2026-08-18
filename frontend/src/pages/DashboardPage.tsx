@@ -83,9 +83,11 @@ export function DashboardPage() {
         <Panel
           title={isManager ? "בקשות תוספת" : "תוספת להשקעה"}
           subtitle={
-            isManager
-              ? "יש בקשות ממתינות לאישור כמסלול חדש"
-              : "עקוב אחרי הבקשה, בטל אותה, או בטל השקעה שאושרה בתוך 3 ימי עסקים"
+            (topupRequests ?? []).some((r) => r.status === "pending")
+              ? isManager
+                ? "יש בקשות ממתינות לאישור כמסלול חדש"
+                : "הבקשה ממתינה לאישור — אפשר לבטל אותה כל עוד לא אושרה"
+              : "יש השקעה בחלון ביטול של 3 ימי עסקים"
           }
           action={
             <Link className="btn btn--small btn--primary" to="/investors">

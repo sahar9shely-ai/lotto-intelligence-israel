@@ -2,13 +2,13 @@ import { FormEvent, useMemo, useState, type ReactNode } from "react";
 import { PlanTrackFields } from "./PlanTrackFields";
 import { api } from "../services/api";
 import type { Settings, TopupRequest } from "../types/investments";
-import { formatDate, formatMoney, statusLabel, yearStartISO } from "../utils/format";
+import { formatDate, formatMoney, statusLabel, todayISO } from "../utils/format";
 
 function coolingCopy(req: TopupRequest): string {
   const until = req.cancel_until ? formatDate(req.cancel_until) : "";
   const days = req.cooling_off_days_left;
   if (!req.can_reverse_investment) return "";
-  if (days <= 1) return `ניתן לבטל עד ${until} · נשאר יום עסקים אחד`;
+  if (days <= 1) return `ניתן לבטל עד ${until} · עד סוף יום העסקים`;
   return `ניתן לבטל עד ${until} · נשארו ${days} ימי עסקים`;
 }
 
@@ -40,23 +40,24 @@ function RequestModal({
 export function TopupRequestsPanel({
   isManager,
   investorId,
-  investorName,
   settings,
   requests,
   onChanged,
   onMessage,
+  onFocusInvestor,
 }: {
   isManager: boolean;
   investorId?: number | null;
-  investorName?: string;
   settings: Settings | null;
   requests: TopupRequest[];
   onChanged: () => void;
   onMessage: (text: string) => void;
+  onFocusInvestor?: (investorId: number) => void;
 }) {
   const [showCreate, setShowCreate] = useState(false);
   const [approveTarget, setApproveTarget] = useState<TopupRequest | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const visible = useMemo(() => {
     if (investorId == null) return requests;
@@ -64,7 +65,10 @@ export function TopupRequestsPanel({
   }, [requests, investorId]);
 
   const pending = visible.filter((r) => r.status === "pending");
-  const others = visible.filter((r) => r.status !== "pending");
+  const cooling = visible.filter((r) => r.can_reverse_investment);
+  const history = visible
+    .filter((r) => r.status !== "pending" && !r.can_reverse_investment)
+    .slice(0, investorId == null ? 4 : 6);
   const hasPendingForInvestor =
     investorId != null && pending.some((r) => r.investor_id === investorId);
 
@@ -73,18 +77,22 @@ export function TopupRequestsPanel({
     const fd = new FormData(e.currentTarget);
     const amount = Number(fd.get("amount") || 0);
     const notes = String(fd.get("notes") || "").trim();
-    const created = await api.createTopupRequest({
-      amount,
-      notes: notes || undefined,
-      investor_id: isManager && investorId != null ? investorId : undefined,
-    });
-    setShowCreate(false);
-    onMessage(
-      isManager
-        ? `נפתחה בקשת תוספת ל-${created.investor_name}`
-        : "הבקשה נשלחה. תוכל לעקוב אחרי הסטטוס כאן, ולבטל כל עוד לא אושרה.",
-    );
-    onChanged();
+    setFormError(null);
+    setBusyId(-1);
+    try {
+      const created = await api.createTopupRequest({
+        amount,
+        notes: notes || undefined,
+      });
+      setShowCreate(false);
+      onMessage("הבקשה נשלחה. אפשר לבטל אותה כל עוד היא ממתינה לאישור.");
+      onChanged();
+      if (created.investor_id) onFocusInvestor?.(created.investor_id);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "שליחת הבקשה נכשלה");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function cancelRequest(req: TopupRequest) {
@@ -102,10 +110,12 @@ export function TopupRequestsPanel({
   }
 
   async function rejectRequest(req: TopupRequest) {
-    const reason = window.prompt("סיבת הדחייה (אופציונלי, תוצג למשקיע):", "") ?? "";
+    if (!window.confirm(`לדחות את הבקשה של ${req.investor_name} על סך ${formatMoney(req.amount)}?`)) {
+      return;
+    }
     setBusyId(req.id);
     try {
-      await api.rejectTopupRequest(req.id, reason.trim() || undefined);
+      await api.rejectTopupRequest(req.id);
       onMessage(`הבקשה של ${req.investor_name} נדחתה`);
       onChanged();
     } catch (err) {
@@ -118,7 +128,7 @@ export function TopupRequestsPanel({
   async function reverseRequest(req: TopupRequest) {
     if (
       !window.confirm(
-        `לבטל את ההשקעה החדשה של ${req.investor_name}?\nהמסלול ייסגר. הביטול אפשרי רק עד תום 3 ימי עסקים.`,
+        `לבטל את ההשקעה החדשה${isManager ? ` של ${req.investor_name}` : ""}?\nהמסלול ייסגר. הביטול אפשרי רק עד תום 3 ימי עסקים.`,
       )
     ) {
       return;
@@ -139,6 +149,7 @@ export function TopupRequestsPanel({
     e.preventDefault();
     if (!approveTarget) return;
     const fd = new FormData(e.currentTarget);
+    setFormError(null);
     setBusyId(approveTarget.id);
     try {
       const approved = await api.approveTopupRequest(approveTarget.id, {
@@ -147,7 +158,7 @@ export function TopupRequestsPanel({
         monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
         savings_rate_percent: Number(fd.get("savings_rate_percent") || 0),
         manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
-        start_date: String(fd.get("start_date") || yearStartISO()),
+        start_date: String(fd.get("start_date") || todayISO()),
         duration_months: Number(fd.get("duration_months") || 12),
         notes: String(fd.get("notes") || "").trim() || undefined,
         generate_schedule: true,
@@ -157,14 +168,27 @@ export function TopupRequestsPanel({
         `אושר מסלול חדש ל-${approved.investor_name} · קרן ${formatMoney(approved.amount)}`,
       );
       onChanged();
+      onFocusInvestor?.(approved.investor_id);
     } catch (err) {
-      onMessage(err instanceof Error ? err.message : "אישור הבקשה נכשל");
+      setFormError(err instanceof Error ? err.message : "אישור הבקשה נכשל");
     } finally {
       setBusyId(null);
     }
   }
 
-  const showCreateButton = !isManager || investorId != null;
+  const showInvestorCta = !isManager && !hasPendingForInvestor;
+  const showHistory = investorId != null && history.length > 0;
+
+  if (
+    pending.length === 0 &&
+    !showInvestorCta &&
+    cooling.length === 0 &&
+    !showHistory &&
+    !showCreate &&
+    !approveTarget
+  ) {
+    return null;
+  }
 
   return (
     <div className="topup-flow">
@@ -177,22 +201,26 @@ export function TopupRequestsPanel({
               </h2>
               <p className="panel__subtitle">
                 {isManager
-                  ? "אשר כמסלול חדש ובחר את האחוזים. עמלת הניהול לא מוצגת למשקיע."
-                  : "אפשר לבטל את הבקשה כל עוד היא לא אושרה."}
+                  ? "אשר כמסלול חדש ובחר את האחוזים שהמשקיע מקבל. עמלת הניהול נשארת אצלך בלבד."
+                  : "הבקשה אצל המנהל. אפשר לבטל אותה כל עוד היא לא אושרה."}
               </p>
             </div>
-            {showCreateButton && !hasPendingForInvestor ? (
-              <button type="button" className="btn btn--primary" onClick={() => setShowCreate(true)}>
-                בקשת תוספת
-              </button>
-            ) : null}
           </header>
           <ul className="list">
             {pending.map((req) => (
               <li key={req.id} className="list__row topup-row">
                 <div>
                   <strong>
-                    {isManager ? `${req.investor_name} · ` : ""}
+                    {isManager ? (
+                      <button
+                        type="button"
+                        className="text-link topup-row__name"
+                        onClick={() => onFocusInvestor?.(req.investor_id)}
+                      >
+                        {req.investor_name}
+                      </button>
+                    ) : null}
+                    {isManager ? " · " : ""}
                     {formatMoney(req.amount)}
                   </strong>
                   <span className="muted">
@@ -201,14 +229,17 @@ export function TopupRequestsPanel({
                   </span>
                 </div>
                 <div className="page-head__actions">
-                  <span className="badge badge--scheduled">{statusLabel(req.status)}</span>
+                  <span className="badge badge--pending">{statusLabel(req.status)}</span>
                   {isManager ? (
                     <>
                       <button
                         type="button"
                         className="btn btn--small btn--primary"
                         disabled={busyId === req.id}
-                        onClick={() => setApproveTarget(req)}
+                        onClick={() => {
+                          setFormError(null);
+                          setApproveTarget(req);
+                        }}
                       >
                         אשר כמסלול
                       </button>
@@ -221,8 +252,7 @@ export function TopupRequestsPanel({
                         דחה
                       </button>
                     </>
-                  ) : null}
-                  {req.can_cancel_request ? (
+                  ) : req.can_cancel_request ? (
                     <button
                       type="button"
                       className="btn btn--small btn--ghost"
@@ -237,92 +267,105 @@ export function TopupRequestsPanel({
             ))}
           </ul>
         </section>
-      ) : (
-        <section className="panel topup-cta">
-          <header className="panel__head">
-            <div>
-              <h2 className="panel__title">תוספת להשקעה</h2>
-              <p className="panel__subtitle">
-                {isManager
-                  ? investorId
-                    ? `פתח בקשה עבור ${investorName || "המשקיע"} או אשר בקשות שמגיעות מהמשקיע.`
-                    : "כשמשקיע פותח בקשה היא תופיע כאן לאישור כמסלול חדש."
-                  : "בקש להוסיף סכום. אחרי אישור יתווסף לך מסלול חדש, עם אפשרות ביטול עד 3 ימי עסקים."}
-              </p>
-            </div>
-            {showCreateButton ? (
-              <button type="button" className="btn btn--primary" onClick={() => setShowCreate(true)}>
-                {isManager ? "פתח בקשה" : "בקשת תוספת להשקעה"}
-              </button>
-            ) : null}
-          </header>
-        </section>
-      )}
+      ) : null}
 
-      {others.length > 0 ? (
+      {showInvestorCta ? (
+        <div className="topup-cta-bar">
+          <div>
+            <strong>רוצה להוסיף להשקעה?</strong>
+            <span>
+              שולח בקשה עם הסכום. אחרי אישור נוסף לך מסלול חדש, עם אפשרות ביטול עד 3 ימי
+              עסקים.
+            </span>
+          </div>
+          <button type="button" className="btn btn--primary" onClick={() => setShowCreate(true)}>
+            בקשת תוספת להשקעה
+          </button>
+        </div>
+      ) : null}
+
+      {cooling.length > 0 ? (
         <div className="topup-history">
-          {others.slice(0, 8).map((req) => (
-            <article key={req.id} className={`topup-card topup-card--${req.status}`}>
+          {cooling.map((req) => (
+            <article key={req.id} className="topup-card topup-card--approved">
               <div>
                 <p className="topup-card__kicker">
-                  {isManager ? req.investor_name : "בקשת תוספת"}
+                  {isManager ? req.investor_name : "השקעה חדשה"}
+                  {req.created_plan_id ? ` · מסלול #${req.created_plan_id}` : ""}
                 </p>
                 <h3>{formatMoney(req.amount)}</h3>
-                <p className="muted">
-                  {formatDate(req.created_at)}
-                  {req.created_plan_id ? ` · מסלול #${req.created_plan_id}` : ""}
-                  {req.notes ? ` · ${req.notes}` : ""}
-                </p>
-                {req.status === "approved" && req.can_reverse_investment ? (
-                  <p className="topup-card__cooling">{coolingCopy(req)}</p>
-                ) : null}
-                {req.status === "rejected" && req.review_notes ? (
-                  <p className="muted">{req.review_notes}</p>
-                ) : null}
+                <p className="topup-card__cooling">{coolingCopy(req)}</p>
               </div>
               <div className="topup-card__aside">
-                <span className={`badge badge--${req.status}`}>{statusLabel(req.status)}</span>
-                {req.can_reverse_investment ? (
-                  <button
-                    type="button"
-                    className="btn btn--small btn--ghost btn--danger"
-                    disabled={busyId === req.id}
-                    onClick={() => reverseRequest(req)}
-                  >
-                    בטל השקעה
-                  </button>
-                ) : null}
+                <span className="badge badge--approved">אושרה</span>
+                <button
+                  type="button"
+                  className="btn btn--small btn--ghost btn--danger"
+                  disabled={busyId === req.id}
+                  onClick={() => reverseRequest(req)}
+                >
+                  בטל השקעה
+                </button>
               </div>
             </article>
           ))}
         </div>
       ) : null}
 
+      {showHistory ? (
+        <div className="topup-history topup-history--past">
+          {history.map((req) => (
+            <article key={req.id} className={`topup-card topup-card--${req.status}`}>
+              <div>
+                <p className="topup-card__kicker">
+                  {isManager ? req.investor_name : "בקשת תוספת"}
+                  {req.created_plan_id ? ` · מסלול #${req.created_plan_id}` : ""}
+                </p>
+                <h3>{formatMoney(req.amount)}</h3>
+                <p className="muted">
+                  {formatDate(req.created_at)}
+                  {req.notes ? ` · ${req.notes}` : ""}
+                </p>
+                {req.status === "rejected" && req.review_notes ? (
+                  <p className="muted">{req.review_notes}</p>
+                ) : null}
+              </div>
+              <span className={`badge badge--${req.status}`}>{statusLabel(req.status)}</span>
+            </article>
+          ))}
+        </div>
+      ) : null}
+
       {showCreate ? (
-        <RequestModal
-          title={
-            isManager && investorName
-              ? `בקשת תוספת ל-${investorName}`
-              : "בקשת תוספת להשקעה"
-          }
-          onClose={() => setShowCreate(false)}
-        >
+        <RequestModal title="בקשת תוספת להשקעה" onClose={() => setShowCreate(false)}>
           <form className="form" onSubmit={createRequest}>
             <p className="hint">
-              {isManager
-                ? "הבקשה תופיע בתור לאישור. באישור תגדיר מסלול ואחוזים."
-                : "כתוב את הסכום שברצונך להוסיף. אחרי האישור יתווסף מסלול חדש — אפשר לבטל אותו עד 3 ימי עסקים."}
+              כתוב את הסכום שברצונך להוסיף. אחרי האישור יתווסף מסלול חדש — אפשר לבטל אותו עד 3
+              ימי עסקים.
             </p>
+            {formError ? <p className="form-error">{formError}</p> : null}
             <label>
               סכום להוספה (₪)
-              <input name="amount" type="number" min="1" step="0.01" required placeholder="לדוגמה 20000" />
+              <input
+                name="amount"
+                type="number"
+                min="1"
+                step="0.01"
+                required
+                placeholder="לדוגמה 20000"
+                autoFocus
+              />
             </label>
             <label>
               הערה למנהל
-              <textarea name="notes" rows={3} placeholder="אופציונלי — מטרה, תזמון, או כל פרט שחשוב" />
+              <textarea
+                name="notes"
+                rows={3}
+                placeholder="אופציונלי — מטרה, תזמון, או כל פרט שחשוב"
+              />
             </label>
-            <button type="submit" className="btn btn--primary">
-              שלח בקשה
+            <button type="submit" className="btn btn--primary" disabled={busyId === -1}>
+              {busyId === -1 ? "שולח..." : "שלח בקשה"}
             </button>
           </form>
         </RequestModal>
@@ -337,6 +380,7 @@ export function TopupRequestsPanel({
             <p className="hint">
               בחר את האחוזים שהמשקיע מקבל. עמלת הניהול נשמרת אצלך בלבד ולא מוצגת לו.
             </p>
+            {formError ? <p className="form-error">{formError}</p> : null}
             <div className="form__grid">
               <label>
                 קרן במסלול החדש (₪)
@@ -370,8 +414,9 @@ export function TopupRequestsPanel({
                 </span>
               </label>
               <label>
-                תאריך התחלה
-                <input name="start_date" type="date" defaultValue={yearStartISO()} required />
+                תאריך התחלת המסלול
+                <input name="start_date" type="date" defaultValue={todayISO()} required />
+                <span className="muted rate-field__hint">ברירת מחדל: היום — לא תחילת השנה</span>
               </label>
               <label>
                 משך (חודשים)
@@ -396,7 +441,7 @@ export function TopupRequestsPanel({
               className="btn btn--primary"
               disabled={busyId === approveTarget.id}
             >
-              אשר והוסף מסלול
+              {busyId === approveTarget.id ? "מאשר..." : "אשר והוסף מסלול"}
             </button>
           </form>
         </RequestModal>
@@ -452,7 +497,9 @@ export function PlanCoolingOffBanner({
         <strong>חלון ביטול פתוח</strong>
         <span>
           {until ? `עד ${formatDate(until)}` : "עד 3 ימי עסקים"}
-          {days > 0 ? ` · ${days === 1 ? "נשאר יום עסקים אחד" : `נשארו ${days} ימי עסקים`}` : ""}
+          {days <= 1
+            ? " · עד סוף יום העסקים"
+            : ` · נשארו ${days} ימי עסקים`}
         </span>
       </div>
       <button
