@@ -229,6 +229,8 @@ a {
   margin: 0;
   font-family: var(--font-display);
   font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .modal__close {
@@ -339,11 +341,6 @@ a {
   justify-content: flex-end;
   gap: 8px;
   padding-top: 4px;
-}
-  font-family: var(--font-display);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin: 0;
 }
 
 .page-head h1 {
