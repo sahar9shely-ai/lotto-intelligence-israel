@@ -34,7 +34,7 @@ export type Plan = {
   plan_type: PlanType | string;
   monthly_rate_percent: number;
   savings_rate_percent: number;
-  manager_fee_percent: number;
+  manager_fee_percent?: number;
   start_date: string;
   track_end_date?: string | null;
   duration_months: number;
@@ -42,29 +42,33 @@ export type Plan = {
   notes?: string | null;
   created_at: string;
   monthly_investor_payout: number;
-  monthly_manager_fee: number;
+  monthly_manager_fee?: number;
   monthly_savings_accrual: number;
   projected_savings_balance: number;
   current_savings_balance?: number;
   accrued_savings_balance?: number;
   savings_redeemed_total?: number;
   successor_plan_id?: number | null;
+  source_request_id?: number | null;
+  cooling_off_until?: string | null;
+  cooling_off_days_left?: number;
+  can_cancel_investment?: boolean;
   total_cash_payout: number;
   total_investor_payout: number;
-  total_manager_fee: number;
+  total_manager_fee?: number;
   annual_investor_payout: number;
   months_elapsed: number;
   months_remaining: number;
   paid_count: number;
   paid_investor_total: number;
-  paid_manager_total: number;
+  paid_manager_total?: number;
 };
 
 export type PlanStatusMonth = {
   month_number: number;
   due_date: string;
   cash_amount: number;
-  manager_amount: number;
+  manager_amount?: number;
   savings_accrual: number;
   cumulative_cash: number;
   cumulative_savings: number;
@@ -238,4 +242,36 @@ export type ManagerIncomeBoard = {
     plans: ManagerOwnPlan[];
   };
   monthly_grand_total: number;
+};
+
+export type TopupRequestStatus =
+  | "pending"
+  | "cancelled"
+  | "rejected"
+  | "approved"
+  | "reversed";
+
+export type TopupRequest = {
+  id: number;
+  investor_id: number;
+  investor_name: string;
+  amount: number;
+  notes?: string | null;
+  status: TopupRequestStatus | string;
+  created_at: string;
+  reviewed_at?: string | null;
+  review_notes?: string | null;
+  created_plan_id?: number | null;
+  approved_at?: string | null;
+  cancel_until?: string | null;
+  reversed_at?: string | null;
+  can_cancel_request: boolean;
+  can_reverse_investment: boolean;
+  cooling_off_days_left: number;
+  cooling_off_business_days: number;
+  plan?: Plan | null;
+  manager_fee_percent?: number;
+  monthly_rate_percent?: number;
+  savings_rate_percent?: number;
+  plan_type?: string;
 };

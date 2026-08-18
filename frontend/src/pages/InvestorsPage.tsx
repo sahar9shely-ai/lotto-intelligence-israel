@@ -5,6 +5,7 @@ import { PasswordField } from "../components/PasswordField";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { PlanTrackFields } from "../components/PlanTrackFields";
 import { SavingsActions } from "../components/SavingsActions";
+import { PlanCoolingOffBanner, TopupRequestsPanel } from "../components/TopupRequestsPanel";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -37,6 +38,10 @@ export function InvestorsPage() {
     [isManager],
   );
   const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
+  const { data: topupRequests, reload: reloadTopups } = useAsync(
+    () => api.topupRequests(),
+    [],
+  );
   const [scope, setScope] = useState<Scope | null>(null);
   const [trackView, setTrackView] = useState<TrackView>("active");
   const [editingPlanId, setEditingPlanId] = useState<number | null>(null);
@@ -45,6 +50,12 @@ export function InvestorsPage() {
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
+
+  const refreshAll = useCallback(() => {
+    reload();
+    reloadPlans();
+    reloadTopups();
+  }, [reload, reloadPlans, reloadTopups]);
 
   const effectiveScope: Scope = useMemo(() => {
     if (scope != null) return scope;
@@ -126,8 +137,7 @@ export function InvestorsPage() {
     });
     setShowNewPlan(false);
     setMessage(`מסלול ל-${plan.investor_name} נוצר עם לוח תשלומים`);
-    reload();
-    reloadPlans();
+    refreshAll();
   }
 
   async function onUpdatePlan(
@@ -153,8 +163,7 @@ export function InvestorsPage() {
     await api.updatePlan(plan.id, body);
     setEditingPlanId(null);
     setMessage("המסלול עודכן — מזומן וחיסכון סונכרנו בנפרד");
-    reload();
-    reloadPlans();
+    refreshAll();
   }
 
   async function onDeletePlan(plan: {
@@ -178,8 +187,7 @@ export function InvestorsPage() {
     try {
       await api.deletePlan(plan.id);
       setMessage(`מסלול #${plan.id} נמחק — ${plan.investor_name} לא יופיע בדוח ${year}`);
-      reload();
-      reloadPlans();
+      refreshAll();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "מחיקת המסלול נכשלה");
     }
@@ -224,6 +232,16 @@ export function InvestorsPage() {
       </header>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
+
+      <TopupRequestsPanel
+        isManager={isManager}
+        investorId={effectiveScope === "all" ? null : selected?.id ?? null}
+        investorName={selected?.name}
+        settings={settings}
+        requests={topupRequests ?? []}
+        onChanged={refreshAll}
+        onMessage={setMessage}
+      />
 
       <div className="scope-bar" role="tablist" aria-label="בחירת משקיע">
         {isManager ? (
@@ -457,9 +475,9 @@ export function InvestorsPage() {
                         }
                         onUpdate={onUpdatePlan}
                         onDelete={onDeletePlan}
+                        onMessage={setMessage}
                         onSavingsChanged={() => {
-                          reload();
-                          reloadPlans();
+                          refreshAll();
                           setTrackView("active");
                         }}
                       />
@@ -619,6 +637,7 @@ function PlanCard({
   onUpdate,
   onDelete,
   onSavingsChanged,
+  onMessage,
 }: {
   plan: Plan;
   isManager: boolean;
@@ -637,6 +656,7 @@ function PlanCard({
     paid_count: number;
   }) => Promise<void>;
   onSavingsChanged: () => void;
+  onMessage: (text: string) => void;
 }) {
   const statusLabelHe =
     plan.status === "active" ? "פעיל" : plan.status === "paused" ? "מושהה" : "הסתיים";
@@ -686,8 +706,8 @@ function PlanCard({
         ) : null}
         {isManager ? (
           <div className="money-ledger__item">
-            <span>עמלת ניהול {formatPercent(plan.manager_fee_percent)}</span>
-            <strong>{formatMoney(plan.monthly_manager_fee, true)}</strong>
+            <span>עמלת ניהול {formatPercent(plan.manager_fee_percent ?? 0)}</span>
+            <strong>{formatMoney(plan.monthly_manager_fee ?? 0, true)}</strong>
             <em>נוספת — לא מהמשקיע</em>
           </div>
         ) : null}
@@ -697,6 +717,18 @@ function PlanCard({
           <em>{plan.paid_count} תשלומים</em>
         </div>
       </div>
+
+      {plan.can_cancel_investment && plan.source_request_id ? (
+        <PlanCoolingOffBanner
+          planId={plan.id}
+          requestId={plan.source_request_id}
+          until={plan.cooling_off_until}
+          daysLeft={plan.cooling_off_days_left}
+          canCancel={Boolean(plan.can_cancel_investment)}
+          onChanged={onSavingsChanged}
+          onMessage={onMessage}
+        />
+      ) : null}
 
       <SavingsActions
         plan={plan}
@@ -731,7 +763,7 @@ function PlanCard({
                 type="number"
                 min="0"
                 step="0.01"
-                defaultValue={plan.manager_fee_percent}
+                defaultValue={plan.manager_fee_percent ?? 0}
               />
             </label>
             <label>

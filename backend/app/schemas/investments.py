@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 
 PlanStatus = Literal["active", "completed", "paused"]
@@ -91,7 +91,7 @@ class PlanOut(BaseModel):
     plan_type: str = "monthly"
     monthly_rate_percent: float
     savings_rate_percent: float = 0.0
-    manager_fee_percent: float
+    manager_fee_percent: Optional[float] = None
     start_date: date
     track_end_date: Optional[date] = None
     duration_months: int
@@ -99,7 +99,7 @@ class PlanOut(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
     monthly_investor_payout: float
-    monthly_manager_fee: float
+    monthly_manager_fee: Optional[float] = None
     monthly_savings_accrual: float = 0.0
     projected_savings_balance: float = 0.0
     current_savings_balance: float = 0.0
@@ -107,17 +107,34 @@ class PlanOut(BaseModel):
     savings_redeemed_total: float = 0.0
     accrual_principal: float = 0.0
     successor_plan_id: Optional[int] = None
+    source_request_id: Optional[int] = None
+    cooling_off_until: Optional[datetime] = None
+    cooling_off_days_left: int = 0
+    can_cancel_investment: bool = False
     total_cash_payout: float = 0.0
     total_investor_payout: float
-    total_manager_fee: float
+    total_manager_fee: Optional[float] = None
     annual_investor_payout: float
     months_elapsed: int
     months_remaining: int
     paid_count: int
     paid_investor_total: float
-    paid_manager_total: float
+    paid_manager_total: Optional[float] = None
 
     model_config = {"from_attributes": True}
+
+    @model_serializer(mode="wrap")
+    def _omit_hidden_fees(self, serializer):
+        data = serializer(self)
+        if data.get("manager_fee_percent") is None:
+            for key in (
+                "manager_fee_percent",
+                "monthly_manager_fee",
+                "total_manager_fee",
+                "paid_manager_total",
+            ):
+                data.pop(key, None)
+        return data
 
 
 class SavingsActionRequest(BaseModel):
@@ -334,3 +351,65 @@ class PaymentReportOut(BaseModel):
     available_years: list[int]
     yearly: PaymentTotalsOut
     lifetime: PaymentTotalsOut
+
+
+class TopupRequestCreate(BaseModel):
+    amount: float = Field(gt=0)
+    notes: Optional[str] = Field(default=None, max_length=500)
+    investor_id: Optional[int] = None
+
+
+class TopupRequestDecision(BaseModel):
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class TopupRequestApprove(BaseModel):
+    principal: Optional[float] = Field(default=None, gt=0)
+    plan_type: PlanType = "monthly"
+    monthly_rate_percent: float = Field(ge=0, default=0)
+    savings_rate_percent: float = Field(ge=0, default=0)
+    manager_fee_percent: float = Field(ge=0)
+    start_date: date
+    duration_months: int = Field(ge=1, le=120, default=12)
+    notes: Optional[str] = Field(default=None, max_length=500)
+    generate_schedule: bool = True
+
+
+class TopupRequestOut(BaseModel):
+    id: int
+    investor_id: int
+    investor_name: str
+    amount: float
+    notes: Optional[str] = None
+    status: str
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None
+    review_notes: Optional[str] = None
+    created_plan_id: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    cancel_until: Optional[datetime] = None
+    reversed_at: Optional[datetime] = None
+    can_cancel_request: bool = False
+    can_reverse_investment: bool = False
+    cooling_off_days_left: int = 0
+    cooling_off_business_days: int = 3
+    plan: Optional[PlanOut] = None
+    manager_fee_percent: Optional[float] = None
+    monthly_rate_percent: Optional[float] = None
+    savings_rate_percent: Optional[float] = None
+    plan_type: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+    @model_serializer(mode="wrap")
+    def _omit_manager_only(self, serializer):
+        data = serializer(self)
+        for key in (
+            "manager_fee_percent",
+            "monthly_rate_percent",
+            "savings_rate_percent",
+            "plan_type",
+        ):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data

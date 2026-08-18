@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -10,9 +11,22 @@ from app.models.investments import (
     AppSettings,
     Investor,
     InvestmentPlan,
+    InvestmentTopupRequest,
     Payment,
     Quote,
     SavingsAction,
+    utcnow,
+)
+
+ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
+# Sunday–Thursday (Python weekday: Mon=0 … Sun=6).
+ISRAEL_BUSINESS_WEEKDAYS = {6, 0, 1, 2, 3}
+TOPUP_COOLING_OFF_BUSINESS_DAYS = 3
+MANAGER_FEE_KEYS = (
+    "manager_fee_percent",
+    "monthly_manager_fee",
+    "total_manager_fee",
+    "paid_manager_total",
 )
 
 
@@ -27,6 +41,58 @@ def add_months(start: date, months: int) -> date:
     month = (start.month - 1 + months) % 12 + 1
     day = min(start.day, monthrange(year, month)[1])
     return date(year, month, day)
+
+
+def _as_utc(moment: datetime) -> datetime:
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def is_israel_business_day(day: date) -> bool:
+    return day.weekday() in ISRAEL_BUSINESS_WEEKDAYS
+
+
+def add_israel_business_days(start: date, count: int) -> date:
+    """Advance `count` Israeli business days after `start` (start itself is not counted)."""
+    if count <= 0:
+        return start
+    day = start
+    remaining = count
+    while remaining:
+        day += timedelta(days=1)
+        if is_israel_business_day(day):
+            remaining -= 1
+    return day
+
+
+def cooling_off_deadline_utc(approved_at: datetime, *, business_days: int = TOPUP_COOLING_OFF_BUSINESS_DAYS) -> datetime:
+    """End of the Nth Israeli business day after approval, stored as naive UTC."""
+    local = _as_utc(approved_at).astimezone(ISRAEL_TZ)
+    end_date = add_israel_business_days(local.date(), business_days)
+    end_local = datetime.combine(end_date, time(23, 59, 59), tzinfo=ISRAEL_TZ)
+    return end_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def israel_business_days_remaining(until: datetime, *, now: Optional[datetime] = None) -> int:
+    now_local = _as_utc(now or datetime.now(timezone.utc)).astimezone(ISRAEL_TZ).date()
+    end_local = _as_utc(until).astimezone(ISRAEL_TZ).date()
+    if now_local > end_local:
+        return 0
+    remaining = 0
+    day = now_local
+    while day <= end_local:
+        if is_israel_business_day(day):
+            remaining += 1
+        day += timedelta(days=1)
+    return remaining
+
+
+def redact_manager_fees(payload: dict) -> dict:
+    out = dict(payload)
+    for key in MANAGER_FEE_KEYS:
+        out.pop(key, None)
+    return out
 
 
 def months_elapsed_inclusive(start: date, today: date, *, cap: int) -> int:
@@ -612,7 +678,7 @@ def settle_savings_action(
     }
 
 
-def serialize_plan(plan: InvestmentPlan) -> dict:
+def serialize_plan(plan: InvestmentPlan, *, hide_fees: bool = False) -> dict:
     metrics = plan_metrics(plan)
     kind, monthly_rate, savings_rate = normalize_plan_rates(
         getattr(plan, "plan_type", None) or "monthly",
@@ -620,7 +686,7 @@ def serialize_plan(plan: InvestmentPlan) -> dict:
         getattr(plan, "savings_rate_percent", 0.0) or 0.0,
     )
     duration = metrics.get("effective_duration_months") or plan.duration_months
-    return {
+    payload = {
         "id": plan.id,
         "investor_id": plan.investor_id,
         "investor_name": plan.investor.name if plan.investor else "",
@@ -636,6 +702,31 @@ def serialize_plan(plan: InvestmentPlan) -> dict:
         "notes": plan.notes,
         "created_at": plan.created_at,
         **{k: v for k, v in metrics.items() if k != "effective_duration_months"},
+    }
+    payload.update(_cooling_off_fields(plan))
+    if hide_fees:
+        return redact_manager_fees(payload)
+    return payload
+
+
+def _cooling_off_fields(plan: InvestmentPlan, *, now: Optional[datetime] = None) -> dict:
+    request = getattr(plan, "source_request", None)
+    if request is None or request.status != "approved" or not request.cancel_until:
+        return {
+            "source_request_id": request.id if request is not None else None,
+            "cooling_off_until": None,
+            "cooling_off_days_left": 0,
+            "can_cancel_investment": False,
+        }
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    active = plan.status == "active" and now <= request.cancel_until
+    return {
+        "source_request_id": request.id,
+        "cooling_off_until": request.cancel_until,
+        "cooling_off_days_left": israel_business_days_remaining(request.cancel_until, now=now)
+        if now <= request.cancel_until
+        else 0,
+        "can_cancel_investment": active,
     }
 
 
@@ -2062,3 +2153,253 @@ def get_manager_income_board(db: Session) -> dict:
         },
         "monthly_grand_total": monthly_grand_total,
     }
+
+
+def serialize_topup_request(
+    request: InvestmentTopupRequest,
+    *,
+    hide_fees: bool = True,
+    now: Optional[datetime] = None,
+) -> dict:
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    plan = request.created_plan
+    cancel_until = request.cancel_until
+    within_cooling = (
+        request.status == "approved"
+        and cancel_until is not None
+        and now <= cancel_until
+        and plan is not None
+        and plan.status == "active"
+    )
+    days_left = (
+        israel_business_days_remaining(cancel_until, now=now)
+        if within_cooling and cancel_until is not None
+        else 0
+    )
+    payload = {
+        "id": request.id,
+        "investor_id": request.investor_id,
+        "investor_name": request.investor.name if request.investor else "",
+        "amount": request.amount,
+        "notes": request.notes,
+        "status": request.status,
+        "created_at": request.created_at,
+        "reviewed_at": request.reviewed_at,
+        "review_notes": request.review_notes,
+        "created_plan_id": request.created_plan_id,
+        "approved_at": request.approved_at,
+        "cancel_until": cancel_until,
+        "reversed_at": request.reversed_at,
+        "can_cancel_request": request.status == "pending",
+        "can_reverse_investment": within_cooling,
+        "cooling_off_days_left": days_left,
+        "cooling_off_business_days": TOPUP_COOLING_OFF_BUSINESS_DAYS,
+        "plan": serialize_plan(plan, hide_fees=hide_fees) if plan is not None else None,
+    }
+    if not hide_fees and plan is not None:
+        payload["manager_fee_percent"] = plan.manager_fee_percent
+        payload["monthly_rate_percent"] = plan.monthly_rate_percent
+        payload["savings_rate_percent"] = getattr(plan, "savings_rate_percent", 0.0) or 0.0
+        payload["plan_type"] = getattr(plan, "plan_type", None) or "monthly"
+    return payload
+
+
+def _load_topup_request(db: Session, request_id: int) -> Optional[InvestmentTopupRequest]:
+    return (
+        db.query(InvestmentTopupRequest)
+        .options(
+            joinedload(InvestmentTopupRequest.investor),
+            joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.investor),
+            joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.payments),
+        )
+        .filter(InvestmentTopupRequest.id == request_id)
+        .first()
+    )
+
+
+def list_topup_requests(
+    db: Session,
+    *,
+    investor_id: Optional[int] = None,
+    status: Optional[str] = None,
+    hide_fees: bool = True,
+) -> list[dict]:
+    query = db.query(InvestmentTopupRequest).options(
+        joinedload(InvestmentTopupRequest.investor),
+        joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.investor),
+        joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.payments),
+    )
+    if investor_id is not None:
+        query = query.filter(InvestmentTopupRequest.investor_id == investor_id)
+    if status:
+        query = query.filter(InvestmentTopupRequest.status == status)
+    rows = query.order_by(InvestmentTopupRequest.created_at.desc()).all()
+    return [serialize_topup_request(row, hide_fees=hide_fees) for row in rows]
+
+
+def create_topup_request(
+    db: Session,
+    *,
+    investor: Investor,
+    amount: float,
+    notes: Optional[str] = None,
+    actor_user_id: Optional[int] = None,
+) -> InvestmentTopupRequest:
+    if amount <= 0:
+        raise ValueError("יש להזין סכום גדול מאפס")
+    pending = (
+        db.query(InvestmentTopupRequest)
+        .filter(
+            InvestmentTopupRequest.investor_id == investor.id,
+            InvestmentTopupRequest.status == "pending",
+        )
+        .first()
+    )
+    if pending:
+        raise ValueError("יש כבר בקשה ממתינה — בטלו אותה או המתינו לאישור")
+    request = InvestmentTopupRequest(
+        investor_id=investor.id,
+        amount=round(float(amount), 2),
+        notes=(notes or "").strip() or None,
+        status="pending",
+        created_by_user_id=actor_user_id,
+    )
+    db.add(request)
+    db.commit()
+    loaded = _load_topup_request(db, request.id)
+    assert loaded is not None
+    return loaded
+
+
+def cancel_topup_request(
+    db: Session,
+    *,
+    request: InvestmentTopupRequest,
+    actor_user_id: Optional[int] = None,
+    notes: Optional[str] = None,
+) -> InvestmentTopupRequest:
+    if request.status != "pending":
+        raise ValueError("אפשר לבטל רק בקשה שעדיין ממתינה לאישור")
+    request.status = "cancelled"
+    request.reviewed_at = utcnow()
+    request.reviewed_by_user_id = actor_user_id
+    if notes:
+        request.review_notes = notes.strip()
+    db.commit()
+    loaded = _load_topup_request(db, request.id)
+    assert loaded is not None
+    return loaded
+
+
+def reject_topup_request(
+    db: Session,
+    *,
+    request: InvestmentTopupRequest,
+    actor_user_id: Optional[int] = None,
+    notes: Optional[str] = None,
+) -> InvestmentTopupRequest:
+    if request.status != "pending":
+        raise ValueError("אפשר לדחות רק בקשה ממתינה")
+    request.status = "rejected"
+    request.reviewed_at = utcnow()
+    request.reviewed_by_user_id = actor_user_id
+    request.review_notes = (notes or "").strip() or "נדחתה על ידי המנהל"
+    db.commit()
+    loaded = _load_topup_request(db, request.id)
+    assert loaded is not None
+    return loaded
+
+
+def approve_topup_request(
+    db: Session,
+    *,
+    request: InvestmentTopupRequest,
+    plan_type: str,
+    monthly_rate_percent: float,
+    savings_rate_percent: float,
+    manager_fee_percent: float,
+    start_date: date,
+    duration_months: int,
+    actor_user_id: Optional[int] = None,
+    principal: Optional[float] = None,
+    notes: Optional[str] = None,
+    generate_schedule: bool = True,
+) -> InvestmentTopupRequest:
+    if request.status != "pending":
+        raise ValueError("אפשר לאשר רק בקשה ממתינה")
+    amount = float(principal) if principal is not None else float(request.amount)
+    if amount <= 0:
+        raise ValueError("יש להזין קרן גדולה מאפס")
+    kind, monthly_rate, savings_rate = normalize_plan_rates(
+        plan_type or "monthly",
+        monthly_rate_percent or 0,
+        savings_rate_percent or 0,
+    )
+    visible_notes = (notes or "").strip() or None
+    plan = InvestmentPlan(
+        investor_id=request.investor_id,
+        principal=round(amount, 2),
+        accrual_principal=round(amount, 2),
+        savings_redeemed_total=0.0,
+        plan_type=kind,
+        monthly_rate_percent=monthly_rate,
+        savings_rate_percent=savings_rate,
+        manager_fee_percent=float(manager_fee_percent or 0),
+        start_date=start_date,
+        duration_months=duration_months,
+        status="active",
+        notes=visible_notes,
+    )
+    db.add(plan)
+    db.flush()
+    if generate_schedule:
+        generate_payment_schedule(db, plan, commit=False)
+
+    approved_at = utcnow()
+    request.status = "approved"
+    request.created_plan_id = plan.id
+    request.approved_at = approved_at
+    request.cancel_until = cooling_off_deadline_utc(approved_at)
+    request.reviewed_at = approved_at
+    request.reviewed_by_user_id = actor_user_id
+    request.amount = round(amount, 2)
+    db.commit()
+    loaded = _load_topup_request(db, request.id)
+    assert loaded is not None
+    return loaded
+
+
+def reverse_topup_investment(
+    db: Session,
+    *,
+    request: InvestmentTopupRequest,
+    actor_user_id: Optional[int] = None,
+    notes: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> InvestmentTopupRequest:
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    if request.status != "approved":
+        raise ValueError("אפשר לבטל השקעה רק אחרי אישור, ובתוך 3 ימי עסקים")
+    if not request.cancel_until or now > request.cancel_until:
+        raise ValueError("חלון הביטול של 3 ימי עסקים הסתיים")
+    plan = request.created_plan
+    if plan is None and request.created_plan_id:
+        plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == request.created_plan_id).first()
+    if plan is None:
+        raise ValueError("לא נמצא מסלול לביטול")
+    if plan.status != "active":
+        raise ValueError("המסלול כבר לא פעיל")
+
+    plan.status = "completed"
+    extra = (notes or "").strip() or "בוטל בחלון 3 ימי העסקים"
+    plan.notes = f"{plan.notes} · {extra}".strip(" ·") if plan.notes else extra
+    _close_plan_remaining_payments(db, plan)
+
+    request.status = "reversed"
+    request.reversed_at = utcnow()
+    request.reversed_by_user_id = actor_user_id
+    request.review_notes = extra
+    db.commit()
+    loaded = _load_topup_request(db, request.id)
+    assert loaded is not None
+    return loaded

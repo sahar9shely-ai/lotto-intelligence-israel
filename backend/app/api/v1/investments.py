@@ -11,7 +11,7 @@ from app.db.investment_session import get_investment_db, investment_engine
 from app.models import auth as auth_models  # noqa: F401
 from app.models import investments as investment_models  # noqa: F401
 from app.models.auth import User
-from app.models.investments import Investor, InvestmentPlan, Payment, Quote
+from app.models.investments import Investor, InvestmentPlan, InvestmentTopupRequest, Payment, Quote
 from app.schemas.investments import (
     DashboardOut,
     InvestorCreate,
@@ -35,6 +35,10 @@ from app.schemas.investments import (
     SettingsUpdate,
     SiteStatusOut,
     SlackAnnounceOut,
+    TopupRequestApprove,
+    TopupRequestCreate,
+    TopupRequestDecision,
+    TopupRequestOut,
 )
 from app.security.auth import get_current_user, is_manager, require_manager
 from app.services import auth_service as auth_svc
@@ -351,14 +355,17 @@ def list_plans(
 ):
     scoped = _scope_investor_id(user, investor_id)
     query = db.query(InvestmentPlan).options(
-        joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments)
+        joinedload(InvestmentPlan.investor),
+        joinedload(InvestmentPlan.payments),
+        joinedload(InvestmentPlan.source_request),
     )
     if scoped is not None:
         query = query.filter(InvestmentPlan.investor_id == scoped)
     if status:
         query = query.filter(InvestmentPlan.status == status)
     plans = query.order_by(InvestmentPlan.start_date.desc()).all()
-    return [svc.serialize_plan(p) for p in plans]
+    hide_fees = not is_manager(user)
+    return [svc.serialize_plan(p, hide_fees=hide_fees) for p in plans]
 
 
 @router.post("/plans", response_model=PlanOut, status_code=201)
@@ -478,9 +485,169 @@ def delete_plan(
     db.query(InvestmentPlan).filter(
         InvestmentPlan.successor_plan_id == plan_id
     ).update({"successor_plan_id": None}, synchronize_session=False)
+    db.query(InvestmentTopupRequest).filter(
+        InvestmentTopupRequest.created_plan_id == plan_id
+    ).update({"created_plan_id": None}, synchronize_session=False)
     db.delete(plan)
     db.commit()
     return None
+
+
+def _require_owned_topup(user: User, request: InvestmentTopupRequest) -> None:
+    if is_manager(user):
+        return
+    if request.investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="אין הרשאה לבקשה הזו")
+
+
+def _serialize_topup(request, user: User) -> dict:
+    return svc.serialize_topup_request(request, hide_fees=not is_manager(user))
+
+
+@router.get("/investment-requests", response_model=list[TopupRequestOut])
+def list_investment_requests(
+    status: Optional[str] = None,
+    investor_id: Optional[int] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    scoped = _scope_investor_id(user, investor_id)
+    return svc.list_topup_requests(
+        db,
+        investor_id=scoped,
+        status=status,
+        hide_fees=not is_manager(user),
+    )
+
+
+@router.post("/investment-requests", response_model=TopupRequestOut, status_code=201)
+def create_investment_request(
+    payload: TopupRequestCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    if is_manager(user):
+        target_id = payload.investor_id or user.investor_id
+        if not target_id:
+            raise HTTPException(status_code=400, detail="בחרו משקיע לבקשה")
+    else:
+        target_id = user.investor_id
+        if payload.investor_id and payload.investor_id != user.investor_id:
+            raise HTTPException(status_code=403, detail="אפשר לפתוח בקשה רק עבור עצמך")
+    if not target_id:
+        raise HTTPException(status_code=400, detail="אין משקיע משויך לחשבון")
+    investor = db.query(Investor).filter(Investor.id == target_id).first()
+    if not investor:
+        raise HTTPException(status_code=404, detail="Investor not found")
+    try:
+        request = svc.create_topup_request(
+            db,
+            investor=investor,
+            amount=payload.amount,
+            notes=payload.notes,
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_topup(request, user)
+
+
+@router.post("/investment-requests/{request_id}/cancel", response_model=TopupRequestOut)
+def cancel_investment_request(
+    request_id: int,
+    payload: TopupRequestDecision = TopupRequestDecision(),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    _require_owned_topup(user, request)
+    try:
+        updated = svc.cancel_topup_request(
+            db,
+            request=request,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_topup(updated, user)
+
+
+@router.post("/investment-requests/{request_id}/reject", response_model=TopupRequestOut)
+def reject_investment_request(
+    request_id: int,
+    payload: TopupRequestDecision = TopupRequestDecision(),
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    try:
+        updated = svc.reject_topup_request(
+            db,
+            request=request,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_topup(updated, user)
+
+
+@router.post("/investment-requests/{request_id}/approve", response_model=TopupRequestOut)
+def approve_investment_request(
+    request_id: int,
+    payload: TopupRequestApprove,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    try:
+        updated = svc.approve_topup_request(
+            db,
+            request=request,
+            plan_type=payload.plan_type,
+            monthly_rate_percent=payload.monthly_rate_percent,
+            savings_rate_percent=payload.savings_rate_percent,
+            manager_fee_percent=payload.manager_fee_percent,
+            start_date=payload.start_date,
+            duration_months=payload.duration_months,
+            actor_user_id=user.id,
+            principal=payload.principal,
+            notes=payload.notes,
+            generate_schedule=payload.generate_schedule,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_topup(updated, user)
+
+
+@router.post("/investment-requests/{request_id}/reverse", response_model=TopupRequestOut)
+def reverse_investment_request(
+    request_id: int,
+    payload: TopupRequestDecision = TopupRequestDecision(),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    _require_owned_topup(user, request)
+    try:
+        updated = svc.reverse_topup_investment(
+            db,
+            request=request,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_topup(updated, user)
 
 
 def _load_plan_for_savings(db: Session, plan_id: int) -> InvestmentPlan:
@@ -643,7 +810,11 @@ def plan_status_report(
         raise HTTPException(status_code=404, detail="Plan not found")
     if not is_manager(user) and plan.investor_id != user.investor_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    return svc.build_plan_status_report(plan, year=year)
+    report = svc.build_plan_status_report(plan, year=year)
+    if not is_manager(user):
+        for month in report.get("months") or []:
+            month.pop("manager_amount", None)
+    return report
 
 
 @router.post("/sync-payment-amounts")

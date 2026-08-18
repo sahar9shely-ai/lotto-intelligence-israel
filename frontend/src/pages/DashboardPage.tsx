@@ -28,6 +28,8 @@ export function DashboardPage() {
     reload: reloadAlerts,
   } = useAsync(() => (isManager ? api.loginAlerts(true) : Promise.resolve([])), [isManager]);
 
+  const { data: topupRequests } = useAsync(() => api.topupRequests(), []);
+
   if (loading) return <div className="state">טוען את לוח הבקרה...</div>;
   if (error || !data)
     return (
@@ -76,6 +78,45 @@ export function DashboardPage() {
           </Link>
         </div>
       </header>
+
+      {(topupRequests ?? []).some((r) => r.status === "pending" || r.can_reverse_investment) ? (
+        <Panel
+          title={isManager ? "בקשות תוספת" : "תוספת להשקעה"}
+          subtitle={
+            isManager
+              ? "יש בקשות ממתינות לאישור כמסלול חדש"
+              : "עקוב אחרי הבקשה, בטל אותה, או בטל השקעה שאושרה בתוך 3 ימי עסקים"
+          }
+          action={
+            <Link className="btn btn--small btn--primary" to="/investors">
+              {isManager ? "לטיפול בבקשות" : "לפרטים"}
+            </Link>
+          }
+        >
+          <ul className="list">
+            {(topupRequests ?? [])
+              .filter((r) => r.status === "pending" || r.can_reverse_investment)
+              .slice(0, 6)
+              .map((r) => (
+                <li key={r.id} className="list__row">
+                  <div>
+                    <strong>
+                      {isManager ? `${r.investor_name} · ` : ""}
+                      {formatMoney(r.amount)}
+                    </strong>
+                    <span className="muted">
+                      {statusLabel(r.status)}
+                      {r.can_reverse_investment && r.cooling_off_days_left
+                        ? ` · ביטול עד ${r.cooling_off_days_left === 1 ? "יום עסקים אחד" : `${r.cooling_off_days_left} ימי עסקים`}`
+                        : ""}
+                    </span>
+                  </div>
+                  <span className={`badge badge--${r.status}`}>{statusLabel(r.status)}</span>
+                </li>
+              ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       {isManager && (investors?.length ?? 0) > 0 ? (
         <div className="scope-bar" role="tablist" aria-label="סינון סיכום">

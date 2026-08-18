@@ -25,6 +25,9 @@ class Investor(Base):
 
     plans: Mapped[list["InvestmentPlan"]] = relationship(back_populates="investor")
     payments: Mapped[list["Payment"]] = relationship(back_populates="investor")
+    topup_requests: Mapped[list["InvestmentTopupRequest"]] = relationship(
+        back_populates="investor"
+    )
 
 
 class InvestmentPlan(Base):
@@ -57,6 +60,11 @@ class InvestmentPlan(Base):
     )
     successor_plan_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("investment_plans.id"), nullable=True
+    )
+    source_request: Mapped[Optional["InvestmentTopupRequest"]] = relationship(
+        back_populates="created_plan",
+        uselist=False,
+        foreign_keys="InvestmentTopupRequest.created_plan_id",
     )
 
 
@@ -120,6 +128,39 @@ class Quote(Base):
         ForeignKey("investors.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class InvestmentTopupRequest(Base):
+    """Investor asks to add money; manager approves as a new track."""
+
+    __tablename__ = "investment_topup_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), nullable=False, index=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # pending | cancelled | rejected | approved | reversed
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_plan_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("investment_plans.id"), nullable=True
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    cancel_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reversed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reversed_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    investor: Mapped["Investor"] = relationship(back_populates="topup_requests")
+    created_plan: Mapped[Optional["InvestmentPlan"]] = relationship(
+        back_populates="source_request",
+        foreign_keys=[created_plan_id],
+    )
 
 
 class AppSettings(Base):

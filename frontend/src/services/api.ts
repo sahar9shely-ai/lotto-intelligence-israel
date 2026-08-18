@@ -15,6 +15,7 @@ import type {
   Quote,
   Settings,
   SiteStatus,
+  TopupRequest,
 } from "../types/investments";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -266,6 +267,51 @@ export const api = {
   deletePlan: (id: number) =>
     request<void>(`/api/v1/investments/plans/${id}`, {
       method: "DELETE",
+    }),
+  topupRequests: (params?: { status?: string; investor_id?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.investor_id != null) qs.set("investor_id", String(params.investor_id));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return request<TopupRequest[]>(`/api/v1/investments/investment-requests${suffix}`);
+  },
+  createTopupRequest: (body: { amount: number; notes?: string; investor_id?: number }) =>
+    request<TopupRequest>("/api/v1/investments/investment-requests", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  cancelTopupRequest: (id: number, notes?: string) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ notes: notes || null }),
+    }),
+  rejectTopupRequest: (id: number, notes?: string) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ notes: notes || null }),
+    }),
+  approveTopupRequest: (
+    id: number,
+    body: {
+      principal?: number;
+      plan_type?: string;
+      monthly_rate_percent: number;
+      savings_rate_percent?: number;
+      manager_fee_percent: number;
+      start_date: string;
+      duration_months: number;
+      notes?: string;
+      generate_schedule?: boolean;
+    },
+  ) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  reverseTopupRequest: (id: number, notes?: string) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/reverse`, {
+      method: "POST",
+      body: JSON.stringify({ notes: notes || null }),
     }),
   withdrawSavings: (planId: number, body: { amount: number; notes?: string }) =>
     request<{

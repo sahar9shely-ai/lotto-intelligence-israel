@@ -55,6 +55,11 @@ export function statusLabel(status: string): string {
     sent: "נשלח",
     converted: "הומר ללקוח",
     archived: "בארכיון",
+    pending: "ממתינה",
+    cancelled: "בוטלה",
+    rejected: "נדחתה",
+    approved: "אושרה",
+    reversed: "בוטלה בחלון הביטול",
   };
   return map[status] ?? status;
 }
