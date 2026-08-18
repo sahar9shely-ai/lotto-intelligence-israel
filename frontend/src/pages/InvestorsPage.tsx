@@ -206,7 +206,9 @@ export function InvestorsPage() {
     );
 
   const planTarget = selected;
-  const hasPendingTopup = (topupRequests ?? []).some((r) => r.status === "pending");
+  const hasPendingTopup = (topupRequests ?? []).some(
+    (r) => r.status === "pending" || r.status === "contract",
+  );
 
   return (
     <div className="page">
@@ -237,7 +239,7 @@ export function InvestorsPage() {
               className="btn btn--primary"
               onClick={() => setShowTopupCreate(true)}
             >
-              תוספת להשקעה
+              הוסף מסלול
             </button>
           </div>
         )}

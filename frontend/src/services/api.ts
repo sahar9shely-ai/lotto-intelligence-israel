@@ -275,6 +275,8 @@ export const api = {
     const suffix = qs.toString() ? `?${qs}` : "";
     return request<TopupRequest[]>(`/api/v1/investments/investment-requests${suffix}`);
   },
+  topupRequest: (id: number) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}`),
   createTopupRequest: (body: { amount: number; notes?: string; investor_id?: number }) =>
     request<TopupRequest>("/api/v1/investments/investment-requests", {
       method: "POST",
@@ -305,6 +307,14 @@ export const api = {
     },
   ) =>
     request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  signTopupRequest: (
+    id: number,
+    body: { typed_name: string; signature_png: string; accepted_terms: boolean },
+  ) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/sign`, {
       method: "POST",
       body: JSON.stringify(body),
     }),

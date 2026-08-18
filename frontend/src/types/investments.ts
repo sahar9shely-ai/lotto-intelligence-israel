@@ -248,6 +248,8 @@ export type TopupRequestStatus =
   | "pending"
   | "cancelled"
   | "rejected"
+  | "contract"
+  | "executed"
   | "approved"
   | "reversed";
 
@@ -263,6 +265,7 @@ export type TopupRequest = {
   review_notes?: string | null;
   created_plan_id?: number | null;
   approved_at?: string | null;
+  executed_at?: string | null;
   cancel_until?: string | null;
   reversed_at?: string | null;
   can_cancel_request: boolean;
@@ -274,4 +277,23 @@ export type TopupRequest = {
   monthly_rate_percent?: number;
   savings_rate_percent?: number;
   plan_type?: string;
+  contract_number?: string;
+  manager_party_name?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  duration_months?: number | null;
+  offered_notes?: string | null;
+  monthly_investor_payout?: number | null;
+  monthly_savings_accrual?: number | null;
+  total_investor_payout?: number | null;
+  manager_signed?: boolean;
+  investor_signed?: boolean;
+  both_signed?: boolean;
+  contract_fully_signed?: boolean;
+  manager_signed_at?: string | null;
+  manager_signed_name?: string | null;
+  investor_signed_at?: string | null;
+  investor_signed_name?: string | null;
+  manager_signature_png?: string | null;
+  investor_signature_png?: string | null;
 };

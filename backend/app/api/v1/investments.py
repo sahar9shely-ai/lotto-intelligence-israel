@@ -39,6 +39,7 @@ from app.schemas.investments import (
     TopupRequestCreate,
     TopupRequestDecision,
     TopupRequestOut,
+    TopupRequestSign,
 )
 from app.security.auth import get_current_user, is_manager, require_manager
 from app.services import auth_service as auth_svc
@@ -500,8 +501,12 @@ def _require_owned_topup(user: User, request: InvestmentTopupRequest) -> None:
         raise HTTPException(status_code=403, detail="אין הרשאה לבקשה הזו")
 
 
-def _serialize_topup(request, user: User) -> dict:
-    return svc.serialize_topup_request(request, hide_fees=not is_manager(user))
+def _serialize_topup(request, user: User, *, include_signatures: bool = False) -> dict:
+    return svc.serialize_topup_request(
+        request,
+        hide_fees=not is_manager(user),
+        include_signatures=include_signatures,
+    )
 
 
 @router.get("/investment-requests", response_model=list[TopupRequestOut])
@@ -518,6 +523,19 @@ def list_investment_requests(
         status=status,
         hide_fees=not is_manager(user),
     )
+
+
+@router.get("/investment-requests/{request_id}", response_model=TopupRequestOut)
+def get_investment_request(
+    request_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    _require_owned_topup(user, request)
+    return _serialize_topup(request, user, include_signatures=True)
 
 
 @router.post("/investment-requests", response_model=TopupRequestOut, status_code=201)
@@ -625,6 +643,36 @@ def approve_investment_request(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _serialize_topup(updated, user)
+
+
+@router.post("/investment-requests/{request_id}/sign", response_model=TopupRequestOut)
+def sign_investment_request(
+    request_id: int,
+    payload: TopupRequestSign,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    if is_manager(user):
+        party = "manager"
+    else:
+        _require_owned_topup(user, request)
+        party = "investor"
+    try:
+        updated = svc.sign_topup_contract(
+            db,
+            request=request,
+            party=party,
+            typed_name=payload.typed_name,
+            signature_png=payload.signature_png,
+            accepted_terms=payload.accepted_terms,
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_topup(updated, user, include_signatures=True)
 
 
 @router.post("/investment-requests/{request_id}/reverse", response_model=TopupRequestOut)

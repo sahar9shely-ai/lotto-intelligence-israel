@@ -717,9 +717,23 @@ def serialize_plan(plan: InvestmentPlan, *, hide_fees: bool = False) -> dict:
     return payload
 
 
+EXECUTED_TOPUP_STATUSES = {"approved", "executed"}
+OPEN_TOPUP_STATUSES = {"pending", "contract"}
+MAX_SIGNATURE_PNG_CHARS = 900_000
+
+
+def track_calendar_end_date(start: date, duration_months: int) -> date:
+    """Last calendar day of the track (start + duration months − 1 day)."""
+    return add_months(start, max(int(duration_months or 1), 1)) - timedelta(days=1)
+
+
+def _is_executed_topup(status: Optional[str]) -> bool:
+    return (status or "") in EXECUTED_TOPUP_STATUSES
+
+
 def _cooling_off_fields(plan: InvestmentPlan, *, now: Optional[datetime] = None) -> dict:
     request = getattr(plan, "source_request", None)
-    if request is None or request.status != "approved" or not request.cancel_until:
+    if request is None or not _is_executed_topup(request.status) or not request.cancel_until:
         return {
             "source_request_id": request.id if request is not None else None,
             "cooling_off_until": None,
@@ -2164,17 +2178,41 @@ def get_manager_income_board(db: Session) -> dict:
     }
 
 
+def _contract_number_for(request: InvestmentTopupRequest) -> str:
+    year = (request.created_at or utcnow()).year
+    return f"TZ-{year}-{request.id:04d}"
+
+
+def _validate_signature_png(data: str) -> str:
+    value = (data or "").strip()
+    if not value.startswith("data:image/png;base64,"):
+        raise ValueError("יש לחתום בלוח החתימה")
+    if len(value) > MAX_SIGNATURE_PNG_CHARS:
+        raise ValueError("קובץ החתימה גדול מדי — חתמו מחדש בקווים פשוטים")
+    return value
+
+
+def _clear_contract_signatures(request: InvestmentTopupRequest) -> None:
+    request.manager_signed_at = None
+    request.manager_signed_name = None
+    request.manager_signature_png = None
+    request.investor_signed_at = None
+    request.investor_signed_name = None
+    request.investor_signature_png = None
+
+
 def serialize_topup_request(
     request: InvestmentTopupRequest,
     *,
     hide_fees: bool = True,
     now: Optional[datetime] = None,
+    include_signatures: bool = False,
 ) -> dict:
     now_utc = _as_utc(now or datetime.now(timezone.utc))
     plan = request.created_plan
     cancel_until = request.cancel_until
     within_cooling = (
-        request.status == "approved"
+        _is_executed_topup(request.status)
         and cancel_until is not None
         and now_utc <= _as_utc(cancel_until)
         and plan is not None
@@ -2185,6 +2223,34 @@ def serialize_topup_request(
         if within_cooling and cancel_until is not None
         else 0
     )
+    manager_signed = bool(request.manager_signed_at and request.manager_signature_png)
+    investor_signed = bool(request.investor_signed_at and request.investor_signature_png)
+    both_signed = manager_signed and investor_signed
+    plan_type = request.offered_plan_type or (getattr(plan, "plan_type", None) if plan else None)
+    monthly_rate = request.offered_monthly_rate_percent
+    if monthly_rate is None and plan is not None:
+        monthly_rate = plan.monthly_rate_percent
+    savings_rate = request.offered_savings_rate_percent
+    if savings_rate is None and plan is not None:
+        savings_rate = getattr(plan, "savings_rate_percent", 0.0) or 0.0
+    duration = request.offered_duration_months or (plan.duration_months if plan is not None else None)
+    start_date = request.offered_start_date or (plan.start_date if plan is not None else None)
+    end_date = request.offered_end_date
+    if end_date is None and start_date is not None and duration:
+        end_date = track_calendar_end_date(start_date, duration)
+    fee = request.offered_management_fee_percent
+    if fee is None and plan is not None:
+        fee = plan.manager_fee_percent
+    metrics = None
+    if start_date is not None and duration and plan_type:
+        metrics = track_metrics(
+            principal=float(request.amount or 0),
+            plan_type=plan_type,
+            monthly_rate_percent=float(monthly_rate or 0),
+            savings_rate_percent=float(savings_rate or 0),
+            manager_fee_percent=float(fee or 0),
+            duration_months=int(duration),
+        )
     payload = {
         "id": request.id,
         "investor_id": request.investor_id,
@@ -2197,19 +2263,40 @@ def serialize_topup_request(
         "review_notes": request.review_notes,
         "created_plan_id": request.created_plan_id,
         "approved_at": request.approved_at,
+        "executed_at": request.executed_at or request.approved_at,
         "cancel_until": cancel_until,
         "reversed_at": request.reversed_at,
-        "can_cancel_request": request.status == "pending",
+        "can_cancel_request": request.status in OPEN_TOPUP_STATUSES,
         "can_reverse_investment": within_cooling,
         "cooling_off_days_left": days_left,
         "cooling_off_business_days": TOPUP_COOLING_OFF_BUSINESS_DAYS,
         "plan": serialize_plan(plan, hide_fees=hide_fees) if plan is not None else None,
+        "contract_number": request.contract_number or _contract_number_for(request),
+        "manager_party_name": request.manager_party_name,
+        "plan_type": plan_type,
+        "monthly_rate_percent": monthly_rate,
+        "savings_rate_percent": savings_rate,
+        "start_date": start_date,
+        "end_date": end_date,
+        "duration_months": duration,
+        "offered_notes": request.offered_notes,
+        "monthly_investor_payout": (metrics or {}).get("monthly_investor_payout"),
+        "monthly_savings_accrual": (metrics or {}).get("monthly_savings_accrual"),
+        "total_investor_payout": (metrics or {}).get("total_investor_payout"),
+        "manager_signed": manager_signed,
+        "investor_signed": investor_signed,
+        "both_signed": both_signed,
+        "contract_fully_signed": both_signed,
+        "manager_signed_at": request.manager_signed_at,
+        "manager_signed_name": request.manager_signed_name,
+        "investor_signed_at": request.investor_signed_at,
+        "investor_signed_name": request.investor_signed_name,
     }
-    if not hide_fees and plan is not None:
-        payload["manager_fee_percent"] = plan.manager_fee_percent
-        payload["monthly_rate_percent"] = plan.monthly_rate_percent
-        payload["savings_rate_percent"] = getattr(plan, "savings_rate_percent", 0.0) or 0.0
-        payload["plan_type"] = getattr(plan, "plan_type", None) or "monthly"
+    if include_signatures:
+        payload["manager_signature_png"] = request.manager_signature_png
+        payload["investor_signature_png"] = request.investor_signature_png
+    if not hide_fees:
+        payload["manager_fee_percent"] = fee
     return payload
 
 
@@ -2220,6 +2307,7 @@ def _load_topup_request(db: Session, request_id: int) -> Optional[InvestmentTopu
             joinedload(InvestmentTopupRequest.investor),
             joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.investor),
             joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.payments),
+            joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.source_request),
         )
         .filter(InvestmentTopupRequest.id == request_id)
         .first()
@@ -2237,6 +2325,7 @@ def list_topup_requests(
         joinedload(InvestmentTopupRequest.investor),
         joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.investor),
         joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.payments),
+        joinedload(InvestmentTopupRequest.created_plan).joinedload(InvestmentPlan.source_request),
     )
     if investor_id is not None:
         query = query.filter(InvestmentTopupRequest.investor_id == investor_id)
@@ -2260,12 +2349,12 @@ def create_topup_request(
         db.query(InvestmentTopupRequest)
         .filter(
             InvestmentTopupRequest.investor_id == investor.id,
-            InvestmentTopupRequest.status == "pending",
+            InvestmentTopupRequest.status.in_(tuple(OPEN_TOPUP_STATUSES)),
         )
         .first()
     )
     if pending:
-        raise ValueError("יש כבר בקשה ממתינה — בטלו אותה או המתינו לאישור")
+        raise ValueError("יש כבר בקשת מסלול פתוחה — בטלו אותה או השלימו את החתימות")
     request = InvestmentTopupRequest(
         investor_id=investor.id,
         amount=round(float(amount), 2),
@@ -2287,8 +2376,8 @@ def cancel_topup_request(
     actor_user_id: Optional[int] = None,
     notes: Optional[str] = None,
 ) -> InvestmentTopupRequest:
-    if request.status != "pending":
-        raise ValueError("אפשר לבטל רק בקשה שעדיין ממתינה לאישור")
+    if request.status not in OPEN_TOPUP_STATUSES:
+        raise ValueError("אפשר לבטל רק בקשה שעדיין ממתינה או חוזה שטרם בוצע")
     request.status = "cancelled"
     request.reviewed_at = utcnow()
     request.reviewed_by_user_id = actor_user_id
@@ -2307,12 +2396,66 @@ def reject_topup_request(
     actor_user_id: Optional[int] = None,
     notes: Optional[str] = None,
 ) -> InvestmentTopupRequest:
-    if request.status != "pending":
-        raise ValueError("אפשר לדחות רק בקשה ממתינה")
+    if request.status not in OPEN_TOPUP_STATUSES:
+        raise ValueError("אפשר לדחות רק בקשה ממתינה או חוזה שטרם בוצע")
     request.status = "rejected"
     request.reviewed_at = utcnow()
     request.reviewed_by_user_id = actor_user_id
     request.review_notes = (notes or "").strip() or "נדחתה על ידי המנהל"
+    db.commit()
+    loaded = _load_topup_request(db, request.id)
+    assert loaded is not None
+    return loaded
+
+
+def offer_topup_contract(
+    db: Session,
+    *,
+    request: InvestmentTopupRequest,
+    plan_type: str,
+    monthly_rate_percent: float,
+    savings_rate_percent: float,
+    manager_fee_percent: float,
+    start_date: date,
+    duration_months: int,
+    actor_user_id: Optional[int] = None,
+    principal: Optional[float] = None,
+    notes: Optional[str] = None,
+    generate_schedule: bool = True,
+) -> InvestmentTopupRequest:
+    """Manager sets contract terms. The track is created only after both signatures."""
+    del generate_schedule  # used later at execution
+    if request.status not in OPEN_TOPUP_STATUSES:
+        raise ValueError("אפשר להכין חוזה רק לבקשה פתוחה")
+    if request.manager_signed_at or request.investor_signed_at:
+        raise ValueError("לא ניתן לשנות תנאים אחרי שהחתימות התחילו")
+    amount = float(principal) if principal is not None else float(request.amount)
+    if amount <= 0:
+        raise ValueError("יש להזין קרן גדולה מאפס")
+    kind, monthly_rate, savings_rate = normalize_plan_rates(
+        plan_type or "monthly",
+        monthly_rate_percent or 0,
+        savings_rate_percent or 0,
+    )
+    settings = ensure_settings(db)
+    offered_at = utcnow()
+    request.status = "contract"
+    request.amount = round(amount, 2)
+    request.offered_plan_type = kind
+    request.offered_monthly_rate_percent = monthly_rate
+    request.offered_savings_rate_percent = savings_rate
+    request.offered_management_fee_percent = float(manager_fee_percent or 0)
+    request.offered_start_date = start_date
+    request.offered_duration_months = int(duration_months)
+    request.offered_end_date = track_calendar_end_date(start_date, duration_months)
+    request.offered_at = offered_at
+    request.offered_by_user_id = actor_user_id
+    request.offered_notes = (notes or "").strip() or None
+    request.reviewed_at = offered_at
+    request.reviewed_by_user_id = actor_user_id
+    request.manager_party_name = (settings.manager_display_name or "סהר").strip() or "סהר"
+    request.contract_number = _contract_number_for(request)
+    _clear_contract_signatures(request)
     db.commit()
     loaded = _load_topup_request(db, request.id)
     assert loaded is not None
@@ -2334,28 +2477,51 @@ def approve_topup_request(
     notes: Optional[str] = None,
     generate_schedule: bool = True,
 ) -> InvestmentTopupRequest:
-    if request.status != "pending":
-        raise ValueError("אפשר לאשר רק בקשה ממתינה")
-    amount = float(principal) if principal is not None else float(request.amount)
-    if amount <= 0:
-        raise ValueError("יש להזין קרן גדולה מאפס")
-    kind, monthly_rate, savings_rate = normalize_plan_rates(
-        plan_type or "monthly",
-        monthly_rate_percent or 0,
-        savings_rate_percent or 0,
+    """Backward-compatible alias: preparing the contract, not executing the track."""
+    return offer_topup_contract(
+        db,
+        request=request,
+        plan_type=plan_type,
+        monthly_rate_percent=monthly_rate_percent,
+        savings_rate_percent=savings_rate_percent,
+        manager_fee_percent=manager_fee_percent,
+        start_date=start_date,
+        duration_months=duration_months,
+        actor_user_id=actor_user_id,
+        principal=principal,
+        notes=notes,
+        generate_schedule=generate_schedule,
     )
-    visible_notes = (notes or "").strip() or None
+
+
+def _execute_signed_contract(
+    db: Session,
+    *,
+    request: InvestmentTopupRequest,
+    generate_schedule: bool = True,
+) -> None:
+    if request.created_plan_id:
+        return
+    if not request.offered_start_date or not request.offered_duration_months:
+        raise ValueError("חסרים תנאי חוזה לביצוע")
+    amount = round(float(request.amount), 2)
+    kind, monthly_rate, savings_rate = normalize_plan_rates(
+        request.offered_plan_type or "monthly",
+        request.offered_monthly_rate_percent or 0,
+        request.offered_savings_rate_percent or 0,
+    )
+    visible_notes = request.offered_notes or request.notes
     plan = InvestmentPlan(
         investor_id=request.investor_id,
-        principal=round(amount, 2),
-        accrual_principal=round(amount, 2),
+        principal=amount,
+        accrual_principal=amount,
         savings_redeemed_total=0.0,
         plan_type=kind,
         monthly_rate_percent=monthly_rate,
         savings_rate_percent=savings_rate,
-        manager_fee_percent=float(manager_fee_percent or 0),
-        start_date=start_date,
-        duration_months=duration_months,
+        manager_fee_percent=float(request.offered_management_fee_percent or 0),
+        start_date=request.offered_start_date,
+        duration_months=int(request.offered_duration_months),
         status="active",
         notes=visible_notes,
     )
@@ -2363,15 +2529,54 @@ def approve_topup_request(
     db.flush()
     if generate_schedule:
         generate_payment_schedule(db, plan, commit=False)
-
-    approved_at = utcnow()
-    request.status = "approved"
+    executed_at = utcnow()
+    request.status = "executed"
     request.created_plan_id = plan.id
-    request.approved_at = approved_at
-    request.cancel_until = cooling_off_deadline_utc(approved_at)
-    request.reviewed_at = approved_at
-    request.reviewed_by_user_id = actor_user_id
-    request.amount = round(amount, 2)
+    request.approved_at = executed_at
+    request.executed_at = executed_at
+    request.cancel_until = cooling_off_deadline_utc(executed_at)
+    request.reviewed_at = executed_at
+
+
+def sign_topup_contract(
+    db: Session,
+    *,
+    request: InvestmentTopupRequest,
+    party: str,
+    typed_name: str,
+    signature_png: str,
+    accepted_terms: bool,
+    actor_user_id: Optional[int] = None,
+) -> InvestmentTopupRequest:
+    del actor_user_id
+    if request.status != "contract":
+        raise ValueError("אפשר לחתום רק על חוזה שהוכן וממתין לחתימות")
+    if not accepted_terms:
+        raise ValueError("יש לאשר את תנאי החוזה לפני החתימה")
+    name = (typed_name or "").strip()
+    if len(name) < 2:
+        raise ValueError("יש להקליד שם מלא לחתימה")
+    png = _validate_signature_png(signature_png)
+    role = (party or "").strip().lower()
+    signed_at = utcnow()
+    if role == "manager":
+        if request.manager_signed_at:
+            raise ValueError("המנהל כבר חתם על החוזה")
+        request.manager_signed_at = signed_at
+        request.manager_signed_name = name[:80]
+        request.manager_signature_png = png
+    elif role == "investor":
+        if request.investor_signed_at:
+            raise ValueError("המשקיע כבר חתם על החוזה")
+        request.investor_signed_at = signed_at
+        request.investor_signed_name = name[:80]
+        request.investor_signature_png = png
+    else:
+        raise ValueError("צד חתימה לא תקין")
+
+    if request.manager_signed_at and request.investor_signed_at:
+        _execute_signed_contract(db, request=request)
+
     db.commit()
     loaded = _load_topup_request(db, request.id)
     assert loaded is not None
@@ -2387,8 +2592,8 @@ def reverse_topup_investment(
     now: Optional[datetime] = None,
 ) -> InvestmentTopupRequest:
     now_utc = _as_utc(now or datetime.now(timezone.utc))
-    if request.status != "approved":
-        raise ValueError("אפשר לבטל השקעה רק אחרי אישור, ובתוך 3 ימי עסקים")
+    if not _is_executed_topup(request.status):
+        raise ValueError("אפשר לבטל השקעה רק אחרי ביצוע החוזה, ובתוך 3 ימי עסקים")
     if not request.cancel_until or now_utc > _as_utc(request.cancel_until):
         raise ValueError("חלון הביטול של 3 ימי עסקים הסתיים")
     plan = request.created_plan

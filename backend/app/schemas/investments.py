@@ -375,6 +375,12 @@ class TopupRequestApprove(BaseModel):
     generate_schedule: bool = True
 
 
+class TopupRequestSign(BaseModel):
+    typed_name: str = Field(min_length=2, max_length=80)
+    signature_png: str = Field(min_length=40, max_length=900_000)
+    accepted_terms: bool = False
+
+
 class TopupRequestOut(BaseModel):
     id: int
     investor_id: int
@@ -387,6 +393,7 @@ class TopupRequestOut(BaseModel):
     review_notes: Optional[str] = None
     created_plan_id: Optional[int] = None
     approved_at: Optional[datetime] = None
+    executed_at: Optional[datetime] = None
     cancel_until: Optional[datetime] = None
     reversed_at: Optional[datetime] = None
     can_cancel_request: bool = False
@@ -398,6 +405,25 @@ class TopupRequestOut(BaseModel):
     monthly_rate_percent: Optional[float] = None
     savings_rate_percent: Optional[float] = None
     plan_type: Optional[str] = None
+    contract_number: Optional[str] = None
+    manager_party_name: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    duration_months: Optional[int] = None
+    offered_notes: Optional[str] = None
+    monthly_investor_payout: Optional[float] = None
+    monthly_savings_accrual: Optional[float] = None
+    total_investor_payout: Optional[float] = None
+    manager_signed: bool = False
+    investor_signed: bool = False
+    both_signed: bool = False
+    manager_signed_at: Optional[datetime] = None
+    manager_signed_name: Optional[str] = None
+    investor_signed_at: Optional[datetime] = None
+    investor_signed_name: Optional[str] = None
+    manager_signature_png: Optional[str] = None
+    investor_signature_png: Optional[str] = None
+    contract_fully_signed: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -409,6 +435,22 @@ class TopupRequestOut(BaseModel):
             "monthly_rate_percent",
             "savings_rate_percent",
             "plan_type",
+            "contract_number",
+            "manager_party_name",
+            "start_date",
+            "end_date",
+            "duration_months",
+            "offered_notes",
+            "monthly_investor_payout",
+            "monthly_savings_accrual",
+            "total_investor_payout",
+            "manager_signed_at",
+            "manager_signed_name",
+            "investor_signed_at",
+            "investor_signed_name",
+            "manager_signature_png",
+            "investor_signature_png",
+            "executed_at",
         ):
             if data.get(key) is None:
                 data.pop(key, None)

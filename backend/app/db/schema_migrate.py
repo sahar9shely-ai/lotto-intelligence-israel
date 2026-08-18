@@ -196,6 +196,34 @@ def ensure_schema(engine: Engine) -> None:
             if "successor_plan_id" not in cols:
                 _add_column(conn, "investment_plans", "successor_plan_id INTEGER")
 
+    if _table_exists(engine, "investment_topup_requests"):
+        cols = _table_columns(engine, "investment_topup_requests")
+        with engine.begin() as conn:
+            additions = {
+                "contract_number": "contract_number VARCHAR(32)",
+                "manager_party_name": "manager_party_name VARCHAR(120)",
+                "offered_plan_type": "offered_plan_type VARCHAR(32)",
+                "offered_duration_months": "offered_duration_months INTEGER",
+                "offered_start_date": "offered_start_date DATE",
+                "offered_end_date": "offered_end_date DATE",
+                "offered_monthly_rate_percent": "offered_monthly_rate_percent FLOAT",
+                "offered_savings_rate_percent": "offered_savings_rate_percent FLOAT",
+                "offered_management_fee_percent": "offered_management_fee_percent FLOAT",
+                "offered_at": "offered_at DATETIME" if _dialect(engine) == "sqlite" else "offered_at TIMESTAMP",
+                "offered_by_user_id": "offered_by_user_id INTEGER",
+                "offered_notes": "offered_notes TEXT",
+                "manager_signed_at": "manager_signed_at DATETIME" if _dialect(engine) == "sqlite" else "manager_signed_at TIMESTAMP",
+                "manager_signed_name": "manager_signed_name VARCHAR(80)",
+                "manager_signature_png": "manager_signature_png TEXT",
+                "investor_signed_at": "investor_signed_at DATETIME" if _dialect(engine) == "sqlite" else "investor_signed_at TIMESTAMP",
+                "investor_signed_name": "investor_signed_name VARCHAR(80)",
+                "investor_signature_png": "investor_signature_png TEXT",
+                "executed_at": "executed_at DATETIME" if _dialect(engine) == "sqlite" else "executed_at TIMESTAMP",
+            }
+            for name, sql in additions.items():
+                if name not in cols:
+                    _add_column(conn, "investment_topup_requests", sql)
+
     if not _table_exists(engine, "users"):
         return
 

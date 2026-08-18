@@ -131,7 +131,7 @@ class Quote(Base):
 
 
 class InvestmentTopupRequest(Base):
-    """Investor asks to add money; manager approves as a new track."""
+    """Investor asks to add a track; manager offers a contract; both parties sign."""
 
     __tablename__ = "investment_topup_requests"
 
@@ -139,7 +139,7 @@ class InvestmentTopupRequest(Base):
     investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), nullable=False, index=True)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # pending | cancelled | rejected | approved | reversed
+    # pending | cancelled | rejected | contract | executed | approved (legacy) | reversed
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -155,6 +155,27 @@ class InvestmentTopupRequest(Base):
     cancel_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     reversed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     reversed_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    contract_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    manager_party_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    offered_plan_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    offered_duration_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    offered_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    offered_end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    offered_monthly_rate_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    offered_savings_rate_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    offered_management_fee_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    offered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    offered_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    offered_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    manager_signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    manager_signed_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    manager_signature_png: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    investor_signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    investor_signed_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    investor_signature_png: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     investor: Mapped["Investor"] = relationship(back_populates="topup_requests")
     created_plan: Mapped[Optional["InvestmentPlan"]] = relationship(

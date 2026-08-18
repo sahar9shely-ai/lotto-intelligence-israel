@@ -16,6 +16,11 @@ from app.services.investment_service import (
 
 client = TestClient(app)
 
+TINY_PNG = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
 
 def _ensure_seeded() -> None:
     db = InvestmentSessionLocal()
@@ -31,7 +36,7 @@ def _login(email: str, password: str) -> tuple[dict, int]:
         "sahar9shely@gmail.com": "sahar",
         "bar050297@gmail.com": "bar",
     }
-    username = username_map.get(email, email.split("@")[0].lower())
+    username = username_map.get(email, email.split("@", 1)[0].lower())
     db = InvestmentSessionLocal()
     try:
         from app.models.auth import User
@@ -52,14 +57,14 @@ def _login(email: str, password: str) -> tuple[dict, int]:
     return headers, investor_id
 
 
-def _clear_pending(investor_id: int) -> None:
+def _clear_open(investor_id: int) -> None:
     db = InvestmentSessionLocal()
     try:
         rows = (
             db.query(InvestmentTopupRequest)
             .filter(
                 InvestmentTopupRequest.investor_id == investor_id,
-                InvestmentTopupRequest.status == "pending",
+                InvestmentTopupRequest.status.in_(("pending", "contract")),
             )
             .all()
         )
@@ -70,6 +75,30 @@ def _clear_pending(investor_id: int) -> None:
         db.close()
 
 
+def _offer_terms() -> dict:
+    return {
+        "plan_type": "monthly",
+        "monthly_rate_percent": 1.5,
+        "savings_rate_percent": 0,
+        "manager_fee_percent": 0.8,
+        "start_date": "2041-06-01",
+        "duration_months": 12,
+        "notes": "מסלול מאושר לבדיקה",
+    }
+
+
+def _sign(headers: dict, request_id: int, name: str):
+    return client.post(
+        f"/api/v1/investments/investment-requests/{request_id}/sign",
+        headers=headers,
+        json={
+            "typed_name": name,
+            "signature_png": TINY_PNG,
+            "accepted_terms": True,
+        },
+    )
+
+
 def test_israel_business_days_skip_weekend():
     thursday = date(2026, 8, 13)  # Thursday
     assert is_israel_business_day(thursday)
@@ -78,10 +107,10 @@ def test_israel_business_days_skip_weekend():
     assert add_israel_business_days(sunday, 3) == date(2026, 8, 19)  # Wed
 
 
-def test_investor_topup_request_approve_hides_fee_and_creates_plan():
+def test_investor_topup_request_signs_then_executes_without_exposing_fee():
     manager, _ = _login("sahar9shely@gmail.com", "ManagerPass1!")
     investor, investor_id = _login("bar050297@gmail.com", "InvestorPass1!")
-    _clear_pending(investor_id)
+    _clear_open(investor_id)
 
     created = client.post(
         "/api/v1/investments/investment-requests",
@@ -104,47 +133,75 @@ def test_investor_topup_request_approve_hides_fee_and_creates_plan():
     queue = client.get("/api/v1/investments/investment-requests", headers=manager).json()
     assert any(row["id"] == request["id"] and row["status"] == "pending" for row in queue)
 
-    approved = client.post(
+    offered = client.post(
         f"/api/v1/investments/investment-requests/{request['id']}/approve",
         headers=manager,
-        json={
-            "plan_type": "monthly",
-            "monthly_rate_percent": 1.5,
-            "savings_rate_percent": 0,
-            "manager_fee_percent": 0.8,
-            "start_date": "2041-06-01",
-            "duration_months": 12,
-            "notes": "מסלול מאושר לבדיקה",
-        },
+        json=_offer_terms(),
     )
-    assert approved.status_code == 200, approved.text
-    body = approved.json()
-    assert body["status"] == "approved"
-    assert body["created_plan_id"]
+    assert offered.status_code == 200, offered.text
+    body = offered.json()
+    assert body["status"] == "contract"
+    assert body["created_plan_id"] is None
     assert body["manager_fee_percent"] == 0.8
-    assert body["can_reverse_investment"] is True
+    assert body["monthly_rate_percent"] == 1.5
+    assert body["start_date"] == "2041-06-01"
+    assert body["end_date"] == "2042-05-31"
+    assert body["duration_months"] == 12
+    assert body["can_reverse_investment"] is False
 
     investor_view = client.get(
         "/api/v1/investments/investment-requests", headers=investor
     ).json()
     mine = next(row for row in investor_view if row["id"] == request["id"])
     assert "manager_fee_percent" not in mine
-    assert mine["status"] == "approved"
-    assert mine["plan"]
-    assert "manager_fee_percent" not in mine["plan"]
-    assert "monthly_manager_fee" not in mine["plan"]
-    assert mine["plan"]["monthly_rate_percent"] == 1.5
-    assert mine["can_reverse_investment"] is True
+    assert mine["status"] == "contract"
+    assert mine["plan"] is None
+    assert mine["monthly_rate_percent"] == 1.5
+    assert mine["plan_type"] == "monthly"
+    assert mine["can_reverse_investment"] is False
+
+    no_terms = client.post(
+        f"/api/v1/investments/investment-requests/{request['id']}/sign",
+        headers=manager,
+        json={"typed_name": "סהר", "signature_png": TINY_PNG, "accepted_terms": False},
+    )
+    assert no_terms.status_code == 400
+
+    manager_signed = _sign(manager, request["id"], "סהר מנהל")
+    assert manager_signed.status_code == 200, manager_signed.text
+    assert manager_signed.json()["status"] == "contract"
+    assert manager_signed.json()["manager_signed"] is True
+    assert manager_signed.json()["investor_signed"] is False
+    assert manager_signed.json()["created_plan_id"] is None
+
+    investor_signed = _sign(investor, request["id"], "בר משקיע")
+    assert investor_signed.status_code == 200, investor_signed.text
+    executed = investor_signed.json()
+    assert executed["status"] == "executed"
+    assert executed["created_plan_id"]
+    assert executed["both_signed"] is True
+    assert executed["can_reverse_investment"] is True
+    assert "manager_fee_percent" not in executed
+    assert executed.get("manager_signature_png", "").startswith("data:image/png")
+    assert executed.get("investor_signature_png", "").startswith("data:image/png")
+
+    detail = client.get(
+        f"/api/v1/investments/investment-requests/{request['id']}",
+        headers=investor,
+    )
+    assert detail.status_code == 200, detail.text
+    assert "manager_fee_percent" not in detail.json()
+    assert detail.json()["monthly_rate_percent"] == 1.5
 
     plans = client.get("/api/v1/investments/plans", headers=investor).json()
-    plan = next(p for p in plans if p["id"] == body["created_plan_id"])
+    plan = next(p for p in plans if p["id"] == executed["created_plan_id"])
     assert plan["principal"] == 25000
     assert plan["status"] == "active"
     assert "manager_fee_percent" not in plan
     assert plan["can_cancel_investment"] is True
 
     manager_plans = client.get("/api/v1/investments/plans", headers=manager).json()
-    manager_plan = next(p for p in manager_plans if p["id"] == body["created_plan_id"])
+    manager_plan = next(p for p in manager_plans if p["id"] == executed["created_plan_id"])
     assert manager_plan["manager_fee_percent"] == 0.8
 
     reversed_req = client.post(
@@ -156,14 +213,14 @@ def test_investor_topup_request_approve_hides_fee_and_creates_plan():
     assert reversed_req.json()["status"] == "reversed"
 
     plans_after = client.get("/api/v1/investments/plans", headers=investor).json()
-    closed = next(p for p in plans_after if p["id"] == body["created_plan_id"])
+    closed = next(p for p in plans_after if p["id"] == executed["created_plan_id"])
     assert closed["status"] == "completed"
     assert closed["can_cancel_investment"] is False
 
 
 def test_cancel_pending_topup_request():
     investor, investor_id = _login("bar050297@gmail.com", "InvestorPass1!")
-    _clear_pending(investor_id)
+    _clear_open(investor_id)
     created = client.post(
         "/api/v1/investments/investment-requests",
         headers=investor,
@@ -182,7 +239,7 @@ def test_cancel_pending_topup_request():
 def test_reverse_after_cooling_off_fails():
     manager, _ = _login("sahar9shely@gmail.com", "ManagerPass1!")
     investor, investor_id = _login("bar050297@gmail.com", "InvestorPass1!")
-    _clear_pending(investor_id)
+    _clear_open(investor_id)
     created = client.post(
         "/api/v1/investments/investment-requests",
         headers=investor,
@@ -190,7 +247,7 @@ def test_reverse_after_cooling_off_fails():
     )
     assert created.status_code == 201, created.text
     request_id = created.json()["id"]
-    approved = client.post(
+    offered = client.post(
         f"/api/v1/investments/investment-requests/{request_id}/approve",
         headers=manager,
         json={
@@ -200,8 +257,12 @@ def test_reverse_after_cooling_off_fails():
             "duration_months": 12,
         },
     )
-    assert approved.status_code == 200, approved.text
-    plan_id = approved.json()["created_plan_id"]
+    assert offered.status_code == 200, offered.text
+    assert offered.json()["status"] == "contract"
+    assert _sign(manager, request_id, "סהר מנהל").status_code == 200
+    signed = _sign(investor, request_id, "בר משקיע")
+    assert signed.status_code == 200, signed.text
+    plan_id = signed.json()["created_plan_id"]
 
     db = InvestmentSessionLocal()
     try:

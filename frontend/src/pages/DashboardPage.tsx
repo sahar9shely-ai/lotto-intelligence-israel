@@ -77,14 +77,16 @@ export function DashboardPage() {
         </div>
       </header>
 
-      {(topupRequests ?? []).some((r) => r.status === "pending" || r.can_reverse_investment) ? (
+      {(topupRequests ?? []).some(
+        (r) => r.status === "pending" || r.status === "contract" || r.can_reverse_investment,
+      ) ? (
         <Panel
-          title={isManager ? "בקשות תוספת" : "תוספת להשקעה"}
+          title={isManager ? "בקשות מסלול" : "הוסף מסלול"}
           subtitle={
-            (topupRequests ?? []).some((r) => r.status === "pending")
+            (topupRequests ?? []).some((r) => r.status === "pending" || r.status === "contract")
               ? isManager
-                ? "יש בקשות ממתינות לאישור כמסלול חדש"
-                : "הבקשה ממתינה לאישור — אפשר לבטל אותה כל עוד לא אושרה"
+                ? "יש בקשות ממתינות לחוזה או לחתימה"
+                : "עקבו אחרי הסטטוס, חתמו על החוזה והורידו את הקובץ"
               : "יש השקעה בחלון ביטול של 3 ימי עסקים"
           }
           action={
@@ -95,7 +97,10 @@ export function DashboardPage() {
         >
           <ul className="list">
             {(topupRequests ?? [])
-              .filter((r) => r.status === "pending" || r.can_reverse_investment)
+              .filter(
+                (r) =>
+                  r.status === "pending" || r.status === "contract" || r.can_reverse_investment,
+              )
               .slice(0, 6)
               .map((r) => (
                 <li key={r.id} className="list__row">
