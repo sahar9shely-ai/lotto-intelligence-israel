@@ -2549,15 +2549,6 @@ textarea {
   font-size: 1rem;
 }
 
-.topup-cta-bar span {
-  display: block;
-  margin-top: 4px;
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-  max-width: 42rem;
-  line-height: 1.45;
-}
-
 .topup-row__name {
   font: inherit;
   font-weight: 700;
