@@ -226,6 +226,120 @@ a {
 .hero__brand,
 .quote-card h2,
 .modal__head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+}
+
+.modal__close {
+  appearance: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--foam-deep);
+  color: var(--ink-soft);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal__close:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.modal__sheet--wide {
+  width: min(720px, 100%);
+}
+
+.request-sheet {
+  width: min(440px, 100%);
+  padding: 22px 22px 18px;
+}
+
+.request-form {
+  display: grid;
+  gap: 18px;
+}
+
+.request-form__amount,
+.request-form__note {
+  display: grid;
+  gap: 8px;
+}
+
+.request-form__amount span,
+.request-form__note span {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
+}
+
+.money-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  padding: 4px 14px;
+  min-height: 58px;
+}
+
+.money-input em {
+  font-style: normal;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  color: var(--accent-strong);
+}
+
+.money-input input {
+  border: 0;
+  padding: 10px 0;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: transparent;
+}
+
+.money-input input:focus {
+  outline: none;
+}
+
+.money-input input::-webkit-outer-spin-button,
+.money-input input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.money-input input[type="number"] {
+  appearance: textfield;
+}
+
+.money-input:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow: 0 0 0 4px rgba(47, 111, 94, 0.12);
+}
+
+.request-form__preview {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  color: var(--accent-strong);
+}
+
+.request-form__note textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.request-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
   font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: -0.02em;

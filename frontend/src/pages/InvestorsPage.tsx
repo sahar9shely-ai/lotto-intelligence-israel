@@ -48,6 +48,7 @@ export function InvestorsPage() {
   const [reportPlanId, setReportPlanId] = useState<number | null>(null);
   const [showNewInvestor, setShowNewInvestor] = useState(false);
   const [showNewPlan, setShowNewPlan] = useState(false);
+  const [showTopupCreate, setShowTopupCreate] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
 
@@ -205,6 +206,7 @@ export function InvestorsPage() {
     );
 
   const planTarget = selected;
+  const hasPendingTopup = (topupRequests ?? []).some((r) => r.status === "pending");
 
   return (
     <div className="page">
@@ -228,7 +230,17 @@ export function InvestorsPage() {
               מסלול חדש
             </button>
           </div>
-        ) : null}
+        ) : hasPendingTopup ? null : (
+          <div className="page-head__actions">
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setShowTopupCreate(true)}
+            >
+              תוספת להשקעה
+            </button>
+          </div>
+        )}
       </header>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
@@ -240,14 +252,16 @@ export function InvestorsPage() {
         requests={topupRequests ?? []}
         onChanged={refreshAll}
         onMessage={setMessage}
+        createOpen={showTopupCreate}
+        onCreateOpenChange={setShowTopupCreate}
         onFocusInvestor={(id) => {
           setScope(id);
           setTrackView("active");
         }}
       />
 
-      <div className="scope-bar" role="tablist" aria-label="בחירת משקיע">
-        {isManager ? (
+      {isManager ? (
+        <div className="scope-bar" role="tablist" aria-label="בחירת משקיע">
           <button
             type="button"
             role="tab"
@@ -260,24 +274,24 @@ export function InvestorsPage() {
           >
             סה״כ כולם
           </button>
-        ) : null}
-        {investors.map((inv) => (
-          <button
-            key={inv.id}
-            type="button"
-            role="tab"
-            aria-selected={effectiveScope === inv.id}
-            className={effectiveScope === inv.id ? "scope-bar__btn is-active" : "scope-bar__btn"}
-            onClick={() => {
-              setScope(inv.id);
-              setTrackView("active");
-            }}
-          >
-            {inv.name}
-            {inv.is_manager ? " · מנהל" : ""}
-          </button>
-        ))}
-      </div>
+          {investors.map((inv) => (
+            <button
+              key={inv.id}
+              type="button"
+              role="tab"
+              aria-selected={effectiveScope === inv.id}
+              className={effectiveScope === inv.id ? "scope-bar__btn is-active" : "scope-bar__btn"}
+              onClick={() => {
+                setScope(inv.id);
+                setTrackView("active");
+              }}
+            >
+              {inv.name}
+              {inv.is_manager ? " · מנהל" : ""}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {effectiveScope === "all" && isManager ? (
         <div className="stack">

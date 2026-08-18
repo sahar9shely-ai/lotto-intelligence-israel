@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { PlanTrackFields } from "./PlanTrackFields";
 import { api } from "../services/api";
 import type { Settings, TopupRequest } from "../types/investments";
@@ -16,24 +16,95 @@ function RequestModal({
   title,
   children,
   onClose,
+  wide = false,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  wide?: boolean;
 }) {
   return (
     <div className="modal" role="dialog" aria-modal="true">
       <button type="button" className="modal__backdrop" aria-label="סגירה" onClick={onClose} />
-      <div className="modal__sheet">
+      <div className={wide ? "modal__sheet modal__sheet--wide" : "modal__sheet request-sheet"}>
         <header className="modal__head">
           <h2>{title}</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            סגור
+          <button type="button" className="modal__close" aria-label="סגירה" onClick={onClose}>
+            ×
           </button>
         </header>
         {children}
       </div>
     </div>
+  );
+}
+
+function CreateTopupForm({
+  busy,
+  error,
+  onSubmit,
+  onCancel,
+}: {
+  busy: boolean;
+  error: string | null;
+  onSubmit: (amount: number, notes: string) => void;
+  onCancel: () => void;
+}) {
+  const [amount, setAmount] = useState("");
+  const [notes, setNotes] = useState("");
+  const parsed = Number(amount);
+  const valid = Number.isFinite(parsed) && parsed >= 1;
+
+  return (
+    <form
+      className="request-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!valid) return;
+        onSubmit(parsed, notes.trim());
+      }}
+    >
+      {error ? <p className="form-error">{error}</p> : null}
+      <label className="request-form__amount">
+        <span>סכום</span>
+        <div className="money-input">
+          <em>₪</em>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            inputMode="decimal"
+            required
+            autoFocus
+            placeholder="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+        {valid ? (
+          <strong className="request-form__preview">{formatMoney(parsed)}</strong>
+        ) : (
+          <span className="muted">הסכום שיתווסף להשקעה</span>
+        )}
+      </label>
+      <label className="request-form__note">
+        <span>הערה</span>
+        <textarea
+          rows={2}
+          placeholder="אופציונלי"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      </label>
+      <div className="request-form__actions">
+        <button type="button" className="btn btn--ghost" onClick={onCancel} disabled={busy}>
+          ביטול
+        </button>
+        <button type="submit" className="btn btn--primary" disabled={busy || !valid}>
+          {busy ? "שולח..." : "שליחה"}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -45,6 +116,8 @@ export function TopupRequestsPanel({
   onChanged,
   onMessage,
   onFocusInvestor,
+  createOpen = false,
+  onCreateOpenChange,
 }: {
   isManager: boolean;
   investorId?: number | null;
@@ -53,11 +126,19 @@ export function TopupRequestsPanel({
   onChanged: () => void;
   onMessage: (text: string) => void;
   onFocusInvestor?: (investorId: number) => void;
+  createOpen?: boolean;
+  onCreateOpenChange?: (open: boolean) => void;
 }) {
-  const [showCreate, setShowCreate] = useState(false);
+  const [internalCreate, setInternalCreate] = useState(false);
+  const showCreate = onCreateOpenChange ? createOpen : internalCreate;
+  const setShowCreate = onCreateOpenChange ?? setInternalCreate;
   const [approveTarget, setApproveTarget] = useState<TopupRequest | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (showCreate) setFormError(null);
+  }, [showCreate]);
 
   const visible = useMemo(() => {
     if (investorId == null) return requests;
@@ -72,11 +153,7 @@ export function TopupRequestsPanel({
   const hasPendingForInvestor =
     investorId != null && pending.some((r) => r.investor_id === investorId);
 
-  async function createRequest(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const amount = Number(fd.get("amount") || 0);
-    const notes = String(fd.get("notes") || "").trim();
+  async function createRequest(amount: number, notes: string) {
     setFormError(null);
     setBusyId(-1);
     try {
@@ -85,7 +162,7 @@ export function TopupRequestsPanel({
         notes: notes || undefined,
       });
       setShowCreate(false);
-      onMessage("הבקשה נשלחה. אפשר לבטל אותה כל עוד היא ממתינה לאישור.");
+      onMessage("הבקשה נשלחה");
       onChanged();
       if (created.investor_id) onFocusInvestor?.(created.investor_id);
     } catch (err) {
@@ -176,7 +253,7 @@ export function TopupRequestsPanel({
     }
   }
 
-  const showInvestorCta = !isManager && !hasPendingForInvestor;
+  const showInvestorCta = !isManager && !hasPendingForInvestor && !onCreateOpenChange;
   const showHistory = investorId != null && history.length > 0;
 
   if (
@@ -202,7 +279,7 @@ export function TopupRequestsPanel({
               <p className="panel__subtitle">
                 {isManager
                   ? "אשר כמסלול חדש ובחר את האחוזים שהמשקיע מקבל. עמלת הניהול נשארת אצלך בלבד."
-                  : "הבקשה אצל המנהל. אפשר לבטל אותה כל עוד היא לא אושרה."}
+                  : "ממתינה לאישור"}
               </p>
             </div>
           </header>
@@ -331,37 +408,14 @@ export function TopupRequestsPanel({
       ) : null}
 
       {showCreate ? (
-        <RequestModal title="בקשת תוספת להשקעה" onClose={() => setShowCreate(false)}>
-          <form className="form" onSubmit={createRequest}>
-            <p className="hint">
-              כתוב את הסכום שברצונך להוסיף. אחרי האישור יתווסף מסלול חדש — אפשר לבטל אותו עד 3
-              ימי עסקים.
-            </p>
-            {formError ? <p className="form-error">{formError}</p> : null}
-            <label>
-              סכום להוספה (₪)
-              <input
-                name="amount"
-                type="number"
-                min="1"
-                step="0.01"
-                required
-                placeholder="לדוגמה 20000"
-                autoFocus
-              />
-            </label>
-            <label>
-              הערה למנהל
-              <textarea
-                name="notes"
-                rows={3}
-                placeholder="אופציונלי — מטרה, תזמון, או כל פרט שחשוב"
-              />
-            </label>
-            <button type="submit" className="btn btn--primary" disabled={busyId === -1}>
-              {busyId === -1 ? "שולח..." : "שלח בקשה"}
-            </button>
-          </form>
+        <RequestModal title="תוספת להשקעה" onClose={() => setShowCreate(false)}>
+          <CreateTopupForm
+            key={String(showCreate)}
+            busy={busyId === -1}
+            error={formError}
+            onCancel={() => setShowCreate(false)}
+            onSubmit={createRequest}
+          />
         </RequestModal>
       ) : null}
 
@@ -369,6 +423,7 @@ export function TopupRequestsPanel({
         <RequestModal
           title={`אישור מסלול חדש · ${approveTarget.investor_name}`}
           onClose={() => setApproveTarget(null)}
+          wide
         >
           <form className="form" onSubmit={approveRequest}>
             <p className="hint">
