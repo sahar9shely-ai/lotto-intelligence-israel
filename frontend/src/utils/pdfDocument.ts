@@ -25,7 +25,7 @@ export function mountPdfNode(html: string, styles: string): HTMLElement {
   return host;
 }
 
-export function canvasToPdf(canvas: HTMLCanvasElement, fileName: string): void {
+function pdfFromCanvas(canvas: HTMLCanvasElement): jsPDF {
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -46,8 +46,7 @@ export function canvasToPdf(canvas: HTMLCanvasElement, fileName: string): void {
     }
     const offsetX = marginX + (usableWidth - imgWidth) / 2;
     pdf.addImage(imgData, "JPEG", offsetX, marginY, imgWidth, imgHeight, undefined, "FAST");
-    pdf.save(fileName);
-    return;
+    return pdf;
   }
 
   let heightLeft = imgHeight;
@@ -62,14 +61,18 @@ export function canvasToPdf(canvas: HTMLCanvasElement, fileName: string): void {
     heightLeft -= usableHeight;
   }
 
-  pdf.save(fileName);
+  return pdf;
 }
 
-export async function renderHtmlToPdf(
-  html: string,
-  styles: string,
-  fileName: string,
-): Promise<void> {
+export function canvasToPdf(canvas: HTMLCanvasElement, fileName: string): void {
+  pdfFromCanvas(canvas).save(fileName);
+}
+
+export function canvasToPdfBlob(canvas: HTMLCanvasElement): Blob {
+  return pdfFromCanvas(canvas).output("blob");
+}
+
+async function htmlToCanvas(html: string, styles: string): Promise<HTMLCanvasElement> {
   await waitForFonts();
   const host = mountPdfNode(html, styles);
   const sheet = host.querySelector(".pdf-sheet") as HTMLElement | null;
@@ -80,7 +83,7 @@ export async function renderHtmlToPdf(
 
   try {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const canvas = await html2canvas(sheet, {
+    return await html2canvas(sheet, {
       scale: 2,
       useCORS: true,
       backgroundColor: "#ffffff",
@@ -88,10 +91,35 @@ export async function renderHtmlToPdf(
       windowWidth: sheet.scrollWidth,
       windowHeight: sheet.scrollHeight,
     });
-    canvasToPdf(canvas, fileName);
   } finally {
     host.remove();
   }
+}
+
+export async function renderHtmlToPdf(
+  html: string,
+  styles: string,
+  fileName: string,
+): Promise<void> {
+  const canvas = await htmlToCanvas(html, styles);
+  canvasToPdf(canvas, fileName);
+}
+
+export async function renderHtmlToPdfBlob(html: string, styles: string): Promise<Blob> {
+  const canvas = await htmlToCanvas(html, styles);
+  return canvasToPdfBlob(canvas);
+}
+
+export function savePdfBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 /** Shared base styles for תזרים PDF documents. */

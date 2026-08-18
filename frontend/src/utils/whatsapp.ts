@@ -1,6 +1,4 @@
 import type { Quote } from "../types/investments";
-import { formatDate, formatMoney, formatPercent } from "./format";
-import { planTypeLabel } from "./planTypes";
 
 /** Digits only, Israeli mobiles become 9725XXXXXXXX. */
 export function toWhatsAppNumber(phone?: string | null): string | null {
@@ -28,49 +26,12 @@ export function formatPhoneDisplay(phone?: string | null): string {
   return raw;
 }
 
-function quoteRateLine(quote: Quote): string {
-  if (quote.plan_type === "savings") return `${formatPercent(quote.savings_rate_percent)} לחיסכון`;
-  if (quote.plan_type === "hybrid") {
-    return `${formatPercent(quote.monthly_rate_percent)} חודשי + ${formatPercent(quote.savings_rate_percent)} חיסכון`;
-  }
-  return `${formatPercent(quote.monthly_rate_percent)} לחודש`;
-}
-
+/** Short, gender-neutral note. Offer numbers live in the PDF, not in the chat. */
 export function buildQuoteWhatsAppMessage(quote: Quote): string {
-  const lines = [
-    `שלום ${quote.prospect_name},`,
-    "מצורפת הצעת השקעה מתזרים:",
-    "",
-    `מסלול: ${planTypeLabel(quote.plan_type)}`,
-    `קרן: ${formatMoney(quote.principal)}`,
-    `אחוז צפוי: ${quoteRateLine(quote)}`,
-    `משך: ${quote.duration_months} חודשים`,
-  ];
-  if (quote.plan_type !== "savings") {
-    lines.push(`החזר חודשי במזומן: ${formatMoney(quote.monthly_investor_payout, true)}`);
-  }
-  if (quote.plan_type !== "monthly") {
-    lines.push(`צבירת חיסכון חודשית: ${formatMoney(quote.monthly_savings_accrual, true)}`);
-    lines.push(`יתרת חיסכון בסיום: ${formatMoney(quote.projected_savings_balance)}`);
-  }
-  lines.push(`סה״כ רווח בסיום: ${formatMoney(quote.total_investor_payout)}`);
-  lines.push(`קרן + רווח בסיום: ${formatMoney(quote.principal + quote.total_investor_payout)}`);
-  if (quote.start_date) {
-    lines.push(`תחילת מסלול: ${formatDate(quote.start_date)}`);
-  }
-  if (quote.access_username && quote.access_password) {
-    lines.push(
-      "",
-      "כניסה לאתר תזרים:",
-      `שם משתמש: ${quote.access_username}`,
-      `סיסמה: ${quote.access_password}`,
-    );
-  }
-  if (quote.notes) {
-    lines.push("", quote.notes);
-  }
-  lines.push("", "נשמח לעבור יחד על הפרטים.");
-  return lines.join("\n");
+  const name = quote.prospect_name.trim() || "שלום";
+  return [`היי ${name},`, "", "הצעת ההשקעה מצורפת ב-PDF.", "אם יש שאלות — אפשר לפנות אליי."].join(
+    "\n",
+  );
 }
 
 export function whatsAppOfferUrl(quote: Quote): string | null {
@@ -84,5 +45,29 @@ export function openWhatsAppOffer(quote: Quote): boolean {
   const url = whatsAppOfferUrl(quote);
   if (!url) return false;
   window.open(url, "_blank", "noopener,noreferrer");
+  return true;
+}
+
+export function canSharePdfFile(file: File): boolean {
+  const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
+  try {
+    return typeof nav.canShare === "function" && nav.canShare({ files: [file] });
+  } catch {
+    return false;
+  }
+}
+
+export function isShareAbort(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+/** Native share sheet with the PDF attached (WhatsApp appears on most phones). */
+export async function shareQuotePdf(quote: Quote, file: File): Promise<boolean> {
+  if (!canSharePdfFile(file) || typeof navigator.share !== "function") return false;
+  await navigator.share({
+    files: [file],
+    text: buildQuoteWhatsAppMessage(quote),
+    title: file.name,
+  });
   return true;
 }

@@ -8,10 +8,16 @@ import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Quote } from "../types/investments";
 import { suggestPassword, suggestUsername } from "../utils/quoteAccess";
-import { buildMonthSchedule, downloadQuotePdf } from "../utils/quotePdf";
+import { buildMonthSchedule, downloadQuotePdf, quotePdfFile, saveQuotePdfFile } from "../utils/quotePdf";
 import { formatDate, formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
-import { formatPhoneDisplay, openWhatsAppOffer, toWhatsAppNumber } from "../utils/whatsapp";
+import {
+  formatPhoneDisplay,
+  isShareAbort,
+  shareQuotePdf,
+  toWhatsAppNumber,
+  whatsAppOfferUrl,
+} from "../utils/whatsapp";
 
 export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
@@ -175,18 +181,45 @@ export function QuotesPage() {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
+    setPdfBusyId(quote.id);
+    setMessage(null);
+    const pendingChat = window.open("about:blank", "_blank");
     try {
       const ready = await persistQuoteAccess(quote);
-      const opened = openWhatsAppOffer(ready);
-      if (!opened) {
-        setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
+      const file = await quotePdfFile(ready);
+      try {
+        const shared = await shareQuotePdf(ready, file);
+        if (shared) {
+          pendingChat?.close();
+          await markQuoteSent(ready);
+          setMessage(`בחרו וואטסאפ כדי לשלוח ל-${ready.prospect_name} את קובץ ה-PDF`);
+          reload();
+          return;
+        }
+      } catch (err) {
+        if (isShareAbort(err)) {
+          pendingChat?.close();
+          return;
+        }
+        // Share often loses the click gesture after PDF generation — fall back.
+      }
+      saveQuotePdfFile(file);
+      const url = whatsAppOfferUrl(ready);
+      if (!url) {
+        pendingChat?.close();
+        setMessage("ה-PDF ירד, אבל לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
         return;
       }
+      if (pendingChat && !pendingChat.closed) pendingChat.location.href = url;
+      else window.open(url, "_blank", "noopener,noreferrer");
       await markQuoteSent(ready);
-      setMessage(`נפתח וואטסאפ אל ${ready.prospect_name}`);
+      setMessage(`ה-PDF ירד. צרפו אותו להודעה הקצרה בוואטסאפ אל ${ready.prospect_name}`);
       reload();
     } catch (err) {
+      pendingChat?.close();
       setMessage(err instanceof Error ? err.message : "שליחה בוואטסאפ נכשלה");
+    } finally {
+      setPdfBusyId(null);
     }
   }
 
@@ -483,8 +516,13 @@ export function QuotesPage() {
                 ) : null}
 
                 <div className="page-head__actions">
-                  <button type="button" className="btn btn--whatsapp" onClick={() => sendWhatsApp(q)}>
-                    שליחה בוואטסאפ
+                  <button
+                    type="button"
+                    className="btn btn--whatsapp"
+                    disabled={pdfBusyId === q.id}
+                    onClick={() => sendWhatsApp(q)}
+                  >
+                    {pdfBusyId === q.id ? "מכינים PDF..." : "שליחת PDF בוואטסאפ"}
                   </button>
                   <button
                     type="button"

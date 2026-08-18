@@ -1,6 +1,6 @@
 import type { Quote } from "../types/investments";
 import { formatMoney, formatPercent } from "./format";
-import { PDF_BASE_STYLES, renderHtmlToPdf } from "./pdfDocument";
+import { PDF_BASE_STYLES, renderHtmlToPdfBlob, savePdfBlob } from "./pdfDocument";
 import { buildMonthSchedule } from "./quoteSchedule";
 import { planTypeLabel } from "./planTypes";
 
@@ -191,14 +191,26 @@ function buildQuoteDocumentHtml(quote: Quote): string {
   </div>`;
 }
 
+export function quotePdfFileName(quote: Quote): string {
+  const safeName = quote.prospect_name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "quote";
+  return `הצעת-תזרים-${safeName}.pdf`;
+}
+
+/** Build the investor-facing quote as a PDF file (for download or WhatsApp). */
+export async function quotePdfFile(quote: Quote): Promise<File> {
+  const fileName = quotePdfFileName(quote);
+  const blob = await renderHtmlToPdfBlob(buildQuoteDocumentHtml(quote), PDF_BASE_STYLES);
+  return new File([blob], fileName, { type: "application/pdf" });
+}
+
 /** Download a professional A4 PDF for the investor-facing quote. */
 export async function downloadQuotePdf(quote: Quote): Promise<void> {
-  const safeName = quote.prospect_name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "quote";
-  await renderHtmlToPdf(
-    buildQuoteDocumentHtml(quote),
-    PDF_BASE_STYLES,
-    `הצעת-תזרים-${safeName}.pdf`,
-  );
+  const file = await quotePdfFile(quote);
+  saveQuotePdfFile(file);
+}
+
+export function saveQuotePdfFile(file: File): void {
+  savePdfBlob(file, file.name);
 }
 
 /** @deprecated use downloadQuotePdf */
