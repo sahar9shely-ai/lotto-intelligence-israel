@@ -1646,11 +1646,35 @@ textarea {
   animation: rise 0.75s ease both;
 }
 
-.quote-card header {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: start;
+.quote-card header h2 {
+  margin: 0;
+}
+
+.quote-card__phone {
+  margin: 4px 0 0;
+  font-size: 0.88rem;
+}
+
+.quote-card__phone a {
+  color: var(--accent-strong);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.quote-card__phone a:hover {
+  text-decoration: underline;
+}
+
+.btn--whatsapp {
+  background: #128c7e;
+  color: #fff;
+  border-color: #128c7e;
+}
+
+.btn--whatsapp:hover {
+  background: #0e7368;
+  border-color: #0e7368;
+  color: #fff;
 }
 
 .quote-card__lead {

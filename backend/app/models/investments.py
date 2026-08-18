@@ -116,6 +116,7 @@ class Quote(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     prospect_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     principal: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     plan_type: Mapped[str] = mapped_column(String(32), nullable=False, default="monthly")
     monthly_rate_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

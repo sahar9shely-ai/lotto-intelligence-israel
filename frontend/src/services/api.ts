@@ -477,6 +477,7 @@ export const api = {
   quotes: () => request<Quote[]>("/api/v1/investments/quotes"),
   createQuote: (body: {
     prospect_name: string;
+    phone?: string;
     principal: number;
     plan_type?: string;
     monthly_rate_percent: number;
@@ -493,6 +494,7 @@ export const api = {
     id: number,
     body: Partial<{
       prospect_name: string;
+      phone: string | null;
       principal: number;
       plan_type: string;
       monthly_rate_percent: number;

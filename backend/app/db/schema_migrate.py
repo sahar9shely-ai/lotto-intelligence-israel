@@ -123,6 +123,12 @@ def ensure_schema(engine: Engine) -> None:
                     )
                 )
 
+    if _table_exists(engine, "quotes"):
+        cols = _table_columns(engine, "quotes")
+        if "phone" not in cols:
+            with engine.begin() as conn:
+                _add_column(conn, "quotes", "phone VARCHAR(40)")
+
     if _table_exists(engine, "app_settings"):
         cols = _table_columns(engine, "app_settings")
         with engine.begin() as conn:

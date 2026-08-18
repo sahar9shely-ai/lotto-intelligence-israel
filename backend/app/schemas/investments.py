@@ -211,6 +211,7 @@ class PaymentOut(BaseModel):
 
 class QuoteCreate(BaseModel):
     prospect_name: str = Field(min_length=1, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=40)
     principal: float = Field(ge=0)
     plan_type: PlanType = "monthly"
     monthly_rate_percent: float = Field(ge=0, default=0)
@@ -222,6 +223,7 @@ class QuoteCreate(BaseModel):
 
 class QuoteUpdate(BaseModel):
     prospect_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=40)
     principal: Optional[float] = Field(default=None, ge=0)
     plan_type: Optional[PlanType] = None
     monthly_rate_percent: Optional[float] = Field(default=None, ge=0)
@@ -244,6 +246,7 @@ class QuoteConvert(BaseModel):
 class QuoteOut(BaseModel):
     id: int
     prospect_name: str
+    phone: Optional[str] = None
     principal: float
     plan_type: str = "monthly"
     monthly_rate_percent: float

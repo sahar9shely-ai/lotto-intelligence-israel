@@ -103,6 +103,7 @@ def test_plan_payment_and_quote_flow():
         headers=headers,
         json={
             "prospect_name": "נועה",
+            "phone": "050-1234567",
             "principal": 50000,
             "monthly_rate_percent": 1.5,
             "manager_fee_percent": 0.4,
@@ -111,6 +112,7 @@ def test_plan_payment_and_quote_flow():
     )
     assert quote.status_code == 201
     quote_body = quote.json()
+    assert quote_body["phone"] == "050-1234567"
 
     converted = client.post(
         f"/api/v1/investments/quotes/{quote_body['id']}/convert",
@@ -123,6 +125,9 @@ def test_plan_payment_and_quote_flow():
     )
     assert converted.status_code == 200
     assert converted.json()["investor_name"] == "נועה"
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    noa = next(i for i in investors if i["name"] == "נועה")
+    assert noa["phone"] == "050-1234567"
 
 
 def test_settings_update():

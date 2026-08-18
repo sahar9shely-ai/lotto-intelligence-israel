@@ -8,6 +8,7 @@ import type { Quote } from "../types/investments";
 import { buildMonthSchedule, downloadQuotePdf } from "../utils/quotePdf";
 import { formatMoney, formatPercent, statusLabel, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
+import { formatPhoneDisplay, openWhatsAppOffer, toWhatsAppNumber } from "../utils/whatsapp";
 
 export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
@@ -35,6 +36,7 @@ export function QuotesPage() {
     const fd = new FormData(e.currentTarget);
     const body = {
       prospect_name: String(fd.get("prospect_name") || "").trim(),
+      phone: String(fd.get("phone") || "").trim() || undefined,
       principal: Number(fd.get("principal") || 0),
       plan_type: String(fd.get("plan_type") || "monthly"),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
@@ -95,6 +97,30 @@ export function QuotesPage() {
     await api.convertQuote(id, { start_date: start, username, password });
     setMessage(`${name} הומר למשקיע חדש — התחברות: ${username}`);
     reload();
+  }
+
+  async function sendWhatsApp(quote: Quote) {
+    if (!toWhatsAppNumber(quote.phone)) {
+      setMessage("הוסיפו מספר טלפון להצעה כדי לשלוח בוואטסאפ");
+      setEditing(quote);
+      setShowForm(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    const opened = openWhatsAppOffer(quote);
+    if (!opened) {
+      setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
+      return;
+    }
+    if (quote.status === "draft") {
+      try {
+        await api.updateQuote(quote.id, { status: "sent" });
+        reload();
+      } catch {
+        // The chat still opened; status update is secondary.
+      }
+    }
+    setMessage(`נפתח וואטסאפ אל ${quote.prospect_name}`);
   }
 
   async function exportPdf(quote: Quote) {
@@ -159,6 +185,18 @@ export function QuotesPage() {
                 />
               </label>
               <label>
+                טלפון בוואטסאפ
+                <input
+                  name="phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  required
+                  placeholder="050-0000000"
+                  defaultValue={editing?.phone ?? ""}
+                />
+              </label>
+              <label>
                 קרן מוצעת (₪)
                 <input
                   name="principal"
@@ -218,7 +256,16 @@ export function QuotesPage() {
             return (
               <article key={q.id} className="quote-card">
                 <header>
-                  <h2>{q.prospect_name}</h2>
+                  <div>
+                    <h2>{q.prospect_name}</h2>
+                    {q.phone ? (
+                      <p className="quote-card__phone">
+                        <a href={`tel:${q.phone.replace(/\s+/g, "")}`}>{formatPhoneDisplay(q.phone)}</a>
+                      </p>
+                    ) : (
+                      <p className="quote-card__phone muted">אין מספר טלפון</p>
+                    )}
+                  </div>
                   <span className={`badge badge--${q.status}`}>{statusLabel(q.status)}</span>
                 </header>
                 <p className="quote-card__lead">
@@ -309,6 +356,13 @@ export function QuotesPage() {
                 ) : null}
 
                 <div className="page-head__actions">
+                  <button
+                    type="button"
+                    className="btn btn--whatsapp"
+                    onClick={() => sendWhatsApp(q)}
+                  >
+                    שליחה בוואטסאפ
+                  </button>
                   <button
                     type="button"
                     className="btn btn--ghost"

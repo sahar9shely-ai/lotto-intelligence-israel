@@ -909,6 +909,7 @@ def serialize_quote(quote: Quote) -> dict:
     return {
         "id": quote.id,
         "prospect_name": quote.prospect_name,
+        "phone": quote.phone,
         "principal": quote.principal,
         "plan_type": kind,
         "monthly_rate_percent": monthly_rate,

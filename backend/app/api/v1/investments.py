@@ -1118,6 +1118,7 @@ def create_quote(
     data["plan_type"] = kind
     data["monthly_rate_percent"] = monthly_rate
     data["savings_rate_percent"] = savings_rate
+    data["phone"] = (data.get("phone") or "").strip() or None
     quote = Quote(**data)
     db.add(quote)
     db.commit()
@@ -1136,6 +1137,8 @@ def update_quote(
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     for key, value in payload.model_dump(exclude_unset=True).items():
+        if key == "phone":
+            value = (value or "").strip() or None
         setattr(quote, key, value)
     kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
         getattr(quote, "plan_type", None) or "monthly",
@@ -1184,7 +1187,7 @@ def convert_quote(
 
     investor = Investor(
         name=quote.prospect_name,
-        phone=payload.phone,
+        phone=payload.phone or quote.phone,
         notes=payload.notes or quote.notes,
     )
     db.add(investor)

@@ -68,6 +68,7 @@ function buildQuoteDocumentHtml(quote: Quote): string {
       <h1>${name}</h1>
       <p class="pdf-hero__sub">
         ${typeLabel} · קרן ${formatMoney(quote.principal)} · ${rateLine} · ${quote.duration_months} חודשים
+        ${quote.phone ? ` · טלפון ${escapeHtml(quote.phone)}` : ""}
       </p>
     </section>
 
