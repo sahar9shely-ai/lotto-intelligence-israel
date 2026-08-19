@@ -68,7 +68,10 @@ export function DashboardPage() {
           ) : null}
         </div>
         <div className="page-head__actions">
-          <Link className="btn btn--primary" to="/investors">
+          <Link
+            className={`btn ${isManager ? "btn--admin" : "btn--gold"}`}
+            to="/investors"
+          >
             {isManager ? "למשקיעים" : "המסלול שלי"}
           </Link>
           <Link className="btn btn--ghost" to="/payments">

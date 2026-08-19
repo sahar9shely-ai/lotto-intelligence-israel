@@ -41,9 +41,12 @@ export function LoginPage() {
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <p className="auth-card__eyebrow">כניסה למערכת</p>
+        <p className="auth-card__eyebrow">ברוכים הבאים</p>
         <h1 className="auth-card__brand">תזרים</h1>
-        <p className="muted">שם משתמש וסיסמה שקיבלת מהמנהל.</p>
+        <p className="auth-card__welcome">
+          מערכת ניהול השקעות ותזרים — פשוט, ברור ומעודכן.
+        </p>
+        <p className="muted">הזינו את שם המשתמש והסיסמה שקיבלתם מהמנהל.</p>
 
         <form className="form" onSubmit={onSubmit} autoComplete="on">
           <label>
@@ -72,10 +75,19 @@ export function LoginPage() {
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
-          <button type="submit" className="btn btn--primary" disabled={busy}>
-            {busy ? "מתחבר..." : "התחבר"}
+          <button type="submit" className="btn btn--primary btn--wide" disabled={busy}>
+            {busy ? "מתחבר..." : "כניסה למערכת"}
           </button>
         </form>
+
+        <div className="auth-card__roles" aria-label="סוגי משתמשים">
+          <p>
+            <strong>ADMIN</strong> — ניהול מלא: משקיעים, תשלומים, הצעות והגדרות.
+          </p>
+          <p>
+            <strong>משקיע</strong> — צפייה במסלול, תשלומים ובקשות אישיות בלבד.
+          </p>
+        </div>
 
         <div className="auth-links">
           <Link to="/forgot-password">שכחתי סיסמה</Link>

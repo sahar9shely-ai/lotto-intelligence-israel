@@ -4,7 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import "./styles.css";
 
-const CACHE_BUST = "tazrim-v7-20260806-nosw";
+const CACHE_BUST = "tazrim-v8-ui-refresh-20260819";
 
 async function purgeStale() {
   try {

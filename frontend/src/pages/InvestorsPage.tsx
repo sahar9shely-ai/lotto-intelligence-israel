@@ -796,7 +796,12 @@ function PlanCard({
           <div className="money-ledger__item">
             <span>יתרת חיסכון</span>
             <strong>{formatMoney(plan.current_savings_balance ?? 0)}</strong>
-            <em>צפי {formatMoney(plan.projected_savings_balance)}</em>
+            <em>
+              צפי {formatMoney(plan.projected_savings_balance)}
+              {(plan.rollover_savings_balance ?? 0) > 0
+                ? ` · כולל ${formatMoney(plan.rollover_savings_balance ?? 0)} מהמסלול הקודם`
+                : ""}
+            </em>
           </div>
         ) : null}
         {isManager ? (

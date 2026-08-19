@@ -41,12 +41,14 @@ export function AppShell() {
   const primaryLinks = links.filter((l) => PRIMARY_PATHS.has(l.to));
   const moreLinks = links.filter((l) => !PRIMARY_PATHS.has(l.to));
   const displayName = user?.investor_name || user?.username || "";
-  const roleLabel =
-    user?.username === "admin" || (isManager && user?.investor_name === "מנהל מערכת")
-      ? "ADMIN"
-      : isManager
-        ? "מנהל"
-        : null;
+  const isAdminAccount =
+    user?.username === "admin" || (isManager && user?.investor_name === "מנהל מערכת");
+  const roleLabel = isAdminAccount ? "ADMIN" : isManager ? "מנהל" : "משקיע";
+  const roleChipClass = isAdminAccount
+    ? "role-chip role-chip--admin"
+    : isManager
+      ? "role-chip role-chip--manager"
+      : "role-chip role-chip--investor";
 
   async function copyPublicUrl() {
     const url = siteStatus?.public_url;
@@ -135,7 +137,7 @@ export function AppShell() {
                     </button>
                     <button
                       type="button"
-                      className="btn btn--small btn--primary"
+                      className="btn btn--small btn--admin"
                       disabled={slackBusy}
                       onClick={sendToSlack}
                     >
@@ -153,7 +155,7 @@ export function AppShell() {
               <span className="brand__mark">תזרים</span>
               <span className="brand__tag">
                 {displayName}
-                {roleLabel ? <span className="role-chip">{roleLabel}</span> : null}
+                <span className={roleChipClass}>{roleLabel}</span>
               </span>
             </div>
             <nav className="nav" aria-label="ניווט ראשי">
