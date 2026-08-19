@@ -285,47 +285,69 @@ def ensure_settings(db: Session) -> AppSettings:
 
 
 def seed_defaults(db: Session) -> dict:
-    ensure_settings(db)
-    existing = {i.name for i in db.query(Investor).all()}
-    created: list[str] = []
+    """Seed investors + users. Idempotent; safe on legacy DBs with a combined manager row."""
+    from app.services.auth_service import ADMIN_INVESTOR_NAME, PERSONAL_INVESTOR_NAME
 
-    defaults = [
-        ("מנהל מערכת", True),
-        ("סהר", False),
-        ("בר", False),
-        ("אופק", False),
-        ("אלמוג", False),
-        ("שושי", False),
-    ]
-    for name, is_manager_flag in defaults:
-        if name not in existing:
-            # Migrate legacy combined manager row into personal Sahar + admin shell via seed_users.
-            if name == "סהר" and is_manager_flag is False:
-                legacy = (
-                    db.query(Investor)
-                    .filter(
-                        Investor.name.in_(("סהר", "מנהל", "מנהלת")),
-                    )
-                    .first()
+    ensure_settings(db)
+    created: list[str] = []
+    updated: list[str] = []
+
+    def investor_names() -> set[str]:
+        return {i.name for i in db.query(Investor).all()}
+
+    # 1) Personal portfolio row — keep legacy id + plans (rename מנהל/מנהלת → סהר).
+    personal = db.query(Investor).filter(Investor.name == PERSONAL_INVESTOR_NAME).first()
+    if personal is None:
+        legacy = (
+            db.query(Investor)
+            .filter(Investor.name.in_(("מנהל", "מנהלת", PERSONAL_INVESTOR_NAME)))
+            .order_by(Investor.id.asc())
+            .first()
+        )
+        if legacy is not None:
+            if legacy.name != PERSONAL_INVESTOR_NAME:
+                old_name = legacy.name
+                legacy.name = PERSONAL_INVESTOR_NAME
+                updated.append(f"renamed:{old_name}->{PERSONAL_INVESTOR_NAME}")
+        else:
+            db.add(Investor(name=PERSONAL_INVESTOR_NAME, is_manager=False))
+            created.append(PERSONAL_INVESTOR_NAME)
+    personal = db.query(Investor).filter(Investor.name == PERSONAL_INVESTOR_NAME).first()
+    if personal is not None:
+        personal.is_manager = False
+
+    db.flush()
+    personal_id = personal.id if personal else None
+
+    # 2) Empty admin shell — always a separate row; never repurpose the personal portfolio id.
+    admin = db.query(Investor).filter(Investor.name == ADMIN_INVESTOR_NAME).first()
+    if admin is None:
+        db.add(
+            Investor(
+                name=ADMIN_INVESTOR_NAME,
+                is_manager=True,
+                notes="חשבון מנהל מערכת — ללא תיק השקעה אישי",
+            )
+        )
+        created.append(ADMIN_INVESTOR_NAME)
+    else:
+        admin.is_manager = True
+        if personal_id is not None and admin.id == personal_id:
+            db.add(
+                Investor(
+                    name=ADMIN_INVESTOR_NAME,
+                    is_manager=True,
+                    notes="חשבון מנהל מערכת — ללא תיק השקעה אישי",
                 )
-                if legacy and legacy.name == "סהר":
-                    continue
-            if is_manager_flag and ("מנהל" in existing or "מנהלת" in existing):
-                legacy = (
-                    db.query(Investor)
-                    .filter(
-                        Investor.name.in_(("מנהל", "מנהלת")),
-                    )
-                    .first()
-                )
-                if legacy:
-                    old_name = legacy.name
-                    legacy.name = name
-                    legacy.is_manager = True
-                    created.append(f"renamed:{old_name}->{name}")
-                    continue
-            db.add(Investor(name=name, is_manager=is_manager_flag))
+            )
+            created.append(f"{ADMIN_INVESTOR_NAME}:shell")
+
+    # 3) Demo investors (skip names already present).
+    for name in ("בר", "אופק", "אלמוג", "שושי"):
+        if name not in investor_names():
+            db.add(Investor(name=name, is_manager=False))
             created.append(name)
+
     db.commit()
 
     from app.services import auth_service as auth_svc
@@ -333,7 +355,7 @@ def seed_defaults(db: Session) -> dict:
     users = auth_svc.seed_users(db)
     return {
         "created": created,
-        "already_existed": sorted(existing),
+        "updated": updated,
         "users": users,
     }
 

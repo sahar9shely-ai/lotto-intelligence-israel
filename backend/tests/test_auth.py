@@ -318,6 +318,17 @@ def test_cannot_delete_manager_or_self():
     assert "עצמך" in self_delete.json()["detail"] or "מנהל" in self_delete.json()["detail"]
 
 
+def test_seed_defaults_twice_does_not_crash():
+    """Startup + re-seed must stay idempotent (Render deploy runs seed on every boot)."""
+    _ensure_seeded()
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        inv_svc.seed_defaults(db)
+    finally:
+        db.close()
+
+
 def test_split_admin_and_personal_accounts():
     _ensure_seeded()
     db = InvestmentSessionLocal()

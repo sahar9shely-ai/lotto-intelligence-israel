@@ -235,13 +235,8 @@ def split_admin_and_personal_accounts(db: Session) -> dict:
         db.query(Payment).filter(Payment.investor_id == personal_inv.id).count()
     )
 
-    admin_inv = (
-        db.query(Investor)
-        .filter(Investor.is_manager.is_(True), Investor.id != personal_inv.id)
-        .order_by(Investor.id.asc())
-        .first()
-    )
-    if admin_inv is None:
+    admin_inv = db.query(Investor).filter(Investor.name == ADMIN_INVESTOR_NAME).first()
+    if admin_inv is None or (personal_inv is not None and admin_inv.id == personal_inv.id):
         admin_inv = Investor(
             name=ADMIN_INVESTOR_NAME,
             is_manager=True,
@@ -262,26 +257,67 @@ def split_admin_and_personal_accounts(db: Session) -> dict:
 
     admin_email = normalize_email(DEFAULT_USER_EMAILS.get(ADMIN_INVESTOR_NAME)) or "sahar9shely@gmail.com"
 
-    if admin_user is None:
-        admin_user = User(
-            username=ADMIN_USERNAME,
-            email=admin_email,
-            investor_id=admin_inv.id,
-            role="manager",
-            must_reset_password=True,
-            is_active=True,
+    def user_on_investor(investor_id: int) -> User | None:
+        return db.query(User).filter(User.investor_id == investor_id).first()
+
+    def fresh_admin_investor() -> Investor:
+        inv = Investor(
+            name=ADMIN_INVESTOR_NAME,
+            is_manager=True,
+            notes="חשבון מנהל מערכת — ללא תיק השקעה אישי",
         )
-        if not db.query(User).filter(User.email == admin_email).first():
-            admin_user.email = admin_email
-        else:
-            admin_user.email = f"{ADMIN_USERNAME}@local.tazrim"
-        db.add(admin_user)
+        db.add(inv)
         db.flush()
-        if not admin_user.password_hash:
-            admin_user.password_hash = hash_password(ADMIN_DEMO_PASSWORD)
-            admin_user.must_reset_password = False
-            admin_user.password_set_at = utcnow()
+        return inv
+
+    if admin_user is None:
+        occupant = user_on_investor(admin_inv.id)
+        if occupant is not None:
+            if personal_user is not None and occupant.id == personal_user.id:
+                pass
+            elif occupant.username == PERSONAL_USERNAME or (
+                personal_user is None
+                and personal_inv is not None
+                and occupant.investor_id == personal_inv.id
+            ):
+                personal_user = occupant
+            else:
+                admin_user = occupant
+                admin_user.role = "manager"
+                if admin_user.username != ADMIN_USERNAME:
+                    clash = (
+                        db.query(User)
+                        .filter(User.username == ADMIN_USERNAME, User.id != admin_user.id)
+                        .first()
+                    )
+                    if not clash:
+                        admin_user.username = ADMIN_USERNAME
+
+        if admin_user is None:
+            if user_on_investor(admin_inv.id) is not None:
+                admin_inv = fresh_admin_investor()
+            admin_user = User(
+                username=ADMIN_USERNAME,
+                email=admin_email,
+                investor_id=admin_inv.id,
+                role="manager",
+                must_reset_password=True,
+                is_active=True,
+            )
+            if not db.query(User).filter(User.email == admin_email).first():
+                admin_user.email = admin_email
+            else:
+                admin_user.email = f"{ADMIN_USERNAME}@local.tazrim"
+            db.add(admin_user)
+            db.flush()
+            if not admin_user.password_hash:
+                admin_user.password_hash = hash_password(ADMIN_DEMO_PASSWORD)
+                admin_user.must_reset_password = False
+                admin_user.password_set_at = utcnow()
     else:
+        occupant = user_on_investor(admin_inv.id)
+        if occupant is not None and occupant.id != admin_user.id:
+            admin_inv = fresh_admin_investor()
         admin_user.investor_id = admin_inv.id
         admin_user.role = "manager"
 
@@ -343,8 +379,12 @@ def seed_users(db: Session) -> dict:
     if split_result.get("status") == "ok":
         updated.append("split-admin-personal")
 
-    manager = db.query(Investor).filter(Investor.is_manager.is_(True)).first()
-    if manager and manager.name in {"מנהל", "מנהלת", "שחר", PERSONAL_INVESTOR_NAME}:
+    manager = (
+        db.query(Investor)
+        .filter(Investor.is_manager.is_(True), Investor.name == ADMIN_INVESTOR_NAME)
+        .first()
+    )
+    if manager and manager.name in {"מנהל", "מנהלת", "שחר"}:
         manager.name = ADMIN_INVESTOR_NAME
         updated.append(f"investor:{ADMIN_INVESTOR_NAME}")
 
@@ -354,6 +394,18 @@ def seed_users(db: Session) -> dict:
 
     for investor in db.query(Investor).order_by(Investor.id).all():
         user = db.query(User).filter(User.investor_id == investor.id).first()
+        if user is None and investor.is_manager:
+            linked_admin = db.query(User).filter(User.username == ADMIN_USERNAME).first()
+            if linked_admin is not None:
+                linked_admin.investor_id = investor.id
+                linked_admin.role = "manager"
+                user = linked_admin
+        if user is None and investor.name == PERSONAL_INVESTOR_NAME:
+            linked_personal = db.query(User).filter(User.username == PERSONAL_USERNAME).first()
+            if linked_personal is not None:
+                linked_personal.investor_id = investor.id
+                linked_personal.role = "investor"
+                user = linked_personal
         desired_username = username_for_investor(investor)
         desired_email = normalize_email(
             DEFAULT_USER_EMAILS.get(investor.name)
