@@ -50,6 +50,7 @@ class InvestorOut(BaseModel):
     months_in_program: int = 0
     plans_count: int = 0
     access_username: Optional[str] = None
+    access_password: Optional[str] = None
     access_email: Optional[str] = None
     access_role: Optional[str] = None
     has_login: bool = False

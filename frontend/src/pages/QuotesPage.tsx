@@ -12,14 +12,13 @@ import { buildMonthSchedule, downloadQuotePdf, quotePdfFile, saveQuotePdfFile } 
 import { formatDate, formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
 import {
-  buildQuoteWhatsAppMessage,
+  buildAccessWhatsAppMessage,
   canSharePdfFile,
-  copyQuoteWhatsAppMessage,
   formatPhoneDisplay,
   isShareAbort,
   shareQuotePdf,
   toWhatsAppNumber,
-  whatsAppOfferUrl,
+  whatsAppAccessUrl,
 } from "../utils/whatsapp";
 
 export function QuotesPage() {
@@ -210,7 +209,19 @@ export function QuotesPage() {
     if (!whatsappSend) return;
     setWhatsappShareBusy(true);
     try {
-      await shareQuotePdf(whatsappSend.quote, whatsappSend.file);
+      await shareQuotePdf(
+        whatsappSend.quote,
+        whatsappSend.file,
+        buildAccessWhatsAppMessage(
+          {
+            name: whatsappSend.quote.prospect_name,
+            phone: whatsappSend.quote.phone,
+            access_username: whatsappSend.quote.access_username,
+            access_password: whatsappSend.quote.access_password,
+          },
+          window.location.origin,
+        ),
+      );
       await markQuoteSent(whatsappSend.quote);
       const name = whatsappSend.quote.prospect_name;
       setWhatsappSend(null);
@@ -228,7 +239,15 @@ export function QuotesPage() {
   function openWhatsappChat() {
     if (!whatsappSend) return;
     const { quote, file } = whatsappSend;
-    const url = whatsAppOfferUrl(quote);
+    const url = whatsAppAccessUrl(
+      {
+        name: quote.prospect_name,
+        phone: quote.phone,
+        access_username: quote.access_username,
+        access_password: quote.access_password,
+      },
+      window.location.origin,
+    );
     if (!url) {
       setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
       return;
@@ -243,7 +262,17 @@ export function QuotesPage() {
   async function copyWhatsappText() {
     if (!whatsappSend) return;
     try {
-      await copyQuoteWhatsAppMessage(whatsappSend.quote);
+      await navigator.clipboard.writeText(
+        buildAccessWhatsAppMessage(
+          {
+            name: whatsappSend.quote.prospect_name,
+            phone: whatsappSend.quote.phone,
+            access_username: whatsappSend.quote.access_username,
+            access_password: whatsappSend.quote.access_password,
+          },
+          window.location.origin,
+        ),
+      );
       setMessage("טקסט ההודעה הועתק — הדביקו בוואטסאפ אחרי צירוף הקובץ");
     } catch {
       setMessage("לא ניתן להעתיק — העתיקו ידנית מהתצוגה");
@@ -720,9 +749,19 @@ export function QuotesPage() {
                   בוואטסאפ לחצו <strong>📎 צירוף</strong> → <strong>מסמך</strong> → בחרו את הקובץ
                   שהורד.
                 </li>
-                <li>שלחו את ההודעה (הטקסט כבר מוכן בצ&apos;אט).</li>
+                <li>שלחו את ההודעה — היא כבר כוללת קישור לאתר, שם משתמש וסיסמה.</li>
               </ol>
-              <p className="whatsapp-send__preview">{buildQuoteWhatsAppMessage(whatsappSend.quote)}</p>
+              <p className="whatsapp-send__preview">
+                {buildAccessWhatsAppMessage(
+                  {
+                    name: whatsappSend.quote.prospect_name,
+                    phone: whatsappSend.quote.phone,
+                    access_username: whatsappSend.quote.access_username,
+                    access_password: whatsappSend.quote.access_password,
+                  },
+                  window.location.origin,
+                )}
+              </p>
               <div className="whatsapp-send__actions">
                 <button type="button" className="btn btn--ghost" onClick={() => setWhatsappSend(null)}>
                   סגור

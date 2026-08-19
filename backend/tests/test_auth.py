@@ -152,6 +152,10 @@ def test_password_reset_requires_manager_approval():
         json={"username": "ofek", "password": "NewPass999!"},
     )
     assert new.status_code == 200
+    users = client.get("/api/v1/auth/users", headers=headers)
+    assert users.status_code == 200
+    ofek = next(u for u in users.json() if u["username"] == "ofek")
+    assert ofek["access_password"] == "NewPass999!"
 
 
 def test_manager_can_set_password_directly():
@@ -165,6 +169,7 @@ def test_manager_can_set_password_directly():
     )
     assert res.status_code == 200
     assert res.json()["has_password"] is True
+    assert res.json()["access_password"] == "AlmogPass1!"
     login = client.post(
         "/api/v1/auth/login",
         json={"username": "almog", "password": "AlmogPass1!"},

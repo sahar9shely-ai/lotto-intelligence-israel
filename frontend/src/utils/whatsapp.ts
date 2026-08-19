@@ -1,4 +1,4 @@
-import type { Quote } from "../types/investments";
+import type { Investor, Quote } from "../types/investments";
 
 /** Digits only, Israeli mobiles become 9725XXXXXXXX. */
 export function toWhatsAppNumber(phone?: string | null): string | null {
@@ -34,10 +34,40 @@ export function buildQuoteWhatsAppMessage(quote: Quote): string {
   );
 }
 
+type AccessShareTarget = {
+  name: string;
+  phone?: string | null;
+  access_username?: string | null;
+  access_password?: string | null;
+};
+
+export function buildAccessWhatsAppMessage(
+  target: AccessShareTarget,
+  publicUrl?: string | null,
+): string {
+  const name = target.name.trim() || "שלום";
+  const lines = [`היי ${name},`, "", "מצורפים פרטי הכניסה שלך לתזרים:"];
+  if (publicUrl) lines.push(`קישור לאתר: ${publicUrl}`);
+  if (target.access_username) lines.push(`שם משתמש: ${target.access_username}`);
+  if (target.access_password) lines.push(`סיסמה: ${target.access_password}`);
+  lines.push("", "אם יש שאלות — אפשר לפנות אליי.");
+  return lines.join("\n");
+}
+
 export function whatsAppOfferUrl(quote: Quote): string | null {
   const number = toWhatsAppNumber(quote.phone);
   if (!number) return null;
   const text = encodeURIComponent(buildQuoteWhatsAppMessage(quote));
+  return `https://wa.me/${number}?text=${text}`;
+}
+
+export function whatsAppAccessUrl(
+  target: AccessShareTarget,
+  publicUrl?: string | null,
+): string | null {
+  const number = toWhatsAppNumber(target.phone);
+  if (!number) return null;
+  const text = encodeURIComponent(buildAccessWhatsAppMessage(target, publicUrl));
   return `https://wa.me/${number}?text=${text}`;
 }
 
@@ -55,17 +85,28 @@ export function isShareAbort(err: unknown): boolean {
 }
 
 /** Share sheet with PDF attached — works on many phones (pick WhatsApp). */
-export async function shareQuotePdf(quote: Quote, file: File): Promise<void> {
+export async function shareQuotePdf(
+  quote: Quote,
+  file: File,
+  message = buildQuoteWhatsAppMessage(quote),
+): Promise<void> {
   if (!canSharePdfFile(file) || typeof navigator.share !== "function") {
     throw new Error("הדפדפן לא תומך בשיתוף קובץ — צרפו את ה-PDF ידנית בוואטסאפ");
   }
   await navigator.share({
     files: [file],
-    text: buildQuoteWhatsAppMessage(quote),
+    text: message,
     title: file.name,
   });
 }
 
 export async function copyQuoteWhatsAppMessage(quote: Quote): Promise<void> {
   await navigator.clipboard.writeText(buildQuoteWhatsAppMessage(quote));
+}
+
+export async function copyAccessWhatsAppMessage(
+  target: Investor | AccessShareTarget,
+  publicUrl?: string | null,
+): Promise<void> {
+  await navigator.clipboard.writeText(buildAccessWhatsAppMessage(target, publicUrl));
 }

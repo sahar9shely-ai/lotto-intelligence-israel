@@ -17,6 +17,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    access_password: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="investor")
     must_reset_password: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

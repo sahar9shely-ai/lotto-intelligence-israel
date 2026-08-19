@@ -28,6 +28,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     email: Optional[str] = None
+    access_password: Optional[str] = None
     role: str
     investor_id: int
     investor_name: str

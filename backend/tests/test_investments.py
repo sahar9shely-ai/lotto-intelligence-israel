@@ -180,6 +180,7 @@ def test_convert_quote_uses_stored_login_and_creates_user():
     revital = next(i for i in investors if i["name"] == "רויטל")
     assert revital["phone"] == "052-535-7071"
     assert revital.get("access_username") == "revitalq"
+    assert revital.get("access_password") == "Revital1234!"
 
     me = client.get(
         "/api/v1/auth/me",

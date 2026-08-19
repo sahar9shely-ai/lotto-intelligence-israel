@@ -2,6 +2,7 @@ export type AuthUser = {
   id: number;
   username: string;
   email?: string | null;
+  access_password?: string | null;
   role: string;
   investor_id: number;
   investor_name: string;

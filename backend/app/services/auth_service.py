@@ -107,6 +107,7 @@ def set_user_password(db: Session, user: User, new_password: str) -> User:
     if len(new_password) < 8:
         raise ValueError("הסיסמה חייבת להכיל לפחות 8 תווים")
     user.password_hash = hash_password(new_password)
+    user.access_password = new_password
     user.must_reset_password = False
     user.password_set_at = utcnow()
     # Close open reset requests when manager sets a password.
@@ -153,6 +154,7 @@ def ensure_user_for_investor(
     user = User(
         username=chosen_username,
         email=chosen_email,
+        access_password=password,
         investor_id=investor.id,
         role="manager" if investor.is_manager else "investor",
         must_reset_password=password is None,
@@ -251,6 +253,7 @@ def serialize_user(user: User) -> dict:
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "access_password": user.access_password,
         "role": user.role,
         "investor_id": user.investor_id,
         "investor_name": user.investor.name if user.investor else "",
@@ -374,6 +377,7 @@ def fulfill_password_reset(
         raise ValueError("הסיסמה חייבת להכיל לפחות 8 תווים")
 
     user.password_hash = hash_password(new_password)
+    user.access_password = new_password
     user.must_reset_password = False
     user.password_set_at = utcnow()
     req.status = "fulfilled"

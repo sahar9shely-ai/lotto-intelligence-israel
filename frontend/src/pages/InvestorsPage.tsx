@@ -13,6 +13,11 @@ import { api } from "../services/api";
 import type { Investor, Plan, Settings } from "../types/investments";
 import { formatMoney, formatPercent, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
+import {
+  copyAccessWhatsAppMessage,
+  formatPhoneDisplay,
+  whatsAppAccessUrl,
+} from "../utils/whatsapp";
 
 type Scope = "all" | number;
 type TrackView = "active" | "closed";
@@ -37,6 +42,10 @@ export function InvestorsPage() {
     () => (isManager ? api.settings() : Promise.resolve(null)),
     [isManager],
   );
+  const { data: siteStatus } = useAsync(
+    () => (isManager ? api.siteStatus() : Promise.resolve(null)),
+    [isManager],
+  );
   const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
   const { data: topupRequests, reload: reloadTopups } = useAsync(
     () => api.topupRequests(),
@@ -57,6 +66,39 @@ export function InvestorsPage() {
     reloadPlans();
     reloadTopups();
   }, [reload, reloadPlans, reloadTopups]);
+
+  const publicUrl = siteStatus?.public_url || window.location.origin;
+
+  function accessMissing(inv: Investor): boolean {
+    return !inv.phone || !inv.access_username || !inv.access_password;
+  }
+
+  async function copyInvestorAccess(inv: Investor) {
+    if (accessMissing(inv)) {
+      setMessage("חסר טלפון, שם משתמש או סיסמה כדי לשלוח פרטי התחברות");
+      return;
+    }
+    try {
+      await copyAccessWhatsAppMessage(inv, publicUrl);
+      setMessage(`הטקסט עם הקישור והכניסה הועתק עבור ${inv.name}`);
+    } catch {
+      setMessage("לא ניתן להעתיק את פרטי ההתחברות");
+    }
+  }
+
+  function openInvestorWhatsApp(inv: Investor) {
+    if (accessMissing(inv)) {
+      setMessage("חסר טלפון, שם משתמש או סיסמה כדי לפתוח הודעת התחברות");
+      return;
+    }
+    const url = whatsAppAccessUrl(inv, publicUrl);
+    if (!url) {
+      setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    setMessage(`נפתחה הודעת התחברות מוכנה עבור ${inv.name}`);
+  }
 
   const effectiveScope: Scope = useMemo(() => {
     if (scope != null) return scope;
@@ -386,7 +428,31 @@ export function InvestorsPage() {
                 ? "השקעה עצמית · עמלה נפרדת בדשבורד"
                 : `${selected.months_in_program} חודשים בתוכנית · ${selected.active_plans_count ?? activeSelectedPlans.length} מסלולים פעילים`
             }
-            action={<Link className="text-link" to="/payments">לתשלומים</Link>}
+            action={
+              <div className="investor-access-actions">
+                <Link className="text-link" to="/payments">
+                  לתשלומים
+                </Link>
+                {isManager && selected.has_login ? (
+                  <>
+                    <button
+                      type="button"
+                      className="text-link"
+                      onClick={() => void copyInvestorAccess(selected)}
+                    >
+                      העתקת כניסה
+                    </button>
+                    <button
+                      type="button"
+                      className="text-link"
+                      onClick={() => openInvestorWhatsApp(selected)}
+                    >
+                      שליחת כניסה בוואטסאפ
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            }
           >
             <div className="money-ledger">
               <div className="money-ledger__item money-ledger__item--accent">
@@ -426,6 +492,16 @@ export function InvestorsPage() {
                   {formatMoney(savingsOf(selected))}
                 </em>
               </div>
+              {isManager && selected.has_login ? (
+                <div className="money-ledger__item investor-login-card">
+                  <span>כניסה לאתר תזרים</span>
+                  <strong className="ltr">{selected.access_username || "—"}</strong>
+                  <em className="ltr">{selected.access_password || "אין סיסמה שמורה"}</em>
+                  <small>
+                    {selected.phone ? `וואטסאפ: ${formatPhoneDisplay(selected.phone)}` : "חסר מספר טלפון"}
+                  </small>
+                </div>
+              ) : null}
             </div>
           </Panel>
 

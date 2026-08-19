@@ -19,6 +19,7 @@ export type Investor = {
   months_in_program: number;
   plans_count: number;
   access_username?: string | null;
+  access_password?: string | null;
   access_email?: string | null;
   access_role?: string | null;
   has_login?: boolean;

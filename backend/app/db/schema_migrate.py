@@ -135,6 +135,12 @@ def ensure_schema(engine: Engine) -> None:
             if "start_date" not in cols:
                 _add_column(conn, "quotes", "start_date DATE")
 
+    if _table_exists(engine, "users"):
+        cols = _table_columns(engine, "users")
+        with engine.begin() as conn:
+            if "access_password" not in cols:
+                _add_column(conn, "users", "access_password VARCHAR(128)")
+
     if _table_exists(engine, "app_settings"):
         cols = _table_columns(engine, "app_settings")
         with engine.begin() as conn:
