@@ -32,7 +32,7 @@ export function LoginPage() {
     return (
       <div className="auth-screen">
         <div className="atmosphere" aria-hidden="true" />
-        <div className="state">טוען...</div>
+        <div className="state state--loading">טוען...</div>
       </div>
     );
   }

@@ -24,7 +24,7 @@ export function Toast({
 
   return (
     <div
-      className={`toast${isErrorMessage(message) ? " toast--error" : ""}`}
+      className={`toast${isErrorMessage(message) ? " toast--error" : " toast--success"}`}
       role="status"
       aria-live="polite"
     >

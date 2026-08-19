@@ -351,7 +351,7 @@ export function QuotesPage() {
     }
   }
 
-  if (loading) return <div className="state">טוען הצעות...</div>;
+  if (loading) return <div className="state state--loading">טוען הצעות...</div>;
   if (error)
     return (
       <div className="state state--error">
@@ -364,21 +364,27 @@ export function QuotesPage() {
 
   return (
     <div className="page">
-      <div className="page-head">
+      <header className="page-intro page-intro--admin">
         <div>
-          <h1>הצעות למשקיעים חדשים</h1>
+          <p className="page-intro__eyebrow">ניהול הצעות</p>
+          <h1 className="page-intro__title">הצעות למשקיעים חדשים</h1>
+          <p className="page-intro__lead">
+            PDF, וואטסאפ ואישור — מעקב ברור מטיוטה ועד קליטה כמשקיע במערכת.
+          </p>
         </div>
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => {
-            setEditing(null);
-            setShowForm(true);
-          }}
-        >
-          הצעה חדשה
-        </button>
-      </div>
+        <div className="page-head__actions">
+          <button
+            type="button"
+            className="btn btn--admin"
+            onClick={() => {
+              setEditing(null);
+              setShowForm(true);
+            }}
+          >
+            + הצעה חדשה
+          </button>
+        </div>
+      </header>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
@@ -489,11 +495,11 @@ export function QuotesPage() {
                 <input name="notes" defaultValue={editing?.notes ?? ""} />
               </label>
             </div>
-            <div className="page-head__actions">
+            <div className="action-bar">
               <button type="button" className="btn btn--ghost" onClick={closeForm}>
                 ביטול
               </button>
-              <button type="submit" className="btn btn--primary" disabled={busy}>
+              <button type="submit" className="btn btn--admin" disabled={busy}>
                 {busy ? "שומר..." : editing ? "שמור שינויים" : "שמור הצעה"}
               </button>
             </div>
@@ -542,13 +548,34 @@ export function QuotesPage() {
 
       <div className="quotes-grid">
         {preview.length === 0 ? (
-          <p className="empty">
-            {viewTab === "pipeline"
-              ? "אין הצעות בתהליך. צרו הצעה חדשה או בדקו בלשונית «הושלמו»."
-              : viewTab === "completed"
-                ? "אין עדיין הצעות שהושלמו. אחרי «הכנס כמשקיע חדש» ההצעה תופיע כאן."
-                : "אין הצעות שלא אושרו."}
-          </p>
+          <div className="empty-state" role="status">
+            <p className="empty-state__title">
+              {viewTab === "pipeline"
+                ? "אין הצעות בתהליך"
+                : viewTab === "completed"
+                  ? "אין הצעות שהושלמו"
+                  : "אין הצעות שלא אושרו"}
+            </p>
+            <p className="empty-state__text">
+              {viewTab === "pipeline"
+                ? "צרו הצעה חדשה או בדקו בלשונית «הושלמו»."
+                : viewTab === "completed"
+                  ? "אחרי «הכנס כמשקיע חדש» ההצעה תופיע כאן."
+                  : "הצעות שנדחו יופיעו כאן לצפייה ולשחזור."}
+            </p>
+            {viewTab === "pipeline" ? (
+              <button
+                type="button"
+                className="btn btn--admin"
+                onClick={() => {
+                  setEditing(null);
+                  setShowForm(true);
+                }}
+              >
+                + הצעה חדשה
+              </button>
+            ) : null}
+          </div>
         ) : (
           preview.map((q) => {
             const rows = buildMonthSchedule(q);
@@ -697,7 +724,7 @@ export function QuotesPage() {
                   </div>
                 ) : null}
 
-                <div className="page-head__actions">
+                <div className="action-bar action-bar--card">
                   {viewTab === "pipeline" ? (
                     <>
                       <button
@@ -719,7 +746,7 @@ export function QuotesPage() {
                       {canApproveQuote(q.status) ? (
                         <button
                           type="button"
-                          className="btn btn--primary"
+                          className="btn btn--admin"
                           onClick={() => void setQuoteStatus(q, "approved")}
                         >
                           סימון כאושר
@@ -759,7 +786,7 @@ export function QuotesPage() {
                       {canConvertQuote(q.status) ? (
                         <button
                           type="button"
-                          className="btn btn--primary"
+                          className="btn btn--gold"
                           onClick={() => {
                             setConvertError(null);
                             setConverting(q);
@@ -774,7 +801,7 @@ export function QuotesPage() {
                     <>
                       <Link
                         to="/investors"
-                        className="btn btn--primary"
+                        className="btn btn--admin"
                       >
                         מסך משקיעים #{q.converted_investor_id}
                       </Link>

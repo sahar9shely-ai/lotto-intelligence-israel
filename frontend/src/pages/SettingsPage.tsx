@@ -55,7 +55,7 @@ export function SettingsPage() {
     }
   }
 
-  if (loading) return <div className="state">טוען הגדרות...</div>;
+  if (loading) return <div className="state state--loading">טוען הגדרות...</div>;
   if (error || !data)
     return (
       <div className="state state--error">
@@ -68,15 +68,20 @@ export function SettingsPage() {
 
   return (
     <div className="page">
-      <div className="page-head">
+      <header className="page-intro page-intro--admin">
         <div>
-          <h1>הגדרות גלובליות</h1>
-          <p className="muted">ברירות מחדל למסלולים · הודעת עדכון למשתמשים פעילים</p>
+          <p className="page-intro__eyebrow">הגדרות מערכת</p>
+          <h1 className="page-intro__title">הגדרות גלובליות</h1>
+          <p className="page-intro__lead">
+            ברירות מחדל למסלולים, הודעת עדכון למשתמשים, Slack ועוזר אישי.
+          </p>
         </div>
-        <Link className="btn btn--primary" to="/users">
-          משתמשים והרשאות
-        </Link>
-      </div>
+        <div className="page-head__actions">
+          <Link className="btn btn--admin" to="/users">
+            משתמשים והרשאות
+          </Link>
+        </div>
+      </header>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
@@ -89,11 +94,11 @@ export function SettingsPage() {
             ? "כרגע מוצגת הודעת עדכון לכל מי שמחובר."
             : "כרגע אין הודעת עדכון. הפעילו כשמבצעים שינויים באתר."}
         </p>
-        <div className="page-head__actions">
+        <div className="action-bar">
           {data.site_updating ? (
             <button
               type="button"
-              className="btn btn--primary"
+              className="btn btn--admin"
               disabled={busy}
               onClick={() => toggleUpdating(false)}
             >
@@ -102,7 +107,7 @@ export function SettingsPage() {
           ) : (
             <button
               type="button"
-              className="btn btn--primary"
+              className="btn btn--admin"
               disabled={busy}
               onClick={() => toggleUpdating(true)}
             >
@@ -142,7 +147,7 @@ export function SettingsPage() {
               dir="ltr"
             />
           </label>
-          <button type="submit" className="btn btn--primary">
+          <button type="submit" className="btn btn--admin">
             שמור חיבור Slack
           </button>
         </form>
@@ -198,7 +203,7 @@ export function SettingsPage() {
               dir="ltr"
             />
           </label>
-          <button type="submit" className="btn btn--primary">
+          <button type="submit" className="btn btn--admin">
             שמור מפתח עוזר אישי
           </button>
         </form>
@@ -264,7 +269,7 @@ export function SettingsPage() {
               />
             </label>
           </div>
-          <button type="submit" className="btn btn--primary">
+          <button type="submit" className="btn btn--admin">
             שמור הגדרות
           </button>
         </form>

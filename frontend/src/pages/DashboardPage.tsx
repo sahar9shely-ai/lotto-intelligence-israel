@@ -30,7 +30,7 @@ export function DashboardPage() {
 
   const { data: topupRequests } = useAsync(() => api.topupRequests(), []);
 
-  if (loading) return <div className="state">טוען את לוח הבקרה...</div>;
+  if (loading) return <div className="state state--loading">טוען את לוח הבקרה...</div>;
   if (error || !data)
     return (
       <div className="state state--error">

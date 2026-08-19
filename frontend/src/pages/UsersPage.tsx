@@ -210,7 +210,7 @@ export function UsersPage() {
     return true;
   }
 
-  if (loading) return <div className="state">טוען משתמשים...</div>;
+  if (loading) return <div className="state state--loading">טוען משתמשים...</div>;
   if (error)
     return (
       <div className="state state--error">
@@ -226,17 +226,20 @@ export function UsersPage() {
 
   return (
     <div className="page">
-      <div className="page-head">
+      <header className="page-intro page-intro--admin">
         <div>
-          <h1>משתמשים והרשאות</h1>
-          <p className="muted">
-            התחברות בשם משתמש וסיסמה · רק אתה מגדיר/מאשר איפוס סיסמה
+          <p className="page-intro__eyebrow">ניהול גישה</p>
+          <h1 className="page-intro__title">משתמשים והרשאות</h1>
+          <p className="page-intro__lead">
+            התחברות בשם משתמש וסיסמה · רק אתה מגדיר סיסמאות, מאשר איפוסים ושולח כניסה בוואטסאפ.
           </p>
         </div>
-        <button type="button" className="btn btn--primary" onClick={() => setShowCreate(true)}>
-          משתמש חדש
-        </button>
-      </div>
+        <div className="page-head__actions">
+          <button type="button" className="btn btn--admin" onClick={() => setShowCreate(true)}>
+            + משתמש חדש
+          </button>
+        </div>
+      </header>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
       {errorMsg ? <p className="form-error">{errorMsg}</p> : null}
@@ -258,10 +261,10 @@ export function UsersPage() {
                     {req.note ? ` · ${req.note}` : ""}
                   </span>
                 </div>
-                <div className="page-head__actions">
+                <div className="action-bar">
                   <button
                     type="button"
-                    className="btn btn--small btn--primary"
+                    className="btn btn--small btn--admin"
                     onClick={() => {
                       setFulfillPassword("");
                       setFulfillTarget(req);
@@ -369,14 +372,14 @@ export function UsersPage() {
                 </label>
               ) : null}
             </div>
-            <div className="page-head__actions">
-              <button type="submit" className="btn btn--primary">
+            <div className="action-bar">
+              <button type="submit" className="btn btn--admin">
                 שמור
               </button>
               {u.role !== "manager" && u.has_password ? (
                 <button
                   type="button"
-                  className="btn btn--ghost"
+                  className="btn btn--whatsapp"
                   onClick={() => openAccessWhatsApp(u)}
                 >
                   שליחת כניסה בוואטסאפ
@@ -449,7 +452,7 @@ export function UsersPage() {
                 <input name="send_whatsapp" type="checkbox" defaultChecked />
                 <span>פתח וואטסאפ עם שם משתמש וסיסמה אחרי יצירה</span>
               </label>
-              <button type="submit" className="btn btn--primary">
+              <button type="submit" className="btn btn--admin">
                 צור משתמש
               </button>
             </form>
@@ -493,7 +496,7 @@ export function UsersPage() {
                 value={fulfillPassword}
                 onChange={(e) => setFulfillPassword(e.target.value)}
               />
-              <button type="submit" className="btn btn--primary">
+              <button type="submit" className="btn btn--admin">
                 אשר ושמור סיסמה
               </button>
             </form>

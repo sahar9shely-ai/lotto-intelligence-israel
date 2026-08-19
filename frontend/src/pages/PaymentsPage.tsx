@@ -663,7 +663,7 @@ export function PaymentsPage() {
     }
   }
 
-  if (loading && !data) return <div className="state">טוען היסטוריית תשלומים...</div>;
+  if (loading && !data) return <div className="state state--loading">טוען היסטוריית תשלומים...</div>;
   if (error && !data)
     return (
       <div className="state state--error">
@@ -698,7 +698,7 @@ export function PaymentsPage() {
         <div className="page-head__actions">
           <button
             type="button"
-            className="btn btn--primary"
+            className={`btn ${isManager ? "btn--admin" : "btn--gold"}`}
             disabled={pdfBusy}
             onClick={exportYearPdf}
           >
@@ -706,7 +706,7 @@ export function PaymentsPage() {
           </button>
           {isManager ? (
             <details className="tools-menu">
-              <summary className="btn btn--ghost">פעולות ניהול</summary>
+              <summary className="btn btn--ghost btn--admin-outline">פעולות ניהול</summary>
               <div className="tools-menu__list">
                 <button
                   type="button"
@@ -755,10 +755,10 @@ export function PaymentsPage() {
                       {formatDate(p.due_date)} · {formatMoney(p.investor_amount, true)}
                     </span>
                   </div>
-                  <div className="page-head__actions">
+                  <div className="action-bar">
                     <button
                       type="button"
-                      className="btn btn--small btn--primary"
+                      className="btn btn--small btn--gold"
                       disabled={markBusyId === p.id}
                       onClick={() => confirmPayment(p.id)}
                     >
@@ -1343,7 +1343,7 @@ export function PaymentsPage() {
             {isManager && !allYears && !detailFocus ? (
               <button
                 type="button"
-                className="btn btn--primary"
+                className="btn btn--admin"
                 disabled={openBusy}
                 onClick={openReportingYear}
               >
@@ -1423,7 +1423,7 @@ export function PaymentsPage() {
                         p.status === "scheduled" ? (
                           <button
                             type="button"
-                            className="btn btn--small"
+                            className="btn btn--small btn--admin"
                             disabled={markBusyId === p.id}
                             onClick={() => markPaid(p.id)}
                           >
@@ -1452,7 +1452,7 @@ export function PaymentsPage() {
                         <>
                           <button
                             type="button"
-                            className="btn btn--small btn--primary"
+                            className={`btn btn--small ${isManager ? "btn--admin" : "btn--gold"}`}
                             disabled={markBusyId === p.id}
                             onClick={() => confirmPayment(p.id)}
                           >

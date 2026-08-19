@@ -236,7 +236,7 @@ export function InvestorsPage() {
     }
   }
 
-  if (loading) return <div className="state">טוען משקיעים...</div>;
+  if (loading) return <div className="state state--loading">טוען משקיעים...</div>;
   if (error || !investors)
     return (
       <div className="state state--error">
