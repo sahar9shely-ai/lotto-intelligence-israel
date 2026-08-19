@@ -124,6 +124,7 @@ export const api = {
     body: Partial<{
       username: string;
       email: string | null;
+      phone: string | null;
       role: string;
       is_active: boolean;
       investor_name: string;

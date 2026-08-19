@@ -7,6 +7,29 @@ import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { AuthUser, PasswordResetRequestItem } from "../types/auth";
 import { formatDate } from "../utils/format";
+import { formatPhoneDisplay, toWhatsAppNumber, whatsAppAccessUrl } from "../utils/whatsapp";
+
+function accessShareTarget(
+  user: AuthUser,
+  passwordOverride?: string,
+): {
+  name: string;
+  phone?: string | null;
+  access_username?: string | null;
+  access_password?: string | null;
+} {
+  return {
+    name: user.investor_name,
+    phone: user.phone,
+    access_username: user.username,
+    access_password: passwordOverride || user.access_password,
+  };
+}
+
+function canSendAccess(user: AuthUser, passwordOverride?: string): boolean {
+  const password = passwordOverride || user.access_password;
+  return Boolean(toWhatsAppNumber(user.phone) && user.username && password && user.has_password);
+}
 
 export function UsersPage() {
   const { user: currentUser } = useAuth();
@@ -15,22 +38,45 @@ export function UsersPage() {
     data: resetRequests,
     reload: reloadRequests,
   } = useAsync(() => api.passwordResetRequests(true), []);
+  const { data: siteStatus } = useAsync(() => api.siteStatus(), []);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [fulfillTarget, setFulfillTarget] = useState<PasswordResetRequestItem | null>(null);
   const [fulfillPassword, setFulfillPassword] = useState("");
   const clearMessage = useCallback(() => setMessage(null), []);
+  const publicUrl = siteStatus?.public_url || window.location.origin;
+
+  function openAccessWhatsApp(
+    user: AuthUser,
+    passwordOverride?: string,
+  ): boolean {
+    if (!canSendAccess(user, passwordOverride)) {
+      setErrorMsg("חסר טלפון, סיסמה פעילה או שם משתמש — שמרו את הפרטים ונסו שוב");
+      return false;
+    }
+    const url = whatsAppAccessUrl(accessShareTarget(user, passwordOverride), publicUrl);
+    if (!url) {
+      setErrorMsg("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
+      return false;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    setMessage(`נפתחה הודעת וואטסאפ עם פרטי הכניסה עבור ${user.investor_name}`);
+    return true;
+  }
 
   async function saveUser(user: AuthUser, e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErrorMsg(null);
     const fd = new FormData(e.currentTarget);
+    const sendWhatsApp = fd.get("send_whatsapp") === "on";
+    const phone = String(fd.get("phone") || "").trim() || null;
     try {
       await api.updateUser(user.id, {
         investor_name: String(fd.get("investor_name") || "").trim(),
         username: String(fd.get("username") || "").trim(),
         email: String(fd.get("email") || "").trim() || null,
+        phone,
         role: String(fd.get("role") || "investor"),
         is_active: String(fd.get("is_active") || "true") === "true",
       });
@@ -38,10 +84,25 @@ export function UsersPage() {
       if (newPassword) {
         await api.setUserPassword(user.id, newPassword);
       }
+      const updatedUser: AuthUser = {
+        ...user,
+        investor_name: String(fd.get("investor_name") || "").trim(),
+        username: String(fd.get("username") || "").trim(),
+        phone,
+        access_password: newPassword || user.access_password,
+        has_password: newPassword ? true : user.has_password,
+      };
+      if (sendWhatsApp) {
+        openAccessWhatsApp(updatedUser, newPassword || undefined);
+      }
       setMessage(
         newPassword
-          ? "המשתמש עודכן והסיסמה הוגדרה על ידך."
-          : "המשתמש עודכן.",
+          ? sendWhatsApp
+            ? "המשתמש עודכן, הסיסמה הוגדרה ונפתחה הודעת וואטסאפ."
+            : "המשתמש עודכן והסיסמה הוגדרה על ידך."
+          : sendWhatsApp
+            ? "המשתמש עודכן ונפתחה הודעת וואטסאפ עם פרטי הכניסה."
+            : "המשתמש עודכן.",
       );
       reload();
       reloadRequests();
@@ -54,17 +115,35 @@ export function UsersPage() {
     e.preventDefault();
     setErrorMsg(null);
     const fd = new FormData(e.currentTarget);
+    const sendWhatsApp = fd.get("send_whatsapp") === "on";
+    const phone = String(fd.get("phone") || "").trim() || undefined;
+    const password = String(fd.get("password") || "");
     try {
-      await api.createAccessUser({
+      const created = await api.createAccessUser({
         name: String(fd.get("name") || "").trim(),
         username: String(fd.get("username") || "").trim(),
-        password: String(fd.get("password") || ""),
+        password,
         email: String(fd.get("email") || "").trim() || undefined,
         role: String(fd.get("role") || "investor"),
-        phone: String(fd.get("phone") || "") || undefined,
+        phone,
       });
+      if (sendWhatsApp) {
+        openAccessWhatsApp(
+          {
+            ...created,
+            phone: phone ?? null,
+            access_password: password,
+            has_password: true,
+          },
+          password,
+        );
+      }
       setShowCreate(false);
-      setMessage("משתמש חדש נוצר עם שם משתמש וסיסמה.");
+      setMessage(
+        sendWhatsApp
+          ? "משתמש חדש נוצר ונפתחה הודעת וואטסאפ עם פרטי הכניסה."
+          : "משתמש חדש נוצר עם שם משתמש וסיסמה.",
+      );
       reload();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "יצירה נכשלה");
@@ -229,8 +308,8 @@ export function UsersPage() {
           title={u.investor_name}
           subtitle={
             u.has_password
-              ? `שם משתמש: ${u.username} · יש גישה פעילה`
-              : `שם משתמש: ${u.username} · ממתין לסיסמה מהמנהל`
+              ? `שם משתמש: ${u.username}${u.phone ? ` · ${formatPhoneDisplay(u.phone)}` : ""} · יש גישה פעילה`
+              : `שם משתמש: ${u.username}${u.phone ? ` · ${formatPhoneDisplay(u.phone)}` : ""} · ממתין לסיסמה מהמנהל`
           }
         >
           <form className="form" onSubmit={(e) => saveUser(u, e)}>
@@ -250,6 +329,16 @@ export function UsersPage() {
                   type="email"
                   defaultValue={u.email && !u.email.endsWith("@local.tazrim") ? u.email : ""}
                   placeholder="אופציונלי"
+                />
+              </label>
+              <label>
+                טלפון (לשליחת וואטסאפ)
+                <input
+                  name="phone"
+                  type="tel"
+                  inputMode="tel"
+                  defaultValue={u.phone ?? ""}
+                  placeholder="05X-XXX-XXXX"
                 />
               </label>
               <label>
@@ -273,11 +362,26 @@ export function UsersPage() {
                 autoComplete="new-password"
                 placeholder={u.has_password ? "השאר ריק כדי לא לשנות" : "חובה להגדיר"}
               />
+              {u.role !== "manager" && u.has_password ? (
+                <label className="checkbox-row">
+                  <input name="send_whatsapp" type="checkbox" />
+                  <span>פתח וואטסאפ עם שם משתמש וסיסמה אחרי שמירה</span>
+                </label>
+              ) : null}
             </div>
             <div className="page-head__actions">
               <button type="submit" className="btn btn--primary">
                 שמור
               </button>
+              {u.role !== "manager" && u.has_password ? (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => openAccessWhatsApp(u)}
+                >
+                  שליחת כניסה בוואטסאפ
+                </button>
+              ) : null}
               {canDeleteUser(u) ? (
                 <button
                   type="button"
@@ -339,7 +443,11 @@ export function UsersPage() {
               </label>
               <label>
                 טלפון
-                <input name="phone" />
+                <input name="phone" type="tel" inputMode="tel" placeholder="05X-XXX-XXXX" />
+              </label>
+              <label className="checkbox-row">
+                <input name="send_whatsapp" type="checkbox" defaultChecked />
+                <span>פתח וואטסאפ עם שם משתמש וסיסמה אחרי יצירה</span>
               </label>
               <button type="submit" className="btn btn--primary">
                 צור משתמש

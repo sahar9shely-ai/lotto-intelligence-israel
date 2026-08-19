@@ -177,6 +177,19 @@ def test_manager_can_set_password_directly():
     assert login.status_code == 200
 
 
+def test_manager_can_update_user_phone():
+    headers = _auth_headers("sahar", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    almog = next(u for u in users if u["username"] == "almog")
+    res = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"phone": "052-535-7071"},
+    )
+    assert res.status_code == 200
+    assert res.json()["phone"] == "052-535-7071"
+
+
 def test_delete_user_removes_investor_and_history():
     from datetime import date
 

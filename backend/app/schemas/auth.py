@@ -28,6 +28,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     email: Optional[str] = None
+    phone: Optional[str] = None
     access_password: Optional[str] = None
     role: str
     investor_id: int
@@ -79,6 +80,7 @@ class PasswordResetRequestOut(BaseModel):
 class UpdateUserRequest(BaseModel):
     username: Optional[str] = Field(default=None, min_length=2, max_length=64)
     email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, max_length=40)
     role: Optional[str] = Field(default=None, pattern="^(manager|investor)$")
     is_active: Optional[bool] = None
     investor_name: Optional[str] = Field(default=None, min_length=1, max_length=120)

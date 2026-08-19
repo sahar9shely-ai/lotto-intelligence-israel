@@ -253,6 +253,7 @@ def serialize_user(user: User) -> dict:
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "phone": user.investor.phone if user.investor else None,
         "access_password": user.access_password,
         "role": user.role,
         "investor_id": user.investor_id,

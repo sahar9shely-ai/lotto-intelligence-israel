@@ -284,6 +284,10 @@ def _apply_user_update(
     if "investor_name" in data and data["investor_name"] and user.investor:
         user.investor.name = str(data["investor_name"]).strip()
 
+    if "phone" in data and user.investor:
+        phone = str(data["phone"]).strip() if data["phone"] else None
+        user.investor.phone = phone or None
+
     db.commit()
     db.refresh(user)
     return auth_svc.serialize_user(user)
