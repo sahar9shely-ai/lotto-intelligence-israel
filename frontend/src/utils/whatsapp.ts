@@ -1,5 +1,6 @@
 import type { Investor, Quote } from "../types/investments";
 import { quotePdfFileName } from "./quotePdf";
+import { canSendQuoteAccessMessage } from "./quoteStatus";
 
 /** Digits only, Israeli mobiles become 9725XXXXXXXX. */
 export function toWhatsAppNumber(phone?: string | null): string | null {
@@ -53,6 +54,30 @@ export function buildAccessWhatsAppMessage(
   if (target.access_password) lines.push(`סיסמה: ${target.access_password}`);
   lines.push("", "אם יש שאלות — אפשר לפנות אליי.");
   return lines.join("\n");
+}
+
+function quoteAccessTarget(quote: Quote): AccessShareTarget {
+  return {
+    name: quote.prospect_name,
+    phone: quote.phone,
+    access_username: quote.access_username,
+    access_password: quote.access_password,
+  };
+}
+
+/** PDF share text: offer note before convert, login details only after transfer. */
+export function buildQuoteWhatsAppShareMessage(quote: Quote, publicUrl?: string | null): string {
+  if (canSendQuoteAccessMessage(quote.status)) {
+    return buildAccessWhatsAppMessage(quoteAccessTarget(quote), publicUrl);
+  }
+  return buildQuoteWhatsAppMessage(quote);
+}
+
+export function whatsAppQuoteShareUrl(quote: Quote, publicUrl?: string | null): string | null {
+  const number = toWhatsAppNumber(quote.phone);
+  if (!number) return null;
+  const text = encodeURIComponent(buildQuoteWhatsAppShareMessage(quote, publicUrl));
+  return `https://wa.me/${number}?text=${text}`;
 }
 
 export function whatsAppOfferUrl(quote: Quote): string | null {

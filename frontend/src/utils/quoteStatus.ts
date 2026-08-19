@@ -51,3 +51,8 @@ export function canRejectQuote(status: string): boolean {
 export function canConvertQuote(status: string): boolean {
   return normalizeQuoteStatus(status) === "approved";
 }
+
+/** Login credentials go out only after money transfer + track opened. */
+export function canSendQuoteAccessMessage(status: string): boolean {
+  return normalizeQuoteStatus(status) === "converted";
+}

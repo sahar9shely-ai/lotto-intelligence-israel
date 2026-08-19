@@ -16,19 +16,21 @@ import {
   canConvertQuote,
   canEditQuote,
   canRejectQuote,
+  canSendQuoteAccessMessage,
   isClosedQuote,
   isOpenQuote,
   normalizeQuoteStatus,
   quoteStatusLabel,
 } from "../utils/quoteStatus";
 import {
-  buildAccessWhatsAppMessage,
+  buildQuoteWhatsAppShareMessage,
   canSharePdfFile,
   formatPhoneDisplay,
   isShareAbort,
   shareQuotePdf,
   toWhatsAppNumber,
   whatsAppAccessUrl,
+  whatsAppQuoteShareUrl,
 } from "../utils/whatsapp";
 
 export function QuotesPage() {
@@ -244,15 +246,7 @@ export function QuotesPage() {
       await shareQuotePdf(
         whatsappSend.quote,
         whatsappSend.file,
-        buildAccessWhatsAppMessage(
-          {
-            name: whatsappSend.quote.prospect_name,
-            phone: whatsappSend.quote.phone,
-            access_username: whatsappSend.quote.access_username,
-            access_password: whatsappSend.quote.access_password,
-          },
-          publicUrl,
-        ),
+        buildQuoteWhatsAppShareMessage(whatsappSend.quote, publicUrl),
       );
       const name = whatsappSend.quote.prospect_name;
       setWhatsappSend(null);
@@ -270,6 +264,26 @@ export function QuotesPage() {
   function openWhatsappChat() {
     if (!whatsappSend) return;
     const { quote, file } = whatsappSend;
+    const url = whatsAppQuoteShareUrl(quote, publicUrl);
+    if (!url) {
+      setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    setWhatsappSend(null);
+    setMessage(
+      canSendQuoteAccessMessage(quote.status)
+        ? `צרפו את "${file.name}" בוואטסאפ (📎) ואז שלחו את ההודעה עם פרטי הכניסה`
+        : `צרפו את "${file.name}" בוואטסאפ (📎) ואז שלחו את ההודעה`,
+    );
+    reload();
+  }
+
+  function openQuoteAccessWhatsApp(quote: Quote) {
+    if (!canSendQuoteAccessMessage(quote.status)) {
+      setMessage("פרטי כניסה נשלחים רק אחרי אישור וביצוע העברה ופתיחת מסלול");
+      return;
+    }
     const url = whatsAppAccessUrl(
       {
         name: quote.prospect_name,
@@ -284,24 +298,14 @@ export function QuotesPage() {
       return;
     }
     window.open(url, "_blank", "noopener,noreferrer");
-    setWhatsappSend(null);
-    setMessage(`צרפו את "${file.name}" בוואטסאפ (📎) ואז שלחו את ההודעה`);
-    reload();
+    setMessage(`נפתחה הודעת כניסה מוכנה עבור ${quote.prospect_name}`);
   }
 
   async function copyWhatsappText() {
     if (!whatsappSend) return;
     try {
       await navigator.clipboard.writeText(
-        buildAccessWhatsAppMessage(
-          {
-            name: whatsappSend.quote.prospect_name,
-            phone: whatsappSend.quote.phone,
-            access_username: whatsappSend.quote.access_username,
-            access_password: whatsappSend.quote.access_password,
-          },
-          publicUrl,
-        ),
+        buildQuoteWhatsAppShareMessage(whatsappSend.quote, publicUrl),
       );
       setMessage("טקסט ההודעה הועתק — הדביקו בוואטסאפ אחרי צירוף הקובץ");
     } catch {
@@ -578,7 +582,7 @@ export function QuotesPage() {
                     <dd>{formatMoney(q.principal + q.total_investor_payout)}</dd>
                   </div>
                 </dl>
-                {q.access_username || q.access_password ? (
+                {canSendQuoteAccessMessage(q.status) && (q.access_username || q.access_password) ? (
                   <div className="quote-access">
                     <p className="quote-access__label">כניסה לאתר תזרים</p>
                     <dl>
@@ -719,10 +723,19 @@ export function QuotesPage() {
                         </button>
                       ) : null}
                       {status === "converted" ? (
-                        <p className="muted">
-                          כבר במערכת כמשקיע #{q.converted_investor_id}{" "}
-                          <Link to="/investors">למסך משקיעים</Link>
-                        </p>
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn--whatsapp"
+                            onClick={() => openQuoteAccessWhatsApp(q)}
+                          >
+                            שליחת כניסה בוואטסאפ
+                          </button>
+                          <p className="muted">
+                            כבר במערכת כמשקיע #{q.converted_investor_id}{" "}
+                            <Link to="/investors">למסך משקיעים</Link>
+                          </p>
+                        </>
                       ) : null}
                     </>
                   ) : (
@@ -869,18 +882,14 @@ export function QuotesPage() {
                   בוואטסאפ לחצו <strong>📎 צירוף</strong> → <strong>מסמך</strong> → בחרו את הקובץ
                   שהורד.
                 </li>
-                <li>שלחו את ההודעה — היא כבר כוללת קישור לאתר, שם משתמש וסיסמה.</li>
+                <li>
+                  {canSendQuoteAccessMessage(whatsappSend.quote.status)
+                    ? "שלחו את ההודעה — היא כוללת קישור לאתר, שם משתמש וסיסמה (רק אחרי ביצוע העברה)."
+                    : "שלחו את ההודעה הקצרה על ההצעה — פרטי כניסה יישלחו רק אחרי אישור וביצוע העברה."}
+                </li>
               </ol>
               <p className="whatsapp-send__preview">
-                {buildAccessWhatsAppMessage(
-                  {
-                    name: whatsappSend.quote.prospect_name,
-                    phone: whatsappSend.quote.phone,
-                    access_username: whatsappSend.quote.access_username,
-                    access_password: whatsappSend.quote.access_password,
-                  },
-                  publicUrl,
-                )}
+                {buildQuoteWhatsAppShareMessage(whatsappSend.quote, publicUrl)}
               </p>
               <div className="whatsapp-send__actions">
                 <button type="button" className="btn btn--ghost" onClick={() => setWhatsappSend(null)}>

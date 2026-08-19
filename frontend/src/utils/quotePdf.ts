@@ -3,6 +3,7 @@ import { formatMoney, formatPercent } from "./format";
 import { PDF_BASE_STYLES, renderHtmlToPdfBlob, savePdfBlob } from "./pdfDocument";
 import { buildMonthSchedule } from "./quoteSchedule";
 import { planTypeLabel } from "./planTypes";
+import { canSendQuoteAccessMessage } from "./quoteStatus";
 
 export type { MonthRow } from "./quoteSchedule";
 export { buildMonthSchedule } from "./quoteSchedule";
@@ -27,6 +28,7 @@ function formatQuoteDate(value?: string | null): string {
 }
 
 function accessSectionHtml(quote: Quote): string {
+  if (!canSendQuoteAccessMessage(quote.status)) return "";
   const start = quote.start_date ? formatQuoteDate(quote.start_date) : "";
   if (!quote.access_username && !quote.access_password && !start) return "";
   return `
