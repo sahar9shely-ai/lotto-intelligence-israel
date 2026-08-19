@@ -16,7 +16,7 @@ from sqlalchemy.orm import joinedload
 client = TestClient(app)
 
 
-def _headers(username: str = "sahar", password: str = "sahar1234!") -> dict:
+def _headers(username: str = "admin", password: str = "admin1234!") -> dict:
     db = InvestmentSessionLocal()
     try:
         inv_svc.seed_defaults(db)

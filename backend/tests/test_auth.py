@@ -65,7 +65,7 @@ def test_username_login_and_investor_scope_alerts_manager():
     )
     assert blocked.status_code == 403
 
-    _set_password("sahar", "ManagerPass1!")
+    _set_password("admin", "ManagerPass1!")
     _set_password("bar", "BarPass123!")
 
     bar_login = client.post(
@@ -92,7 +92,7 @@ def test_username_login_and_investor_scope_alerts_manager():
 
     manager_login = client.post(
         "/api/v1/auth/login",
-        json={"username": "sahar", "password": "ManagerPass1!"},
+        json={"username": "admin", "password": "ManagerPass1!"},
     )
     assert manager_login.status_code == 200
     m_token = manager_login.json()["access_token"]
@@ -123,7 +123,7 @@ def test_password_reset_requires_manager_approval():
     )
     assert still.status_code == 200
 
-    headers = _auth_headers("sahar", "ManagerPass1!")
+    headers = _auth_headers("admin", "ManagerPass1!")
     pending = client.get(
         "/api/v1/auth/password-reset-requests?pending_only=true",
         headers=headers,
@@ -159,7 +159,7 @@ def test_password_reset_requires_manager_approval():
 
 
 def test_manager_can_set_password_directly():
-    headers = _auth_headers("sahar", "ManagerPass1!")
+    headers = _auth_headers("admin", "ManagerPass1!")
     users = client.get("/api/v1/auth/users", headers=headers).json()
     almog = next(u for u in users if u["username"] == "almog")
     res = client.post(
@@ -178,7 +178,7 @@ def test_manager_can_set_password_directly():
 
 
 def test_manager_can_update_user_phone():
-    headers = _auth_headers("sahar", "ManagerPass1!")
+    headers = _auth_headers("admin", "ManagerPass1!")
     users = client.get("/api/v1/auth/users", headers=headers).json()
     almog = next(u for u in users if u["username"] == "almog")
     res = client.patch(
@@ -193,7 +193,7 @@ def test_manager_can_update_user_phone():
 def test_delete_user_removes_investor_and_history():
     from datetime import date
 
-    headers = _auth_headers("sahar", "ManagerPass1!")
+    headers = _auth_headers("admin", "ManagerPass1!")
     created = client.post(
         "/api/v1/auth/users",
         headers=headers,
@@ -245,11 +245,11 @@ def test_delete_user_removes_investor_and_history():
 
 
 def test_cannot_delete_manager():
-    headers = _auth_headers("sahar", "ManagerPass1!")
+    headers = _auth_headers("admin", "ManagerPass1!")
     users = client.get("/api/v1/auth/users", headers=headers).json()
-    sahar = next(u for u in users if u["username"] == "sahar")
+    admin = next(u for u in users if u["username"] == "admin")
 
-    res = client.delete(f"/api/v1/auth/users/{sahar['id']}", headers=headers)
+    res = client.delete(f"/api/v1/auth/users/{admin['id']}", headers=headers)
     assert res.status_code == 400
     assert "מנהל" in res.json()["detail"] or "עצמך" in res.json()["detail"]
 
@@ -257,7 +257,7 @@ def test_cannot_delete_manager():
 def test_delete_user_removes_investor_and_history():
     from datetime import date
 
-    headers = _auth_headers("sahar", "ManagerPass1!")
+    headers = _auth_headers("admin", "ManagerPass1!")
     created = client.post(
         "/api/v1/auth/users",
         headers=headers,
@@ -309,19 +309,72 @@ def test_delete_user_removes_investor_and_history():
 
 
 def test_cannot_delete_manager_or_self():
-    headers = _auth_headers("sahar", "ManagerPass1!")
+    headers = _auth_headers("admin", "ManagerPass1!")
     users = client.get("/api/v1/auth/users", headers=headers).json()
-    sahar = next(u for u in users if u["username"] == "sahar")
+    admin = next(u for u in users if u["username"] == "admin")
 
-    self_delete = client.delete(f"/api/v1/auth/users/{sahar['id']}", headers=headers)
+    self_delete = client.delete(f"/api/v1/auth/users/{admin['id']}", headers=headers)
     assert self_delete.status_code == 400
-    assert "עצמך" in self_delete.json()["detail"]
+    assert "עצמך" in self_delete.json()["detail"] or "מנהל" in self_delete.json()["detail"]
 
-    manager_delete = client.delete(f"/api/v1/auth/users/{sahar['id']}", headers={
-        "Authorization": headers["Authorization"].replace(
-            sahar["username"],
-            sahar["username"],
+
+def test_split_admin_and_personal_accounts():
+    _ensure_seeded()
+    db = InvestmentSessionLocal()
+    try:
+        from app.models.investments import Investor, InvestmentPlan, Payment
+        from app.services import auth_service as auth_svc
+
+        personal = db.query(Investor).filter(Investor.name == "סהר").one()
+        plan_count = db.query(InvestmentPlan).filter(InvestmentPlan.investor_id == personal.id).count()
+        payment_count = db.query(Payment).filter(Payment.investor_id == personal.id).count()
+
+        result = auth_svc.split_admin_and_personal_accounts(db)
+        assert result["status"] in {"ok", "already_split"}
+
+        db.expire_all()
+        personal = db.query(Investor).filter(Investor.name == "סהר").one()
+        admin = db.query(Investor).filter(Investor.name == "מנהל מערכת").one()
+        admin_user = db.query(User).filter(User.username == "admin").one()
+        personal_user = db.query(User).filter(User.username == "sahar").one()
+
+        assert not personal.is_manager
+        assert admin.is_manager
+        assert admin_user.role == "manager"
+        assert personal_user.role == "investor"
+        assert personal_user.investor_id == personal.id
+        assert admin_user.investor_id == admin.id
+        assert (
+            db.query(InvestmentPlan).filter(InvestmentPlan.investor_id == personal.id).count()
+            == plan_count
         )
-    })
-    # Still sahar deleting sahar - already tested. Test deleting manager as different manager - only one manager.
-    assert manager_delete.status_code == 400
+        assert (
+            db.query(Payment).filter(Payment.investor_id == personal.id).count()
+            == payment_count
+        )
+        assert db.query(InvestmentPlan).filter(InvestmentPlan.investor_id == admin.id).count() == 0
+    finally:
+        db.close()
+
+
+def test_personal_sahar_cannot_access_manager_routes():
+    _ensure_seeded()
+    _set_password("sahar", "SaharPass1!")
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "sahar", "password": "SaharPass1!"},
+    )
+    assert login.status_code == 200, login.text
+    body = login.json()["user"]
+    assert body["role"] == "investor"
+    assert body["is_manager"] is False
+    token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    quotes = client.get("/api/v1/investments/quotes", headers=headers)
+    assert quotes.status_code == 403
+
+    dash = client.get("/api/v1/investments/dashboard", headers=headers)
+    assert dash.status_code == 200
+    names = {i["name"] for i in dash.json()["investors_summary"]}
+    assert names == {"סהר"}

@@ -290,7 +290,8 @@ def seed_defaults(db: Session) -> dict:
     created: list[str] = []
 
     defaults = [
-        ("סהר", True),
+        ("מנהל מערכת", True),
+        ("סהר", False),
         ("בר", False),
         ("אופק", False),
         ("אלמוג", False),
@@ -298,19 +299,29 @@ def seed_defaults(db: Session) -> dict:
     ]
     for name, is_manager_flag in defaults:
         if name not in existing:
-            # Migrate legacy manager placeholder name if present.
+            # Migrate legacy combined manager row into personal Sahar + admin shell via seed_users.
+            if name == "סהר" and is_manager_flag is False:
+                legacy = (
+                    db.query(Investor)
+                    .filter(
+                        Investor.name.in_(("סהר", "מנהל", "מנהלת")),
+                    )
+                    .first()
+                )
+                if legacy and legacy.name == "סהר":
+                    continue
             if is_manager_flag and ("מנהל" in existing or "מנהלת" in existing):
                 legacy = (
                     db.query(Investor)
                     .filter(
                         Investor.name.in_(("מנהל", "מנהלת")),
-                        Investor.is_manager.is_(True),
                     )
                     .first()
                 )
                 if legacy:
                     old_name = legacy.name
                     legacy.name = name
+                    legacy.is_manager = True
                     created.append(f"renamed:{old_name}->{name}")
                     continue
             db.add(Investor(name=name, is_manager=is_manager_flag))

@@ -41,6 +41,12 @@ export function AppShell() {
   const primaryLinks = links.filter((l) => PRIMARY_PATHS.has(l.to));
   const moreLinks = links.filter((l) => !PRIMARY_PATHS.has(l.to));
   const displayName = user?.investor_name || user?.username || "";
+  const roleLabel =
+    user?.username === "admin" || (isManager && user?.investor_name === "מנהל מערכת")
+      ? "ADMIN"
+      : isManager
+        ? "מנהל"
+        : null;
 
   async function copyPublicUrl() {
     const url = siteStatus?.public_url;
@@ -147,7 +153,7 @@ export function AppShell() {
               <span className="brand__mark">תזרים</span>
               <span className="brand__tag">
                 {displayName}
-                {isManager ? <span className="role-chip">מנהל</span> : null}
+                {roleLabel ? <span className="role-chip">{roleLabel}</span> : null}
               </span>
             </div>
             <nav className="nav" aria-label="ניווט ראשי">

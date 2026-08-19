@@ -33,7 +33,7 @@ def _ensure_seeded() -> None:
 def _login(email: str, password: str) -> tuple[dict, int]:
     _ensure_seeded()
     username_map = {
-        "sahar9shely@gmail.com": "sahar",
+        "sahar9shely@gmail.com": "admin",
         "bar050297@gmail.com": "bar",
     }
     username = username_map.get(email, email.split("@", 1)[0].lower())

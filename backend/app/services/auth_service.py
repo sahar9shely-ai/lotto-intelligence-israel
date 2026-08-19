@@ -7,15 +7,16 @@ from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.auth import LoginAlert, PasswordResetRequest, User
-from app.models.investments import Investor, utcnow
+from app.models.investments import Investor, InvestmentPlan, Payment, utcnow
 from app.security.auth import create_access_token, hash_password, is_manager, verify_password
 from app.services.email_service import send_email
 
 
 DEFAULT_USERNAMES = {
+    "מנהל מערכת": "admin",
+    "מנהל": "admin",
+    "מנהלת": "admin",  # legacy
     "סהר": "sahar",
-    "מנהל": "sahar",
-    "מנהלת": "sahar",  # legacy display name
     "בר": "bar",
     "אופק": "ofek",
     "אלמוג": "almog",
@@ -23,19 +24,24 @@ DEFAULT_USERNAMES = {
 }
 
 DEFAULT_USER_EMAILS = {
-    "סהר": "sahar9shely@gmail.com",
+    "מנהל מערכת": "sahar9shely@gmail.com",
     "מנהל": "sahar9shely@gmail.com",
     "מנהלת": "sahar9shely@gmail.com",  # legacy
+    "סהר": None,
     "בר": "bar050297@gmail.com",
     "אופק": None,
     "אלמוג": None,
     "שושי": None,
 }
 
-MANAGER_NAME = "סהר"
-MANAGER_USERNAME = "sahar"
-# Initial password for a brand-new manager account only — never overwrites an existing hash.
-MANAGER_DEMO_PASSWORD = "sahar1234!"
+ADMIN_INVESTOR_NAME = "מנהל מערכת"
+ADMIN_USERNAME = "admin"
+ADMIN_DEMO_PASSWORD = "admin1234!"
+PERSONAL_INVESTOR_NAME = "סהר"
+PERSONAL_USERNAME = "sahar"
+MANAGER_NAME = ADMIN_INVESTOR_NAME
+MANAGER_USERNAME = ADMIN_USERNAME
+MANAGER_DEMO_PASSWORD = ADMIN_DEMO_PASSWORD
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{2,64}$")
 
@@ -167,32 +173,201 @@ def ensure_user_for_investor(
     return user
 
 
+def split_admin_and_personal_accounts(db: Session) -> dict:
+    """Separate admin operator login from Sahar's personal investor portfolio.
+
+    Safe / idempotent:
+    - Does not move plans, payments, or savings rows (same investor_id for personal data).
+    - Creates an empty admin shell investor + admin user when missing.
+    - Downgrades personal investor to is_manager=false and sahar user to role=investor.
+    """
+    from app.models.investments import AppSettings
+
+    admin_user = (
+        db.query(User)
+        .options(joinedload(User.investor))
+        .filter(User.username == ADMIN_USERNAME)
+        .first()
+    )
+    personal_user = (
+        db.query(User)
+        .options(joinedload(User.investor))
+        .filter(User.username == PERSONAL_USERNAME)
+        .first()
+    )
+    personal_inv = db.query(Investor).filter(Investor.name == PERSONAL_INVESTOR_NAME).first()
+
+    if personal_inv is None:
+        legacy = (
+            db.query(Investor)
+            .filter(Investor.is_manager.is_(True), Investor.name == PERSONAL_INVESTOR_NAME)
+            .first()
+        )
+        if legacy is not None:
+            personal_inv = legacy
+
+    if personal_inv is None and personal_user is not None:
+        personal_inv = personal_user.investor
+
+    if personal_inv is None:
+        return {"status": "skipped", "reason": "personal_investor_missing"}
+
+    if (
+        admin_user
+        and personal_user
+        and personal_user.role == "investor"
+        and not personal_inv.is_manager
+        and admin_user.role == "manager"
+        and admin_user.investor_id != personal_inv.id
+        and admin_user.investor
+        and admin_user.investor.is_manager
+    ):
+        return {
+            "status": "already_split",
+            "admin_username": admin_user.username,
+            "personal_username": personal_user.username,
+        }
+
+    plan_count_before = (
+        db.query(InvestmentPlan).filter(InvestmentPlan.investor_id == personal_inv.id).count()
+    )
+    payment_count_before = (
+        db.query(Payment).filter(Payment.investor_id == personal_inv.id).count()
+    )
+
+    admin_inv = (
+        db.query(Investor)
+        .filter(Investor.is_manager.is_(True), Investor.id != personal_inv.id)
+        .order_by(Investor.id.asc())
+        .first()
+    )
+    if admin_inv is None:
+        admin_inv = Investor(
+            name=ADMIN_INVESTOR_NAME,
+            is_manager=True,
+            notes="חשבון מנהל מערכת — ללא תיק השקעה אישי",
+        )
+        db.add(admin_inv)
+        db.flush()
+    else:
+        admin_inv.name = ADMIN_INVESTOR_NAME
+        admin_inv.is_manager = True
+
+    personal_inv.is_manager = False
+
+    for extra_manager in db.query(Investor).filter(
+        Investor.is_manager.is_(True), Investor.id != admin_inv.id
+    ):
+        extra_manager.is_manager = False
+
+    admin_email = normalize_email(DEFAULT_USER_EMAILS.get(ADMIN_INVESTOR_NAME)) or "sahar9shely@gmail.com"
+
+    if admin_user is None:
+        admin_user = User(
+            username=ADMIN_USERNAME,
+            email=admin_email,
+            investor_id=admin_inv.id,
+            role="manager",
+            must_reset_password=True,
+            is_active=True,
+        )
+        if not db.query(User).filter(User.email == admin_email).first():
+            admin_user.email = admin_email
+        else:
+            admin_user.email = f"{ADMIN_USERNAME}@local.tazrim"
+        db.add(admin_user)
+        db.flush()
+        if not admin_user.password_hash:
+            admin_user.password_hash = hash_password(ADMIN_DEMO_PASSWORD)
+            admin_user.must_reset_password = False
+            admin_user.password_set_at = utcnow()
+    else:
+        admin_user.investor_id = admin_inv.id
+        admin_user.role = "manager"
+
+    if personal_user is None:
+        personal_user = ensure_user_for_investor(
+            db,
+            personal_inv,
+            username=PERSONAL_USERNAME,
+            email=None,
+            password=None,
+        )
+    else:
+        personal_user.investor_id = personal_inv.id
+        personal_user.role = "investor"
+
+    if personal_user.email == admin_email:
+        personal_user.email = f"{PERSONAL_USERNAME}@local.tazrim"
+    if admin_user.email != admin_email and not db.query(User).filter(
+        User.email == admin_email, User.id != admin_user.id
+    ).first():
+        admin_user.email = admin_email
+
+    settings = db.query(AppSettings).first()
+    if settings and settings.manager_display_name in {"מנהל", "מנהלת", "שחר", ""}:
+        settings.manager_display_name = PERSONAL_INVESTOR_NAME
+
+    db.flush()
+
+    plan_count_after = (
+        db.query(InvestmentPlan).filter(InvestmentPlan.investor_id == personal_inv.id).count()
+    )
+    payment_count_after = (
+        db.query(Payment).filter(Payment.investor_id == personal_inv.id).count()
+    )
+    if plan_count_before != plan_count_after or payment_count_before != payment_count_after:
+        raise RuntimeError(
+            "split_admin_and_personal_accounts changed financial row counts — aborting"
+        )
+
+    db.flush()
+    return {
+        "status": "ok",
+        "admin_username": admin_user.username,
+        "personal_username": personal_user.username,
+        "personal_investor_id": personal_inv.id,
+        "admin_investor_id": admin_inv.id,
+        "plans_preserved": plan_count_after,
+        "payments_preserved": payment_count_after,
+    }
+
+
 def seed_users(db: Session) -> dict:
     from app.models.investments import AppSettings
 
     created: list[str] = []
     updated: list[str] = []
 
+    split_result = split_admin_and_personal_accounts(db)
+    if split_result.get("status") == "ok":
+        updated.append("split-admin-personal")
+
     manager = db.query(Investor).filter(Investor.is_manager.is_(True)).first()
-    if manager and manager.name in {"מנהל", "מנהלת", "שחר"}:
-        manager.name = MANAGER_NAME
-        updated.append(f"investor:{MANAGER_NAME}")
+    if manager and manager.name in {"מנהל", "מנהלת", "שחר", PERSONAL_INVESTOR_NAME}:
+        manager.name = ADMIN_INVESTOR_NAME
+        updated.append(f"investor:{ADMIN_INVESTOR_NAME}")
 
     settings = db.query(AppSettings).first()
     if settings and settings.manager_display_name in {"מנהל", "מנהלת", "שחר", ""}:
-        settings.manager_display_name = MANAGER_NAME
+        settings.manager_display_name = PERSONAL_INVESTOR_NAME
 
     for investor in db.query(Investor).order_by(Investor.id).all():
         user = db.query(User).filter(User.investor_id == investor.id).first()
         desired_username = username_for_investor(investor)
         desired_email = normalize_email(
             DEFAULT_USER_EMAILS.get(investor.name)
-            if not investor.is_manager
-            else DEFAULT_USER_EMAILS.get(MANAGER_NAME)
+            if investor.name != PERSONAL_INVESTOR_NAME
+            else None
         )
+        if investor.is_manager:
+            desired_email = normalize_email(DEFAULT_USER_EMAILS.get(ADMIN_INVESTOR_NAME))
 
         if user is None:
-            password = MANAGER_DEMO_PASSWORD if investor.is_manager else None
+            password = ADMIN_DEMO_PASSWORD if investor.is_manager else None
+            desired_username = (
+                ADMIN_USERNAME if investor.is_manager else desired_username or username_for_investor(investor)
+            )
             user = ensure_user_for_investor(
                 db,
                 investor,
@@ -205,6 +380,8 @@ def seed_users(db: Session) -> dict:
 
         if investor.is_manager:
             user.role = "manager"
+        elif investor.name == PERSONAL_INVESTOR_NAME:
+            user.role = "investor"
 
         # Backfill username for legacy rows migrated without one.
         if not getattr(user, "username", None):
@@ -239,10 +416,10 @@ def seed_users(db: Session) -> dict:
         # Never overwrite an existing password_hash — passwords change only via
         # explicit manager actions (Users page / fulfill reset request).
         if investor.is_manager and not user.password_hash:
-            user.password_hash = hash_password(MANAGER_DEMO_PASSWORD)
+            user.password_hash = hash_password(ADMIN_DEMO_PASSWORD)
             user.must_reset_password = False
             user.password_set_at = utcnow()
-            updated.append("manager-initial-password")
+            updated.append("admin-initial-password")
 
     db.commit()
     return {"created_users": created, "updated": updated}

@@ -23,7 +23,7 @@ def _auth_headers(email: str = "sahar9shely@gmail.com", password: str = "Passwor
     # Backward-compatible helper: map known emails to usernames.
     _ensure_seeded()
     username_map = {
-        "sahar9shely@gmail.com": "sahar",
+        "sahar9shely@gmail.com": "admin",
         "bar050297@gmail.com": "bar",
     }
     username = username_map.get(email, email.split("@")[0].lower())
