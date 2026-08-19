@@ -191,9 +191,15 @@ function buildQuoteDocumentHtml(quote: Quote): string {
   </div>`;
 }
 
-export function quotePdfFileName(quote: Quote): string {
-  const safeName = quote.prospect_name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "quote";
-  return `הצעת-תזרים-${safeName}.pdf`;
+/** Safe PDF download/share name: "רויטל השקעה.pdf" */
+export function quotePdfFileName(quote: Pick<Quote, "prospect_name">): string {
+  const name =
+    quote.prospect_name
+      .normalize("NFC")
+      .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "משקיע";
+  return `${name} השקעה.pdf`;
 }
 
 /** Build the investor-facing quote as a PDF file (for download or WhatsApp). */

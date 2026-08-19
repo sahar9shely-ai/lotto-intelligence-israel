@@ -1,4 +1,5 @@
 import type { Investor, Quote } from "../types/investments";
+import { quotePdfFileName } from "./quotePdf";
 
 /** Digits only, Israeli mobiles become 9725XXXXXXXX. */
 export function toWhatsAppNumber(phone?: string | null): string | null {
@@ -90,13 +91,18 @@ export async function shareQuotePdf(
   file: File,
   message = buildQuoteWhatsAppMessage(quote),
 ): Promise<void> {
-  if (!canSharePdfFile(file) || typeof navigator.share !== "function") {
+  const shareName = quotePdfFileName(quote);
+  const shareFile =
+    file.name === shareName
+      ? file
+      : new File([file], shareName, { type: file.type || "application/pdf", lastModified: file.lastModified });
+  if (!canSharePdfFile(shareFile) || typeof navigator.share !== "function") {
     throw new Error("הדפדפן לא תומך בשיתוף קובץ — צרפו את ה-PDF ידנית בוואטסאפ");
   }
   await navigator.share({
-    files: [file],
+    files: [shareFile],
     text: message,
-    title: file.name,
+    title: shareName.replace(/\.pdf$/i, ""),
   });
 }
 
