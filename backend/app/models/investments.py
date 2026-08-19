@@ -127,7 +127,7 @@ class Quote(Base):
     manager_fee_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     duration_months: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     converted_investor_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("investors.id"), nullable=True
     )

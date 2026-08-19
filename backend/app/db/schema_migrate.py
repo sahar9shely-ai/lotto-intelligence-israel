@@ -134,6 +134,22 @@ def ensure_schema(engine: Engine) -> None:
                 _add_column(conn, "quotes", "access_password VARCHAR(128)")
             if "start_date" not in cols:
                 _add_column(conn, "quotes", "start_date DATE")
+            conn.execute(
+                text(
+                    """
+                    UPDATE quotes SET status = 'pending'
+                    WHERE status IN ('draft', 'sent')
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE quotes SET status = 'rejected'
+                    WHERE status = 'archived'
+                    """
+                )
+            )
 
     if _table_exists(engine, "users"):
         cols = _table_columns(engine, "users")

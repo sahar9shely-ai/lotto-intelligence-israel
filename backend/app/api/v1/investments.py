@@ -1133,6 +1133,7 @@ def create_quote(
     data["phone"] = (data.get("phone") or "").strip() or None
     data["access_username"] = _quote_access_username(data.get("access_username"))
     data["access_password"] = (data.get("access_password") or "").strip() or None
+    data["status"] = "pending"
     quote = Quote(**data)
     db.add(quote)
     db.commit()
@@ -1150,7 +1151,17 @@ def update_quote(
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
+    if not svc.quote_is_editable(quote.status):
+        payload_data = payload.model_dump(exclude_unset=True)
+        if payload_data.keys() - {"status"}:
+            raise HTTPException(status_code=400, detail="לא ניתן לערוך הצעה סגורה או שהושלמה")
     for key, value in payload.model_dump(exclude_unset=True).items():
+        if key == "status":
+            try:
+                svc.validate_quote_status_transition(quote.status, str(value))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            value = svc.normalize_quote_status(str(value))
         if key == "access_username":
             value = _quote_access_username(value if isinstance(value, str) else None)
         elif key in {"phone", "access_password"}:
@@ -1181,7 +1192,7 @@ def delete_quote(
     if quote.status == "converted":
         raise HTTPException(
             status_code=400,
-            detail="לא ניתן למחוק הצעה שכבר הומרה למשקיע",
+            detail="לא ניתן למחוק הצעה שהושלמה ונפתח מסלול",
         )
     db.delete(quote)
     db.commit()
@@ -1200,6 +1211,11 @@ def convert_quote(
         raise HTTPException(status_code=404, detail="ההצעה לא נמצאה")
     if quote.status == "converted":
         raise HTTPException(status_code=400, detail="ההצעה כבר הומרה למשקיע")
+    if svc.normalize_quote_status(quote.status) != "approved":
+        raise HTTPException(
+            status_code=400,
+            detail="יש לאשר את ההצעה לפני קליטת המשקיע ופתיחת המסלול",
+        )
 
     start_date = payload.start_date or quote.start_date
     if start_date is None:

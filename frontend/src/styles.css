@@ -1241,6 +1241,15 @@ button.stat {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.quote-view-switch {
+  margin-bottom: 10px;
+}
+
+.quote-lifecycle {
+  margin: 0 0 14px;
+  font-size: 0.92rem;
+}
+
 .stack {
   display: grid;
   gap: 14px;
@@ -1673,9 +1682,20 @@ textarea {
 
 .badge--scheduled,
 .badge--draft,
-.badge--sent {
+.badge--sent,
+.badge--pending {
   background: var(--gold-soft);
   color: #8a6518;
+}
+
+.badge--approved {
+  background: rgba(47, 111, 94, 0.12);
+  color: var(--accent-strong);
+}
+
+.badge--rejected {
+  background: rgba(155, 44, 44, 0.12);
+  color: #9b2c2c;
 }
 
 .badge--paused,

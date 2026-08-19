@@ -29,6 +29,37 @@ MANAGER_FEE_KEYS = (
     "paid_manager_total",
 )
 
+QUOTE_STATUSES = frozenset({"pending", "approved", "converted", "rejected"})
+OPEN_QUOTE_STATUSES = frozenset({"pending", "approved", "converted"})
+_LEGACY_QUOTE_STATUS = {"draft": "pending", "sent": "pending", "archived": "rejected"}
+
+
+def normalize_quote_status(status: Optional[str]) -> str:
+    raw = (status or "pending").strip().lower()
+    return _LEGACY_QUOTE_STATUS.get(raw, raw)
+
+
+def validate_quote_status_transition(current: str, new: str) -> None:
+    old = normalize_quote_status(current)
+    target = normalize_quote_status(new)
+    if target not in QUOTE_STATUSES:
+        raise ValueError("סטטוס הצעה לא תקין")
+    if old == target:
+        return
+    allowed: dict[str, set[str]] = {
+        "pending": {"approved", "rejected"},
+        "approved": {"pending", "rejected"},
+        "converted": set(),
+        "rejected": {"pending"},
+    }
+    if target not in allowed.get(old, set()):
+        raise ValueError(f"לא ניתן לעבור מ-{old} ל-{target}")
+
+
+def quote_is_editable(status: str) -> bool:
+    normalized = normalize_quote_status(status)
+    return normalized in {"pending", "approved"}
+
 
 def months_between(start: date, end: date) -> int:
     if end < start:
@@ -944,7 +975,7 @@ def serialize_quote(quote: Quote) -> dict:
         "manager_fee_percent": quote.manager_fee_percent,
         "duration_months": quote.duration_months,
         "notes": quote.notes,
-        "status": quote.status,
+        "status": normalize_quote_status(quote.status),
         "converted_investor_id": quote.converted_investor_id,
         "created_at": quote.created_at,
         **quote_metrics(quote),

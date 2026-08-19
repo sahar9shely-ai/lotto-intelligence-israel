@@ -9,8 +9,18 @@ import { api } from "../services/api";
 import type { Quote } from "../types/investments";
 import { suggestPassword, suggestUsername } from "../utils/quoteAccess";
 import { buildMonthSchedule, downloadQuotePdf, quotePdfFile, saveQuotePdfFile } from "../utils/quotePdf";
-import { formatDate, formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
+import { formatDate, formatMoney, formatPercent, todayISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
+import {
+  canApproveQuote,
+  canConvertQuote,
+  canEditQuote,
+  canRejectQuote,
+  isClosedQuote,
+  isOpenQuote,
+  normalizeQuoteStatus,
+  quoteStatusLabel,
+} from "../utils/quoteStatus";
 import {
   buildAccessWhatsAppMessage,
   canSharePdfFile,
@@ -36,16 +46,24 @@ export function QuotesPage() {
   const [convertError, setConvertError] = useState<string | null>(null);
   const [draftPassword] = useState(() => suggestPassword());
   const [busy, setBusy] = useState(false);
+  const [viewTab, setViewTab] = useState<"open" | "closed">("open");
   const clearMessage = useCallback(() => setMessage(null), []);
 
-  const preview = useMemo(() => data ?? [], [data]);
+  const allQuotes = useMemo(() => data ?? [], [data]);
+  const openQuotes = useMemo(() => allQuotes.filter((q) => isOpenQuote(q.status)), [allQuotes]);
+  const closedQuotes = useMemo(
+    () => allQuotes.filter((q) => isClosedQuote(q.status)),
+    [allQuotes],
+  );
+  const preview = viewTab === "open" ? openQuotes : closedQuotes;
   const publicUrl = siteStatus?.public_url || window.location.origin;
   const formOpen = showForm || editing != null;
   const backfilling = useRef(false);
   const accessAttempted = useRef(new Set<number>());
 
   const persistQuoteAccess = useCallback(async (quote: Quote): Promise<Quote> => {
-    if (quote.status === "converted") return quote;
+    const status = normalizeQuoteStatus(quote.status);
+    if (status === "converted" || status === "rejected") return quote;
     if (quote.access_username && quote.access_password && quote.start_date) return quote;
     return api.updateQuote(quote.id, {
       access_username: quote.access_username || suggestUsername(quote.prospect_name, quote.phone),
@@ -58,7 +76,8 @@ export function QuotesPage() {
     if (!data || backfilling.current) return;
     const missing = data.filter(
       (q) =>
-        q.status !== "converted" &&
+        normalizeQuoteStatus(q.status) !== "converted" &&
+        normalizeQuoteStatus(q.status) !== "rejected" &&
         !accessAttempted.current.has(q.id) &&
         (!q.access_username || !q.access_password || !q.start_date),
     );
@@ -130,9 +149,30 @@ export function QuotesPage() {
     }
   }
 
+  async function setQuoteStatus(quote: Quote, status: "approved" | "rejected" | "pending") {
+    try {
+      await api.updateQuote(quote.id, { status });
+      const label = quoteStatusLabel(status);
+      setMessage(
+        status === "rejected"
+          ? `ההצעה ל-${quote.prospect_name} סומנה כ"${label}" ועברה להצעות שנסגרו`
+          : `ההצעה ל-${quote.prospect_name} עודכנה ל"${label}"`,
+      );
+      if (status === "rejected") setViewTab("closed");
+      reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "עדכון הסטטוס נכשל");
+    }
+  }
+
+  async function rejectQuote(quote: Quote) {
+    if (!window.confirm(`לסמן את ההצעה ל-${quote.prospect_name} כ"לא אושר"?`)) return;
+    await setQuoteStatus(quote, "rejected");
+  }
+
   async function removeQuote(quote: Quote) {
-    if (quote.status === "converted") {
-      setMessage("לא ניתן למחוק הצעה שכבר הומרה למשקיע");
+    if (normalizeQuoteStatus(quote.status) === "converted") {
+      setMessage("לא ניתן למחוק הצעה שהושלמה ונפתח מסלול");
       return;
     }
     if (!window.confirm(`למחוק את ההצעה ל-${quote.prospect_name}?`)) return;
@@ -175,16 +215,6 @@ export function QuotesPage() {
     }
   }
 
-  async function markQuoteSent(quote: Quote) {
-    if (quote.status !== "draft") return;
-    try {
-      await api.updateQuote(quote.id, { status: "sent" });
-      reload();
-    } catch {
-      // The chat still opened; status update is secondary.
-    }
-  }
-
   async function sendWhatsApp(quote: Quote) {
     if (!toWhatsAppNumber(quote.phone)) {
       setMessage("הוסיפו מספר טלפון תקין להצעה כדי לשלוח בוואטסאפ");
@@ -224,7 +254,6 @@ export function QuotesPage() {
           publicUrl,
         ),
       );
-      await markQuoteSent(whatsappSend.quote);
       const name = whatsappSend.quote.prospect_name;
       setWhatsappSend(null);
       setMessage(`בחרו וואטסאפ — הקובץ ${name} יצורף להודעה`);
@@ -255,7 +284,6 @@ export function QuotesPage() {
       return;
     }
     window.open(url, "_blank", "noopener,noreferrer");
-    void markQuoteSent(quote);
     setWhatsappSend(null);
     setMessage(`צרפו את "${file.name}" בוואטסאפ (📎) ואז שלחו את ההודעה`);
     reload();
@@ -447,14 +475,54 @@ export function QuotesPage() {
         </Panel>
       ) : null}
 
+      <div className="track-view-switch quote-view-switch" role="tablist" aria-label="סינון הצעות">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={viewTab === "open"}
+          className={
+            viewTab === "open" ? "track-view-switch__btn is-active" : "track-view-switch__btn"
+          }
+          onClick={() => setViewTab("open")}
+        >
+          הצעות פתוחות
+          <em>{openQuotes.length}</em>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={viewTab === "closed"}
+          className={
+            viewTab === "closed" ? "track-view-switch__btn is-active" : "track-view-switch__btn"
+          }
+          onClick={() => setViewTab("closed")}
+        >
+          הצעות שנסגרו
+          <em>{closedQuotes.length}</em>
+        </button>
+      </div>
+
+      {viewTab === "open" ? (
+        <p className="quote-lifecycle muted">
+          מחזור הצעה: ממתין → אושר → בוצע העברה ופתיחת מסלול. הצעה שלא אושרה עוברת לסגורות.
+        </p>
+      ) : (
+        <p className="quote-lifecycle muted">הצעות שלא אושרו — לא מוצגות בין ההצעות הפתוחות.</p>
+      )}
+
       <div className="quotes-grid">
         {preview.length === 0 ? (
-          <p className="empty">אין הצעות עדיין. צור הצעת סיכום לאנשים חדשים.</p>
+          <p className="empty">
+            {viewTab === "open"
+              ? "אין הצעות פתוחות. צרו הצעה חדשה או סמנו הצעה קיימת כאושרת."
+              : "אין הצעות שנסגרו."}
+          </p>
         ) : (
           preview.map((q) => {
             const rows = buildMonthSchedule(q);
             const open = expandedId === q.id;
-            const canEdit = q.status !== "converted";
+            const status = normalizeQuoteStatus(q.status);
+            const editable = canEditQuote(q.status);
             return (
               <article key={q.id} className="quote-card">
                 <header>
@@ -471,7 +539,7 @@ export function QuotesPage() {
                       <p className="quote-card__phone muted">תחילת מסלול {formatDate(q.start_date)}</p>
                     ) : null}
                   </div>
-                  <span className={`badge badge--${q.status}`}>{statusLabel(q.status)}</span>
+                  <span className={`badge badge--${status}`}>{quoteStatusLabel(q.status)}</span>
                 </header>
                 <p className="quote-card__lead">
                   {planTypeLabel(q.plan_type)} · קרן {formatMoney(q.principal)} ·{" "}
@@ -580,34 +648,92 @@ export function QuotesPage() {
                 ) : null}
 
                 <div className="page-head__actions">
-                  <button
-                    type="button"
-                    className="btn btn--whatsapp"
-                    disabled={pdfBusyId === q.id}
-                    onClick={() => sendWhatsApp(q)}
-                  >
-                    {pdfBusyId === q.id ? "מכינים PDF..." : "שליחת PDF בוואטסאפ"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    disabled={pdfBusyId === q.id}
-                    onClick={() => exportPdf(q)}
-                  >
-                    {pdfBusyId === q.id ? "מכינים PDF..." : "הורדת PDF"}
-                  </button>
-                  {canEdit ? (
+                  {viewTab === "open" ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn--whatsapp"
+                        disabled={pdfBusyId === q.id}
+                        onClick={() => sendWhatsApp(q)}
+                      >
+                        {pdfBusyId === q.id ? "מכינים PDF..." : "שליחת PDF בוואטסאפ"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        disabled={pdfBusyId === q.id}
+                        onClick={() => exportPdf(q)}
+                      >
+                        {pdfBusyId === q.id ? "מכינים PDF..." : "הורדת PDF"}
+                      </button>
+                      {canApproveQuote(q.status) ? (
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          onClick={() => void setQuoteStatus(q, "approved")}
+                        >
+                          סימון כאושר
+                        </button>
+                      ) : null}
+                      {canRejectQuote(q.status) ? (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--danger"
+                          onClick={() => void rejectQuote(q)}
+                        >
+                          לא אושר
+                        </button>
+                      ) : null}
+                      {editable ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn--ghost"
+                            onClick={() => {
+                              setShowForm(false);
+                              setEditing(q);
+                              window.scrollTo({ top: 0, behavior: "smooth" });
+                            }}
+                          >
+                            עריכה
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--danger"
+                            onClick={() => removeQuote(q)}
+                          >
+                            מחיקה
+                          </button>
+                        </>
+                      ) : null}
+                      {canConvertQuote(q.status) ? (
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          onClick={() => {
+                            setConvertError(null);
+                            setConverting(q);
+                          }}
+                        >
+                          הכנס כמשקיע חדש
+                        </button>
+                      ) : null}
+                      {status === "converted" ? (
+                        <p className="muted">
+                          כבר במערכת כמשקיע #{q.converted_investor_id}{" "}
+                          <Link to="/investors">למסך משקיעים</Link>
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
                     <>
                       <button
                         type="button"
                         className="btn btn--ghost"
-                        onClick={() => {
-                          setShowForm(false);
-                          setEditing(q);
-                          window.scrollTo({ top: 0, behavior: "smooth" });
-                        }}
+                        disabled={pdfBusyId === q.id}
+                        onClick={() => exportPdf(q)}
                       >
-                        עריכה
+                        {pdfBusyId === q.id ? "מכינים PDF..." : "הורדת PDF"}
                       </button>
                       <button
                         type="button"
@@ -618,20 +744,12 @@ export function QuotesPage() {
                       </button>
                       <button
                         type="button"
-                        className="btn btn--primary"
-                        onClick={() => {
-                          setConvertError(null);
-                          setConverting(q);
-                        }}
+                        className="btn btn--ghost"
+                        onClick={() => void setQuoteStatus(q, "pending")}
                       >
-                        הכנס כמשקיע חדש
+                        החזרה להצעות פתוחות
                       </button>
                     </>
-                  ) : (
-                    <p className="muted">
-                      כבר במערכת כמשקיע #{q.converted_investor_id}{" "}
-                      <Link to="/investors">למסך משקיעים</Link>
-                    </p>
                   )}
                 </div>
               </article>

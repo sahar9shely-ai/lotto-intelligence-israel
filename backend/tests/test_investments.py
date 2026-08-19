@@ -43,6 +43,69 @@ def _auth_headers(email: str = "sahar9shely@gmail.com", password: str = "Passwor
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
+def _approve_quote(headers: dict, quote_id: int) -> None:
+    res = client.patch(
+        f"/api/v1/investments/quotes/{quote_id}",
+        headers=headers,
+        json={"status": "approved"},
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_quote_lifecycle_open_and_closed():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    created = client.post(
+        "/api/v1/investments/quotes",
+        headers=headers,
+        json={
+            "prospect_name": "מחזור סטטוס",
+            "principal": 3000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "duration_months": 12,
+        },
+    )
+    assert created.status_code == 201, created.text
+    quote_id = created.json()["id"]
+    assert created.json()["status"] == "pending"
+
+    convert_before = client.post(
+        f"/api/v1/investments/quotes/{quote_id}/convert",
+        headers=headers,
+        json={
+            "start_date": date.today().isoformat(),
+            "username": "cycleuser",
+            "password": "CyclePass1!",
+        },
+    )
+    assert convert_before.status_code == 400
+    assert "לאשר" in convert_before.json()["detail"]
+
+    approved = client.patch(
+        f"/api/v1/investments/quotes/{quote_id}",
+        headers=headers,
+        json={"status": "approved"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+
+    rejected = client.patch(
+        f"/api/v1/investments/quotes/{quote_id}",
+        headers=headers,
+        json={"status": "rejected"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+
+    reopen = client.patch(
+        f"/api/v1/investments/quotes/{quote_id}",
+        headers=headers,
+        json={"status": "pending"},
+    )
+    assert reopen.status_code == 200
+    assert reopen.json()["status"] == "pending"
+
+
 def test_seed_and_dashboard():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     investors = client.get("/api/v1/investments/investors", headers=headers)
@@ -113,7 +176,9 @@ def test_plan_payment_and_quote_flow():
     assert quote.status_code == 201
     quote_body = quote.json()
     assert quote_body["phone"] == "050-1234567"
+    assert quote_body["status"] == "pending"
 
+    _approve_quote(headers, quote_body["id"])
     converted = client.post(
         f"/api/v1/investments/quotes/{quote_body['id']}/convert",
         headers=headers,
@@ -153,7 +218,9 @@ def test_convert_quote_uses_stored_login_and_creates_user():
     assert body["access_username"] == "revitalq"
     assert body["access_password"] == "Revital1234!"
     assert body["start_date"] == start
+    assert body["status"] == "pending"
 
+    _approve_quote(headers, body["id"])
     converted = client.post(
         f"/api/v1/investments/quotes/{body['id']}/convert",
         headers=headers,
@@ -226,6 +293,7 @@ def test_investor_access_password_falls_back_to_converted_quote():
     assert quote.status_code == 201, quote.text
     quote_id = quote.json()["id"]
 
+    _approve_quote(headers, quote_id)
     converted = client.post(
         f"/api/v1/investments/quotes/{quote_id}/convert",
         headers=headers,
@@ -268,6 +336,7 @@ def test_convert_quote_rejects_hebrew_or_taken_username():
     )
     assert quote.status_code == 201, quote.text
     quote_id = quote.json()["id"]
+    _approve_quote(headers, quote_id)
 
     hebrew = client.post(
         f"/api/v1/investments/quotes/{quote_id}/convert",
@@ -326,6 +395,7 @@ def test_convert_quote_rejects_hebrew_or_taken_username():
         },
     )
     assert no_date.status_code == 201, no_date.text
+    _approve_quote(headers, no_date.json()["id"])
     missing_date = client.post(
         f"/api/v1/investments/quotes/{no_date.json()['id']}/convert",
         headers=headers,
@@ -708,6 +778,7 @@ def test_hybrid_and_savings_plan_types_available_without_seeding():
     assert s["projected_savings_balance"] == 53760
     assert s["total_investor_payout"] == 53760
 
+    _approve_quote(headers, body["id"])
     # Convert hybrid quote → plan keeps type; do not attach to existing seeded people.
     converted = client.post(
         f"/api/v1/investments/quotes/{body['id']}/convert",

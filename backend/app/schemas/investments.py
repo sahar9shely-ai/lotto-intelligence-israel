@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_serializer
 
 PlanStatus = Literal["active", "completed", "paused"]
 PaymentStatus = Literal["scheduled", "paid", "skipped", "awaiting_confirmation"]
-QuoteStatus = Literal["draft", "sent", "converted", "archived"]
+QuoteStatus = Literal["pending", "approved", "converted", "rejected"]
 PlanType = Literal["monthly", "savings", "hybrid"]
 
 
