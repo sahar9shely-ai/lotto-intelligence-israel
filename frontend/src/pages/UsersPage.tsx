@@ -2,12 +2,14 @@ import { FormEvent, useCallback, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
 import { Toast } from "../components/Toast";
+import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { AuthUser, PasswordResetRequestItem } from "../types/auth";
 import { formatDate } from "../utils/format";
 
 export function UsersPage() {
+  const { user: currentUser } = useAuth();
   const { data: users, error, loading, reload } = useAsync(() => api.users(), []);
   const {
     data: resetRequests,
@@ -97,6 +99,36 @@ export function UsersPage() {
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "דחייה נכשלה");
     }
+  }
+
+  async function deleteUserAccount(user: AuthUser) {
+    const warning = [
+      `למחוק לצמיתות את ${user.investor_name} (${user.username})?`,
+      "",
+      "יפעל מחיקה מלאה:",
+      "• משתמש וכניסה לאתר",
+      "• כל המסלולים והתשלומים",
+      "• בקשות הוספת מסלול",
+      "• הצעות שהומרו למשקיע הזה",
+      "",
+      "לא ניתן לשחזר.",
+    ].join("\n");
+    if (!window.confirm(warning)) return;
+    setErrorMsg(null);
+    try {
+      await api.deleteUser(user.id);
+      setMessage(`${user.investor_name} נמחק מהמערכת יחד עם כל ההיסטוריה.`);
+      reload();
+      reloadRequests();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "מחיקה נכשלה");
+    }
+  }
+
+  function canDeleteUser(user: AuthUser): boolean {
+    if (user.is_manager || user.role === "manager") return false;
+    if (currentUser?.id === user.id) return false;
+    return true;
   }
 
   if (loading) return <div className="state">טוען משתמשים...</div>;
@@ -246,6 +278,15 @@ export function UsersPage() {
               <button type="submit" className="btn btn--primary">
                 שמור
               </button>
+              {canDeleteUser(u) ? (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--danger"
+                  onClick={() => void deleteUserAccount(u)}
+                >
+                  מחיקת משקיע והיסטוריה
+                </button>
+              ) : null}
             </div>
             <p className="hint">
               כניסה אחרונה: {u.last_login_at ? formatDate(u.last_login_at) : "עדיין לא התחבר"}

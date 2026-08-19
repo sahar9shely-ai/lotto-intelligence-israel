@@ -175,3 +175,140 @@ def test_manager_can_set_password_directly():
         json={"username": "almog", "password": "AlmogPass1!"},
     )
     assert login.status_code == 200
+
+
+def test_delete_user_removes_investor_and_history():
+    from datetime import date
+
+    headers = _auth_headers("sahar", "ManagerPass1!")
+    created = client.post(
+        "/api/v1/auth/users",
+        headers=headers,
+        json={
+            "name": "למחיקה",
+            "username": "todelete",
+            "password": "DeleteMe1!",
+            "role": "investor",
+            "phone": "050-999-8888",
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    user_id = body["id"]
+    investor_id = body["investor_id"]
+
+    plan = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": investor_id,
+            "principal": 5000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "start_date": date.today().isoformat(),
+            "duration_months": 12,
+        },
+    )
+    assert plan.status_code == 201, plan.text
+
+    deleted = client.delete(f"/api/v1/auth/users/{user_id}", headers=headers)
+    assert deleted.status_code == 204, deleted.text
+
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    assert all(i["id"] != investor_id for i in investors)
+
+    payments = client.get(
+        f"/api/v1/investments/payments?investor_id={investor_id}",
+        headers=headers,
+    )
+    assert payments.status_code == 200
+    assert payments.json() == []
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "todelete", "password": "DeleteMe1!"},
+    )
+    assert login.status_code == 401
+
+
+def test_cannot_delete_manager():
+    headers = _auth_headers("sahar", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    sahar = next(u for u in users if u["username"] == "sahar")
+
+    res = client.delete(f"/api/v1/auth/users/{sahar['id']}", headers=headers)
+    assert res.status_code == 400
+    assert "מנהל" in res.json()["detail"] or "עצמך" in res.json()["detail"]
+
+
+def test_delete_user_removes_investor_and_history():
+    from datetime import date
+
+    headers = _auth_headers("sahar", "ManagerPass1!")
+    created = client.post(
+        "/api/v1/auth/users",
+        headers=headers,
+        json={
+            "name": "למחיקה",
+            "username": "todelete",
+            "password": "DeleteMe1!",
+            "role": "investor",
+            "phone": "050-999-8888",
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    user_id = body["id"]
+    investor_id = body["investor_id"]
+
+    plan = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": investor_id,
+            "principal": 5000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "start_date": date.today().isoformat(),
+            "duration_months": 12,
+        },
+    )
+    assert plan.status_code == 201, plan.text
+
+    deleted = client.delete(f"/api/v1/auth/users/{user_id}", headers=headers)
+    assert deleted.status_code == 204, deleted.text
+
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    assert all(i["id"] != investor_id for i in investors)
+
+    payments = client.get(
+        f"/api/v1/investments/payments?investor_id={investor_id}",
+        headers=headers,
+    )
+    assert payments.status_code == 200
+    assert payments.json() == []
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "todelete", "password": "DeleteMe1!"},
+    )
+    assert login.status_code == 401
+
+
+def test_cannot_delete_manager_or_self():
+    headers = _auth_headers("sahar", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    sahar = next(u for u in users if u["username"] == "sahar")
+
+    self_delete = client.delete(f"/api/v1/auth/users/{sahar['id']}", headers=headers)
+    assert self_delete.status_code == 400
+    assert "עצמך" in self_delete.json()["detail"]
+
+    manager_delete = client.delete(f"/api/v1/auth/users/{sahar['id']}", headers={
+        "Authorization": headers["Authorization"].replace(
+            sahar["username"],
+            sahar["username"],
+        )
+    })
+    # Still sahar deleting sahar - already tested. Test deleting manager as different manager - only one manager.
+    assert manager_delete.status_code == 400

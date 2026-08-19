@@ -1849,6 +1849,86 @@ def remove_investor_from_calendar_year(
     }
 
 
+def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
+    """Remove an investor, login user, and all related financial history."""
+    from app.models.auth import LoginAlert, PasswordResetRequest, PasswordResetToken, User
+
+    investor = db.query(Investor).filter(Investor.id == investor_id).first()
+    if not investor:
+        raise ValueError("משקיע לא נמצא")
+
+    user = db.query(User).filter(User.investor_id == investor_id).first()
+    plan_ids = [
+        row[0]
+        for row in db.query(InvestmentPlan.id)
+        .filter(InvestmentPlan.investor_id == investor_id)
+        .all()
+    ]
+
+    if plan_ids:
+        db.query(InvestmentPlan).filter(
+            InvestmentPlan.successor_plan_id.in_(plan_ids)
+        ).update({"successor_plan_id": None}, synchronize_session=False)
+    db.query(InvestmentPlan).filter(InvestmentPlan.investor_id == investor_id).update(
+        {"successor_plan_id": None}, synchronize_session=False
+    )
+    db.query(InvestmentTopupRequest).filter(
+        InvestmentTopupRequest.investor_id == investor_id
+    ).update({"created_plan_id": None}, synchronize_session=False)
+
+    deleted = {
+        "investor_id": investor_id,
+        "investor_name": investor.name,
+        "savings_actions": db.query(SavingsAction)
+        .filter(SavingsAction.investor_id == investor_id)
+        .delete(synchronize_session=False),
+        "payments": db.query(Payment)
+        .filter(Payment.investor_id == investor_id)
+        .delete(synchronize_session=False),
+        "topup_requests": db.query(InvestmentTopupRequest)
+        .filter(InvestmentTopupRequest.investor_id == investor_id)
+        .delete(synchronize_session=False),
+        "plans": db.query(InvestmentPlan)
+        .filter(InvestmentPlan.investor_id == investor_id)
+        .delete(synchronize_session=False),
+        "quotes": db.query(Quote)
+        .filter(Quote.converted_investor_id == investor_id)
+        .delete(synchronize_session=False),
+    }
+
+    if user:
+        deleted["login_alerts"] = (
+            db.query(LoginAlert)
+            .filter(
+                (LoginAlert.user_id == user.id) | (LoginAlert.investor_id == investor_id)
+            )
+            .delete(synchronize_session=False)
+        )
+        deleted["password_reset_requests"] = (
+            db.query(PasswordResetRequest)
+            .filter(PasswordResetRequest.user_id == user.id)
+            .delete(synchronize_session=False)
+        )
+        deleted["password_reset_tokens"] = (
+            db.query(PasswordResetToken)
+            .filter(PasswordResetToken.user_id == user.id)
+            .delete(synchronize_session=False)
+        )
+        db.delete(user)
+        deleted["user"] = 1
+    else:
+        deleted["login_alerts"] = (
+            db.query(LoginAlert)
+            .filter(LoginAlert.investor_id == investor_id)
+            .delete(synchronize_session=False)
+        )
+        deleted["user"] = 0
+
+    db.delete(investor)
+    db.commit()
+    return deleted
+
+
 def mark_year_payments_paid(
     db: Session,
     *,

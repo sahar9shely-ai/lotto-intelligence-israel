@@ -146,6 +146,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  deleteUser: (id: number) =>
+    request<void>(`/api/v1/auth/users/${id}`, { method: "DELETE" }),
   loginAlerts: (unreadOnly = false) =>
     request<LoginAlert[]>(
       `/api/v1/auth/login-alerts${unreadOnly ? "?unread_only=true" : ""}`,

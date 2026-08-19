@@ -22,6 +22,7 @@ from app.schemas.auth import (
 )
 from app.security.auth import get_current_user, require_manager
 from app.services import auth_service as auth_svc
+from app.services import investment_service as inv_svc
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -126,6 +127,31 @@ def list_users(
         .all()
     )
     return [auth_svc.serialize_user(u) for u in users]
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: int,
+    current: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    user = (
+        db.query(User)
+        .options(joinedload(User.investor))
+        .filter(User.id == user_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="משתמש לא נמצא")
+    if current.id == user.id:
+        raise HTTPException(status_code=400, detail="לא ניתן למחוק את עצמך")
+    if user.role == "manager" or bool(getattr(user.investor, "is_manager", False)):
+        raise HTTPException(status_code=400, detail="לא ניתן למחוק משתמש מנהל")
+    try:
+        inv_svc.delete_investor_and_history(db, investor_id=user.investor_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return None
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
