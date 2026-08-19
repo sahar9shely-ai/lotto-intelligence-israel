@@ -2972,27 +2972,6 @@ input[type="date"] {
   color: var(--ink-soft);
 }
 
-.auth-card__roles {
-  display: grid;
-  gap: 8px;
-  margin-top: 4px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--accent-soft) 45%, #fff);
-  border: 1px dashed color-mix(in srgb, var(--accent) 25%, var(--line));
-}
-
-.auth-card__roles p {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: var(--ink-soft);
-}
-
-.auth-card__roles strong {
-  color: var(--accent-strong);
-}
-
 .auth-card__brand {
   font-family: var(--font-display);
   font-size: 2.75rem;
