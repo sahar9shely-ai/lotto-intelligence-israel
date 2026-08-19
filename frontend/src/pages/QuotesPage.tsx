@@ -9,7 +9,7 @@ import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Quote } from "../types/investments";
 import { suggestPassword, suggestUsername } from "../utils/quoteAccess";
-import { buildMonthSchedule, downloadQuotePdf, quotePdfFile, saveQuotePdfFile } from "../utils/quotePdf";
+import { buildMonthSchedule, downloadQuotePdf, quotePdfDisplayLabel, quotePdfFile, saveQuotePdfFile } from "../utils/quotePdf";
 import { formatDate, formatMoney, formatPercent, todayISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
 import {
@@ -296,8 +296,8 @@ export function QuotesPage() {
     setWhatsappSend(null);
     setMessage(
       canSendQuoteAccessMessage(quote.status)
-        ? `צרפו את "${file.name}" בוואטסאפ (📎) ואז שלחו את ההודעה עם פרטי הכניסה`
-        : `צרפו את "${file.name}" בוואטסאפ (📎) ואז שלחו את ההודעה`,
+        ? `צרפו את "${quotePdfDisplayLabel(quote)}" בוואטסאפ (📎) ואז שלחו את ההודעה עם פרטי הכניסה`
+        : `צרפו את "${quotePdfDisplayLabel(quote)}" בוואטסאפ (📎) ואז שלחו את ההודעה`,
     );
     reload();
   }
@@ -923,7 +923,10 @@ export function QuotesPage() {
                 הקובץ ירד למחשב. וואטסאפ בדפדפן לא מצרף קבצים אוטומטית — צריך לצרף את ה-PDF
                 ידנית לפני השליחה.
               </p>
-              <p className="whatsapp-send__file">{whatsappSend.file.name}</p>
+              <p className="whatsapp-send__file">
+                {quotePdfDisplayLabel(whatsappSend.quote)}
+                <span className="whatsapp-send__file-tech">{whatsappSend.file.name}</span>
+              </p>
               <ol className="whatsapp-send__steps">
                 <li>
                   לחצו <strong>פתיחת וואטסאפ</strong> (או פתחו את הצ&apos;אט עם{" "}

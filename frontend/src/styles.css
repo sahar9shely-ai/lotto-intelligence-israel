@@ -1377,6 +1377,15 @@ button.stat {
   border-color: rgba(155, 44, 44, 0.2);
 }
 
+.whatsApp-send__file-tech,
+.whatsapp-send__file-tech {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
 .stack {
   display: grid;
   gap: 14px;

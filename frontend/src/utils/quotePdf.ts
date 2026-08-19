@@ -3,6 +3,7 @@ import { formatMoney, formatPercent } from "./format";
 import { PDF_BASE_STYLES, renderHtmlToPdfBlob, savePdfBlob } from "./pdfDocument";
 import { buildMonthSchedule } from "./quoteSchedule";
 import { planTypeLabel } from "./planTypes";
+import { suggestUsername } from "./quoteAccess";
 import { canSendQuoteAccessMessage } from "./quoteStatus";
 
 export type { MonthRow } from "./quoteSchedule";
@@ -193,15 +194,27 @@ function buildQuoteDocumentHtml(quote: Quote): string {
   </div>`;
 }
 
-/** Safe PDF download/share name: "רויטל השקעה.pdf" */
-export function quotePdfFileName(quote: Pick<Quote, "prospect_name">): string {
+/** Hebrew label for UI only (WhatsApp corrupts non-ASCII file names). */
+export function quotePdfDisplayLabel(quote: Pick<Quote, "prospect_name">): string {
   const name =
     quote.prospect_name
       .normalize("NFC")
       .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ")
       .replace(/\s+/g, " ")
       .trim() || "משקיע";
-  return `${name} השקעה.pdf`;
+  return `${name} השקעה`;
+}
+
+/** ASCII file name — works in WhatsApp, iOS share sheet, and Windows downloads. */
+export function quotePdfFileName(
+  quote: Pick<Quote, "prospect_name" | "access_username" | "phone">,
+): string {
+  const base =
+    (quote.access_username || suggestUsername(quote.prospect_name, quote.phone))
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]/g, "")
+      .slice(0, 48) || "offer";
+  return `${base}-hashkaa.pdf`;
 }
 
 /** Build the investor-facing quote as a PDF file (for download or WhatsApp). */
