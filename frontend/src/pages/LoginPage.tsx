@@ -80,15 +80,6 @@ export function LoginPage() {
           </button>
         </form>
 
-        <div className="auth-card__roles" aria-label="סוגי משתמשים">
-          <p>
-            <strong>ADMIN</strong> — ניהול מלא: משקיעים, תשלומים, הצעות והגדרות.
-          </p>
-          <p>
-            <strong>משקיע</strong> — צפייה במסלול, תשלומים ובקשות אישיות בלבד.
-          </p>
-        </div>
-
         <div className="auth-links">
           <Link to="/forgot-password">שכחתי סיסמה</Link>
         </div>
