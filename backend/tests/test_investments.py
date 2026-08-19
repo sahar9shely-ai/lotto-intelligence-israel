@@ -164,6 +164,7 @@ def test_convert_quote_uses_stored_login_and_creates_user():
     assert plan["investor_name"] == "רויטל"
     assert plan["status"] == "active"
     assert plan["start_date"] == start
+    assert plan["monthly_investor_payout"] == 500
     payments = client.get(
         f"/api/v1/investments/payments?plan_id={plan['id']}", headers=headers
     ).json()
@@ -179,6 +180,21 @@ def test_convert_quote_uses_stored_login_and_creates_user():
     revital = next(i for i in investors if i["name"] == "רויטל")
     assert revital["phone"] == "052-535-7071"
     assert revital.get("access_username") == "revitalq"
+
+    me = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+    )
+    assert me.status_code == 200, me.text
+    assert me.json()["username"] == "revitalq"
+    assert me.json()["role"] == "investor"
+
+    scoped = client.get(
+        "/api/v1/investments/investors",
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+    )
+    assert scoped.status_code == 200
+    assert {i["name"] for i in scoped.json()} == {"רויטל"}
 
     again = client.post(
         f"/api/v1/investments/quotes/{body['id']}/convert",
@@ -245,6 +261,29 @@ def test_convert_quote_rejects_hebrew_or_taken_username():
         },
     )
     assert saved.status_code == 400
+
+    leftover = client.get("/api/v1/investments/investors", headers=headers).json()
+    assert all(i["name"] != "מועמדת" for i in leftover)
+
+    no_date = client.post(
+        "/api/v1/investments/quotes",
+        headers=headers,
+        json={
+            "prospect_name": "בלי תאריך",
+            "principal": 2000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "duration_months": 12,
+        },
+    )
+    assert no_date.status_code == 201, no_date.text
+    missing_date = client.post(
+        f"/api/v1/investments/quotes/{no_date.json()['id']}/convert",
+        headers=headers,
+        json={"username": "nodateuser", "password": "NoDate1234!"},
+    )
+    assert missing_date.status_code == 400
+    assert "תאריך" in missing_date.json()["detail"]
 
 
 def test_settings_update():

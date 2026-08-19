@@ -58,13 +58,19 @@ export function QuotesPage() {
     );
     if (missing.length === 0) return;
     backfilling.current = true;
-    for (const quote of missing) accessAttempted.current.add(quote.id);
     void (async () => {
+      let changed = false;
       try {
         for (const quote of missing) {
-          await persistQuoteAccess(quote);
+          try {
+            await persistQuoteAccess(quote);
+            accessAttempted.current.add(quote.id);
+            changed = true;
+          } catch {
+            accessAttempted.current.delete(quote.id);
+          }
         }
-        reload();
+        if (changed) reload();
       } finally {
         backfilling.current = false;
       }
@@ -284,6 +290,15 @@ export function QuotesPage() {
                   required
                   placeholder="שם"
                   defaultValue={editing?.prospect_name ?? ""}
+                  onBlur={(e) => {
+                    const form = e.currentTarget.form;
+                    if (!form) return;
+                    const user = form.elements.namedItem("access_username") as HTMLInputElement | null;
+                    const phone = form.elements.namedItem("phone") as HTMLInputElement | null;
+                    if (user && !user.value.trim()) {
+                      user.value = suggestUsername(e.currentTarget.value, phone?.value);
+                    }
+                  }}
                 />
               </label>
               <label>
@@ -312,17 +327,14 @@ export function QuotesPage() {
                 שם משתמש לכניסה
                 <input
                   name="access_username"
-                  required
                   minLength={2}
                   maxLength={64}
                   dir="ltr"
                   autoComplete="off"
                   pattern="[A-Za-z0-9._\\-]{2,64}"
                   title="אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון"
-                  placeholder="באנגלית, למשל revital"
-                  defaultValue={
-                    editing?.access_username ?? suggestUsername(editing?.prospect_name ?? "")
-                  }
+                  placeholder="ייווצר אוטומטית מהשם, באנגלית"
+                  defaultValue={editing?.access_username ?? ""}
                 />
               </label>
               <PasswordField
