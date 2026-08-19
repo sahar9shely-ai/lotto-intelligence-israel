@@ -613,6 +613,12 @@ export function QuotesPage() {
                       <dd>{formatMoney(q.projected_savings_balance)}</dd>
                     </div>
                   ) : null}
+                  {q.plan_type !== "monthly" ? (
+                    <div>
+                      <dt>קרן + חיסכון בסיום</dt>
+                      <dd>{formatMoney(q.principal + q.projected_savings_balance)}</dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>סה״כ רווח בסיום המסלול</dt>
                     <dd>{formatMoney(q.total_investor_payout)}</dd>

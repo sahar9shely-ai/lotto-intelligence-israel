@@ -87,6 +87,9 @@ function buildQuoteDocumentHtml(quote: Quote): string {
 
   const showCash = quote.plan_type !== "savings";
   const showSavings = quote.plan_type !== "monthly";
+  const principalPlusSavings = showSavings
+    ? Math.round((quote.principal + quote.projected_savings_balance) * 100) / 100
+    : null;
 
   const tableRows = rows
     .map(
@@ -141,6 +144,14 @@ function buildQuoteDocumentHtml(quote: Quote): string {
       </div>`
           : ""
       }
+      ${
+        principalPlusSavings != null
+          ? `<div class="pdf-kpi pdf-kpi--capital">
+        <span class="pdf-kpi__label">קרן + חיסכון בסיום</span>
+        <strong class="pdf-kpi__value">${formatMoney(principalPlusSavings)}</strong>
+      </div>`
+          : ""
+      }
       <div class="pdf-kpi">
         <span class="pdf-kpi__label">סה״כ רווח בסיום המסלול</span>
         <strong class="pdf-kpi__value">${formatMoney(totalProfit)}</strong>
@@ -182,6 +193,14 @@ function buildQuoteDocumentHtml(quote: Quote): string {
         <span>סה״כ רווח בסוף ${quote.duration_months} חודשים</span>
         <strong>${formatMoney(totalProfit)}</strong>
       </div>
+      ${
+        principalPlusSavings != null
+          ? `<div class="pdf-totals__row pdf-totals__row--capital">
+        <span>קרן + חיסכון בסיום</span>
+        <strong>${formatMoney(principalPlusSavings)}</strong>
+      </div>`
+          : ""
+      }
       <div class="pdf-totals__row pdf-totals__row--final">
         <span>קרן + רווח בסיום</span>
         <strong>${formatMoney(endBalance)}</strong>

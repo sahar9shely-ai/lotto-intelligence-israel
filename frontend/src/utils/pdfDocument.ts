@@ -207,6 +207,11 @@ export const PDF_BASE_STYLES = `
     color: #eef7f2;
   }
   .pdf-kpi--accent .pdf-kpi__label { color: #a8c4b8; }
+  .pdf-kpi--capital {
+    background: #e8f3ed;
+    border-color: #b8d4c6;
+  }
+  .pdf-kpi--capital .pdf-kpi__label { color: #3d6b5a; }
   .pdf-kpi__label {
     display: block;
     margin-bottom: 4px;
@@ -306,6 +311,10 @@ export const PDF_BASE_STYLES = `
     background: #0e2a22;
     color: #eef7f2;
     font-size: 16px;
+  }
+  .pdf-totals__row--capital {
+    background: #e8f3ed;
+    font-weight: 600;
   }
   .pdf-footer {
     margin-top: 18px;
