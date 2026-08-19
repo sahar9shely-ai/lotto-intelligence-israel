@@ -367,7 +367,6 @@ export function QuotesPage() {
       <div className="page-head">
         <div>
           <h1>הצעות למשקיעים חדשים</h1>
-          <p className="muted">החזר חודשי · חיסכון · משולב · מפרט + PDF</p>
         </div>
         <button
           type="button"
@@ -539,26 +538,6 @@ export function QuotesPage() {
           לא אושרו
           <em>{tabCounts.rejected}</em>
         </button>
-      </div>
-
-      <div className="quote-lifecycle-panel">
-        {viewTab === "pipeline" ? (
-          <p className="quote-lifecycle">
-            <strong>תהליך כסף והשקעה:</strong> ממתין לתגובה → אישור → העברת כסף ופתיחת מסלול.
-            רק הצעות שעדיין בתהליך מוצגות כאן.
-          </p>
-        ) : null}
-        {viewTab === "completed" ? (
-          <p className="quote-lifecycle">
-            <strong>מצב תיק:</strong> המשקיע כבר במערכת עם מסלול פעיל. מעקב תשלומים, יתרות
-            ודוחות — במסך <Link to="/investors">משקיעים</Link>.
-          </p>
-        ) : null}
-        {viewTab === "rejected" ? (
-          <p className="quote-lifecycle">
-            הצעות שלא אושרו — לא נפתח מסלול ולא הועבר כסף. אפשר להחזיר לתהליך או למחוק.
-          </p>
-        ) : null}
       </div>
 
       <div className="quotes-grid">
