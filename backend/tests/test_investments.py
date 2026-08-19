@@ -205,6 +205,54 @@ def test_convert_quote_uses_stored_login_and_creates_user():
     assert again.status_code == 400
 
 
+def test_investor_access_password_falls_back_to_converted_quote():
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    start = date.today().isoformat()
+    quote = client.post(
+        "/api/v1/investments/quotes",
+        headers=headers,
+        json={
+            "prospect_name": "גיבוי סיסמה",
+            "phone": "050-111-2222",
+            "access_username": "backupuser",
+            "access_password": "Backup1234!",
+            "start_date": start,
+            "principal": 5000,
+            "monthly_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "duration_months": 12,
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    quote_id = quote.json()["id"]
+
+    converted = client.post(
+        f"/api/v1/investments/quotes/{quote_id}/convert",
+        headers=headers,
+        json={},
+    )
+    assert converted.status_code == 200, converted.text
+
+    db = InvestmentSessionLocal()
+    try:
+        from app.models.auth import User
+        from app.models.investments import Investor
+
+        investor = db.query(Investor).filter(Investor.name == "גיבוי סיסמה").one()
+        user = db.query(User).filter(User.investor_id == investor.id).one()
+        user.access_password = None
+        db.commit()
+
+        investors = client.get("/api/v1/investments/investors", headers=headers).json()
+        row = next(i for i in investors if i["name"] == "גיבוי סיסמה")
+        assert row["access_password"] == "Backup1234!"
+
+        db.refresh(user)
+        assert user.access_password == "Backup1234!"
+    finally:
+        db.close()
+
+
 def test_convert_quote_rejects_hebrew_or_taken_username():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     quote = client.post(

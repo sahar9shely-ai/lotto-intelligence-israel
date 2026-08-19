@@ -769,7 +769,11 @@ def serialize_payment(payment: Payment) -> dict:
     }
 
 
-def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict:
+def serialize_investor(
+    investor: Investor,
+    today: Optional[date] = None,
+    db: Optional[Session] = None,
+) -> dict:
     """Investor summary with cash and savings kept as separate money lines.
 
     monthly_payout / monthly_cash = cash return only (what is paid out monthly).
@@ -852,6 +856,23 @@ def serialize_investor(investor: Investor, today: Optional[date] = None) -> dict
         access_email = user.email
         access_role = user.role
         has_login = bool(user.password_hash) and not user.must_reset_password
+
+    if not access_password and db is not None:
+        quote = (
+            db.query(Quote)
+            .filter(
+                Quote.converted_investor_id == investor.id,
+                Quote.access_password.isnot(None),
+                Quote.access_password != "",
+            )
+            .order_by(Quote.id.desc())
+            .first()
+        )
+        if quote:
+            access_password = quote.access_password
+            if user is not None and not user.access_password:
+                user.access_password = quote.access_password
+                db.flush()
 
     unique_types = sorted(set(plan_types))
     return {

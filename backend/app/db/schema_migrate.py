@@ -141,6 +141,44 @@ def ensure_schema(engine: Engine) -> None:
             if "access_password" not in cols:
                 _add_column(conn, "users", "access_password VARCHAR(128)")
 
+    if _table_exists(engine, "users") and _table_exists(engine, "quotes"):
+        ucols = _table_columns(engine, "users")
+        qcols = _table_columns(engine, "quotes")
+        if (
+            "access_password" in ucols
+            and "access_password" in qcols
+            and "converted_investor_id" in qcols
+        ):
+            with engine.begin() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT converted_investor_id, access_password
+                        FROM quotes
+                        WHERE converted_investor_id IS NOT NULL
+                          AND access_password IS NOT NULL
+                          AND access_password != ''
+                        ORDER BY id DESC
+                        """
+                    )
+                ).fetchall()
+                seen: set[int] = set()
+                for inv_id, pwd in rows:
+                    if inv_id in seen:
+                        continue
+                    seen.add(inv_id)
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE users
+                            SET access_password = :pwd
+                            WHERE investor_id = :inv_id
+                              AND (access_password IS NULL OR access_password = '')
+                            """
+                        ),
+                        {"pwd": pwd, "inv_id": inv_id},
+                    )
+
     if _table_exists(engine, "app_settings"):
         cols = _table_columns(engine, "app_settings")
         with engine.begin() as conn:

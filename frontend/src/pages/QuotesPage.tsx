@@ -23,6 +23,7 @@ import {
 
 export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
+  const { data: siteStatus } = useAsync(() => api.siteStatus(), []);
   const { data, error, loading, reload } = useAsync(() => api.quotes(), []);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Quote | null>(null);
@@ -38,6 +39,7 @@ export function QuotesPage() {
   const clearMessage = useCallback(() => setMessage(null), []);
 
   const preview = useMemo(() => data ?? [], [data]);
+  const publicUrl = siteStatus?.public_url || window.location.origin;
   const formOpen = showForm || editing != null;
   const backfilling = useRef(false);
   const accessAttempted = useRef(new Set<number>());
@@ -219,7 +221,7 @@ export function QuotesPage() {
             access_username: whatsappSend.quote.access_username,
             access_password: whatsappSend.quote.access_password,
           },
-          window.location.origin,
+          publicUrl,
         ),
       );
       await markQuoteSent(whatsappSend.quote);
@@ -246,7 +248,7 @@ export function QuotesPage() {
         access_username: quote.access_username,
         access_password: quote.access_password,
       },
-      window.location.origin,
+      publicUrl,
     );
     if (!url) {
       setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
@@ -270,7 +272,7 @@ export function QuotesPage() {
             access_username: whatsappSend.quote.access_username,
             access_password: whatsappSend.quote.access_password,
           },
-          window.location.origin,
+          publicUrl,
         ),
       );
       setMessage("טקסט ההודעה הועתק — הדביקו בוואטסאפ אחרי צירוף הקובץ");
@@ -759,7 +761,7 @@ export function QuotesPage() {
                     access_username: whatsappSend.quote.access_username,
                     access_password: whatsappSend.quote.access_password,
                   },
-                  window.location.origin,
+                  publicUrl,
                 )}
               </p>
               <div className="whatsapp-send__actions">

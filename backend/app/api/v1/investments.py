@@ -282,7 +282,9 @@ def list_investors(
     if not is_manager(user):
         query = query.filter(Investor.id == user.investor_id)
     investors = query.order_by(Investor.is_manager.desc(), Investor.name).all()
-    return [svc.serialize_investor(i) for i in investors]
+    rows = [svc.serialize_investor(i, db=db) for i in investors]
+    db.commit()
+    return rows
 
 
 @router.post("/investors", response_model=InvestorOut, status_code=201)
@@ -314,7 +316,7 @@ def create_investor(
         .filter(Investor.id == investor.id)
         .one()
     )
-    return svc.serialize_investor(investor)
+    return svc.serialize_investor(investor, db=db)
 
 
 @router.patch("/investors/{investor_id}", response_model=InvestorOut)
@@ -344,7 +346,7 @@ def update_investor(
         setattr(investor, key, value)
     db.commit()
     db.refresh(investor)
-    return svc.serialize_investor(investor)
+    return svc.serialize_investor(investor, db=db)
 
 
 @router.get("/plans", response_model=list[PlanOut])
