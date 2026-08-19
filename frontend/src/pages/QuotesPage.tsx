@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { QuotePipelineStepper, quoteNextStepHint } from "../components/QuotePipelineStepper";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
 import { PlanTrackFields } from "../components/PlanTrackFields";
@@ -17,10 +18,13 @@ import {
   canEditQuote,
   canRejectQuote,
   canSendQuoteAccessMessage,
-  isClosedQuote,
-  isOpenQuote,
+  isCompletedQuote,
+  isPipelineQuote,
+  isRejectedQuote,
   normalizeQuoteStatus,
+  quoteMoneyPhaseLabel,
   quoteStatusLabel,
+  type QuoteViewTab,
 } from "../utils/quoteStatus";
 import {
   buildQuoteWhatsAppShareMessage,
@@ -48,16 +52,33 @@ export function QuotesPage() {
   const [convertError, setConvertError] = useState<string | null>(null);
   const [draftPassword] = useState(() => suggestPassword());
   const [busy, setBusy] = useState(false);
-  const [viewTab, setViewTab] = useState<"open" | "closed">("open");
+  const [viewTab, setViewTab] = useState<QuoteViewTab>("pipeline");
   const clearMessage = useCallback(() => setMessage(null), []);
 
   const allQuotes = useMemo(() => data ?? [], [data]);
-  const openQuotes = useMemo(() => allQuotes.filter((q) => isOpenQuote(q.status)), [allQuotes]);
-  const closedQuotes = useMemo(
-    () => allQuotes.filter((q) => isClosedQuote(q.status)),
+  const pipelineQuotes = useMemo(
+    () => allQuotes.filter((q) => isPipelineQuote(q.status)),
     [allQuotes],
   );
-  const preview = viewTab === "open" ? openQuotes : closedQuotes;
+  const completedQuotes = useMemo(
+    () => allQuotes.filter((q) => isCompletedQuote(q.status)),
+    [allQuotes],
+  );
+  const rejectedQuotes = useMemo(
+    () => allQuotes.filter((q) => isRejectedQuote(q.status)),
+    [allQuotes],
+  );
+  const preview =
+    viewTab === "pipeline"
+      ? pipelineQuotes
+      : viewTab === "completed"
+        ? completedQuotes
+        : rejectedQuotes;
+  const tabCounts = {
+    pipeline: pipelineQuotes.length,
+    completed: completedQuotes.length,
+    rejected: rejectedQuotes.length,
+  };
   const publicUrl = siteStatus?.public_url || window.location.origin;
   const formOpen = showForm || editing != null;
   const backfilling = useRef(false);
@@ -157,10 +178,11 @@ export function QuotesPage() {
       const label = quoteStatusLabel(status);
       setMessage(
         status === "rejected"
-          ? `ההצעה ל-${quote.prospect_name} סומנה כ"${label}" ועברה להצעות שנסגרו`
+          ? `ההצעה ל-${quote.prospect_name} סומנה כ"${label}"`
           : `ההצעה ל-${quote.prospect_name} עודכנה ל"${label}"`,
       );
-      if (status === "rejected") setViewTab("closed");
+      if (status === "rejected") setViewTab("rejected");
+      else if (status === "approved") setViewTab("pipeline");
       reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "עדכון הסטטוס נכשל");
@@ -206,6 +228,7 @@ export function QuotesPage() {
         phone: converting.phone || undefined,
       });
       setConverting(null);
+      setViewTab("completed");
       setMessage(
         `${plan.investor_name} נוסף למשקיעים עם מסלול פעיל. כניסה: ${username}`,
       );
@@ -483,43 +506,69 @@ export function QuotesPage() {
         <button
           type="button"
           role="tab"
-          aria-selected={viewTab === "open"}
+          aria-selected={viewTab === "pipeline"}
           className={
-            viewTab === "open" ? "track-view-switch__btn is-active" : "track-view-switch__btn"
+            viewTab === "pipeline" ? "track-view-switch__btn is-active" : "track-view-switch__btn"
           }
-          onClick={() => setViewTab("open")}
+          onClick={() => setViewTab("pipeline")}
         >
-          הצעות פתוחות
-          <em>{openQuotes.length}</em>
+          בתהליך
+          <em>{tabCounts.pipeline}</em>
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={viewTab === "closed"}
+          aria-selected={viewTab === "completed"}
           className={
-            viewTab === "closed" ? "track-view-switch__btn is-active" : "track-view-switch__btn"
+            viewTab === "completed" ? "track-view-switch__btn is-active" : "track-view-switch__btn"
           }
-          onClick={() => setViewTab("closed")}
+          onClick={() => setViewTab("completed")}
         >
-          הצעות שנסגרו
-          <em>{closedQuotes.length}</em>
+          הושלמו
+          <em>{tabCounts.completed}</em>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={viewTab === "rejected"}
+          className={
+            viewTab === "rejected" ? "track-view-switch__btn is-active" : "track-view-switch__btn"
+          }
+          onClick={() => setViewTab("rejected")}
+        >
+          לא אושרו
+          <em>{tabCounts.rejected}</em>
         </button>
       </div>
 
-      {viewTab === "open" ? (
-        <p className="quote-lifecycle muted">
-          מחזור הצעה: ממתין → אושר → בוצע העברה ופתיחת מסלול. הצעה שלא אושרה עוברת לסגורות.
-        </p>
-      ) : (
-        <p className="quote-lifecycle muted">הצעות שלא אושרו — לא מוצגות בין ההצעות הפתוחות.</p>
-      )}
+      <div className="quote-lifecycle-panel">
+        {viewTab === "pipeline" ? (
+          <p className="quote-lifecycle">
+            <strong>תהליך כסף והשקעה:</strong> ממתין לתגובה → אישור → העברת כסף ופתיחת מסלול.
+            רק הצעות שעדיין בתהליך מוצגות כאן.
+          </p>
+        ) : null}
+        {viewTab === "completed" ? (
+          <p className="quote-lifecycle">
+            <strong>מצב תיק:</strong> המשקיע כבר במערכת עם מסלול פעיל. מעקב תשלומים, יתרות
+            ודוחות — במסך <Link to="/investors">משקיעים</Link>.
+          </p>
+        ) : null}
+        {viewTab === "rejected" ? (
+          <p className="quote-lifecycle">
+            הצעות שלא אושרו — לא נפתח מסלול ולא הועבר כסף. אפשר להחזיר לתהליך או למחוק.
+          </p>
+        ) : null}
+      </div>
 
       <div className="quotes-grid">
         {preview.length === 0 ? (
           <p className="empty">
-            {viewTab === "open"
-              ? "אין הצעות פתוחות. צרו הצעה חדשה או סמנו הצעה קיימת כאושרת."
-              : "אין הצעות שנסגרו."}
+            {viewTab === "pipeline"
+              ? "אין הצעות בתהליך. צרו הצעה חדשה או בדקו בלשונית «הושלמו»."
+              : viewTab === "completed"
+                ? "אין עדיין הצעות שהושלמו. אחרי «הכנס כמשקיע חדש» ההצעה תופיע כאן."
+                : "אין הצעות שלא אושרו."}
           </p>
         ) : (
           preview.map((q) => {
@@ -527,8 +576,16 @@ export function QuotesPage() {
             const open = expandedId === q.id;
             const status = normalizeQuoteStatus(q.status);
             const editable = canEditQuote(q.status);
+            const nextHint = quoteNextStepHint(q.status);
+            const cardClass =
+              viewTab === "completed"
+                ? "quote-card quote-card--completed"
+                : viewTab === "rejected"
+                  ? "quote-card quote-card--rejected"
+                  : "quote-card quote-card--pipeline";
             return (
-              <article key={q.id} className="quote-card">
+              <article key={q.id} className={cardClass}>
+                <QuotePipelineStepper status={q.status} />
                 <header>
                   <div>
                     <h2>{q.prospect_name}</h2>
@@ -545,6 +602,10 @@ export function QuotesPage() {
                   </div>
                   <span className={`badge badge--${status}`}>{quoteStatusLabel(q.status)}</span>
                 </header>
+                <p className="quote-phase-line">{quoteMoneyPhaseLabel(q.status)}</p>
+                {nextHint && viewTab === "pipeline" ? (
+                  <p className="quote-next-hint">{nextHint}</p>
+                ) : null}
                 <p className="quote-card__lead">
                   {planTypeLabel(q.plan_type)} · קרן {formatMoney(q.principal)} ·{" "}
                   {q.plan_type === "savings"
@@ -652,7 +713,7 @@ export function QuotesPage() {
                 ) : null}
 
                 <div className="page-head__actions">
-                  {viewTab === "open" ? (
+                  {viewTab === "pipeline" ? (
                     <>
                       <button
                         type="button"
@@ -722,23 +783,34 @@ export function QuotesPage() {
                           הכנס כמשקיע חדש
                         </button>
                       ) : null}
-                      {status === "converted" ? (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn--whatsapp"
-                            onClick={() => openQuoteAccessWhatsApp(q)}
-                          >
-                            שליחת כניסה בוואטסאפ
-                          </button>
-                          <p className="muted">
-                            כבר במערכת כמשקיע #{q.converted_investor_id}{" "}
-                            <Link to="/investors">למסך משקיעים</Link>
-                          </p>
-                        </>
-                      ) : null}
                     </>
-                  ) : (
+                  ) : null}
+                  {viewTab === "completed" ? (
+                    <>
+                      <Link
+                        to="/investors"
+                        className="btn btn--primary"
+                      >
+                        מסך משקיעים #{q.converted_investor_id}
+                      </Link>
+                      <button
+                        type="button"
+                        className="btn btn--whatsapp"
+                        onClick={() => openQuoteAccessWhatsApp(q)}
+                      >
+                        שליחת כניסה בוואטסאפ
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        disabled={pdfBusyId === q.id}
+                        onClick={() => exportPdf(q)}
+                      >
+                        {pdfBusyId === q.id ? "מכינים PDF..." : "הורדת PDF"}
+                      </button>
+                    </>
+                  ) : null}
+                  {viewTab === "rejected" ? (
                     <>
                       <button
                         type="button"
@@ -760,10 +832,10 @@ export function QuotesPage() {
                         className="btn btn--ghost"
                         onClick={() => void setQuoteStatus(q, "pending")}
                       >
-                        החזרה להצעות פתוחות
+                        החזרה לתהליך
                       </button>
                     </>
-                  )}
+                  ) : null}
                 </div>
               </article>
             );

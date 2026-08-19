@@ -1245,9 +1245,136 @@ button.stat {
   margin-bottom: 10px;
 }
 
+.quote-lifecycle-panel {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--foam);
+  border: 1px solid var(--line);
+}
+
 .quote-lifecycle {
-  margin: 0 0 14px;
+  margin: 0;
   font-size: 0.92rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.quote-phase-line {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.quote-next-hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(47, 111, 94, 0.08);
+  border: 1px solid rgba(47, 111, 94, 0.15);
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+
+.quote-pipeline {
+  display: flex;
+  gap: 0;
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  counter-reset: none;
+}
+
+.quote-pipeline__step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  text-align: center;
+  padding: 0 4px;
+}
+
+.quote-pipeline__step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: var(--line);
+  z-index: 0;
+}
+
+.quote-pipeline__step.is-done:not(:last-child)::after,
+.quote-pipeline__step.is-current:not(:last-child)::after {
+  background: var(--accent);
+}
+
+.quote-pipeline__dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--panel-strong);
+  position: relative;
+  z-index: 1;
+}
+
+.quote-pipeline__step.is-done .quote-pipeline__dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.quote-pipeline__step.is-current .quote-pipeline__dot {
+  border-color: var(--accent-strong);
+  background: var(--gold-soft);
+  box-shadow: 0 0 0 3px rgba(47, 111, 94, 0.15);
+}
+
+.quote-pipeline__text strong {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.quote-pipeline__text em {
+  display: block;
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.quote-pipeline__step.is-current .quote-pipeline__text strong {
+  color: var(--accent-strong);
+}
+
+.quote-pipeline--rejected {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(155, 44, 44, 0.08);
+}
+
+.quote-pipeline__rejected {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #9b2c2c;
+}
+
+.quote-card--completed {
+  border-color: rgba(47, 111, 94, 0.35);
+  background: linear-gradient(180deg, rgba(47, 111, 94, 0.06), var(--panel-strong));
+}
+
+.quote-card--pipeline {
+  border-color: var(--line);
+}
+
+.quote-card--rejected {
+  opacity: 0.92;
+  border-color: rgba(155, 44, 44, 0.2);
 }
 
 .stack {
