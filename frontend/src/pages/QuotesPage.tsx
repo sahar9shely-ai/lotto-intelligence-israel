@@ -12,6 +12,9 @@ import { buildMonthSchedule, downloadQuotePdf, quotePdfFile, saveQuotePdfFile } 
 import { formatDate, formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
 import {
+  buildQuoteWhatsAppMessage,
+  canSharePdfFile,
+  copyQuoteWhatsAppMessage,
   formatPhoneDisplay,
   isShareAbort,
   shareQuotePdf,
@@ -28,6 +31,8 @@ export function QuotesPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<number | null>(null);
   const [converting, setConverting] = useState<Quote | null>(null);
+  const [whatsappSend, setWhatsappSend] = useState<{ quote: Quote; file: File } | null>(null);
+  const [whatsappShareBusy, setWhatsappShareBusy] = useState(false);
   const [convertError, setConvertError] = useState<string | null>(null);
   const [draftPassword] = useState(() => suggestPassword());
   const [busy, setBusy] = useState(false);
@@ -189,43 +194,59 @@ export function QuotesPage() {
     }
     setPdfBusyId(quote.id);
     setMessage(null);
-    const pendingChat = window.open("about:blank", "_blank");
     try {
       const ready = await persistQuoteAccess(quote);
       const file = await quotePdfFile(ready);
-      try {
-        const shared = await shareQuotePdf(ready, file);
-        if (shared) {
-          pendingChat?.close();
-          await markQuoteSent(ready);
-          setMessage(`בחרו וואטסאפ כדי לשלוח ל-${ready.prospect_name} את קובץ ה-PDF`);
-          reload();
-          return;
-        }
-      } catch (err) {
-        if (isShareAbort(err)) {
-          pendingChat?.close();
-          return;
-        }
-        // Share often loses the click gesture after PDF generation — fall back.
-      }
       saveQuotePdfFile(file);
-      const url = whatsAppOfferUrl(ready);
-      if (!url) {
-        pendingChat?.close();
-        setMessage("ה-PDF ירד, אבל לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
-        return;
-      }
-      if (pendingChat && !pendingChat.closed) pendingChat.location.href = url;
-      else window.open(url, "_blank", "noopener,noreferrer");
-      await markQuoteSent(ready);
-      setMessage(`ה-PDF ירד. צרפו אותו להודעה הקצרה בוואטסאפ אל ${ready.prospect_name}`);
-      reload();
+      setWhatsappSend({ quote: ready, file });
     } catch (err) {
-      pendingChat?.close();
       setMessage(err instanceof Error ? err.message : "שליחה בוואטסאפ נכשלה");
     } finally {
       setPdfBusyId(null);
+    }
+  }
+
+  async function shareWhatsappPdf() {
+    if (!whatsappSend) return;
+    setWhatsappShareBusy(true);
+    try {
+      await shareQuotePdf(whatsappSend.quote, whatsappSend.file);
+      await markQuoteSent(whatsappSend.quote);
+      const name = whatsappSend.quote.prospect_name;
+      setWhatsappSend(null);
+      setMessage(`בחרו וואטסאפ — הקובץ ${name} יצורף להודעה`);
+      reload();
+    } catch (err) {
+      if (!isShareAbort(err)) {
+        setMessage(err instanceof Error ? err.message : "שיתוף הקובץ נכשל");
+      }
+    } finally {
+      setWhatsappShareBusy(false);
+    }
+  }
+
+  function openWhatsappChat() {
+    if (!whatsappSend) return;
+    const { quote, file } = whatsappSend;
+    const url = whatsAppOfferUrl(quote);
+    if (!url) {
+      setMessage("לא ניתן לפתוח וואטסאפ — בדקו את מספר הטלפון");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    void markQuoteSent(quote);
+    setWhatsappSend(null);
+    setMessage(`צרפו את "${file.name}" בוואטסאפ (📎) ואז שלחו את ההודעה`);
+    reload();
+  }
+
+  async function copyWhatsappText() {
+    if (!whatsappSend) return;
+    try {
+      await copyQuoteWhatsAppMessage(whatsappSend.quote);
+      setMessage("טקסט ההודעה הועתק — הדביקו בוואטסאפ אחרי צירוף הקובץ");
+    } catch {
+      setMessage("לא ניתן להעתיק — העתיקו ידנית מהתצוגה");
     }
   }
 
@@ -657,6 +678,73 @@ export function QuotesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {whatsappSend ? (
+        <div className="modal" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="modal__backdrop"
+            aria-label="סגירה"
+            onClick={() => setWhatsappSend(null)}
+          />
+          <div className="modal__sheet request-sheet">
+            <header className="modal__head">
+              <div>
+                <p className="contract-kicker">שליחה בוואטסאפ</p>
+                <h2>{whatsappSend.quote.prospect_name}</h2>
+              </div>
+              <button
+                type="button"
+                className="modal__close"
+                aria-label="סגירה"
+                onClick={() => setWhatsappSend(null)}
+              >
+                ×
+              </button>
+            </header>
+            <div className="request-form">
+              <p className="request-form__lead">
+                הקובץ ירד למחשב. וואטסאפ בדפדפן לא מצרף קבצים אוטומטית — צריך לצרף את ה-PDF
+                ידנית לפני השליחה.
+              </p>
+              <p className="whatsapp-send__file">{whatsappSend.file.name}</p>
+              <ol className="whatsapp-send__steps">
+                <li>
+                  לחצו <strong>פתיחת וואטסאפ</strong> (או פתחו את הצ&apos;אט עם{" "}
+                  {formatPhoneDisplay(whatsappSend.quote.phone)}).
+                </li>
+                <li>
+                  בוואטסאפ לחצו <strong>📎 צירוף</strong> → <strong>מסמך</strong> → בחרו את הקובץ
+                  שהורד.
+                </li>
+                <li>שלחו את ההודעה (הטקסט כבר מוכן בצ&apos;אט).</li>
+              </ol>
+              <p className="whatsapp-send__preview">{buildQuoteWhatsAppMessage(whatsappSend.quote)}</p>
+              <div className="whatsapp-send__actions">
+                <button type="button" className="btn btn--ghost" onClick={() => setWhatsappSend(null)}>
+                  סגור
+                </button>
+                <button type="button" className="btn btn--ghost" onClick={() => void copyWhatsappText()}>
+                  העתקת טקסט
+                </button>
+                {canSharePdfFile(whatsappSend.file) ? (
+                  <button
+                    type="button"
+                    className="btn btn--whatsapp"
+                    disabled={whatsappShareBusy}
+                    onClick={() => void shareWhatsappPdf()}
+                  >
+                    {whatsappShareBusy ? "משתף..." : "שיתוף עם הקובץ (טלפון)"}
+                  </button>
+                ) : null}
+                <button type="button" className="btn btn--primary" onClick={openWhatsappChat}>
+                  פתיחת וואטסאפ
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

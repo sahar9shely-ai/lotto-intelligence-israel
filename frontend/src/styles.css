@@ -350,6 +350,50 @@ a {
   line-height: 1.45;
 }
 
+.whatsapp-send__file {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f4faf7, #eef6f2);
+  border: 1px solid #d5e5db;
+  font-weight: 700;
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
+.whatsapp-send__steps {
+  margin: 0;
+  padding: 0 1.25rem 0 0;
+  display: grid;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.whatsapp-send__steps strong {
+  color: var(--accent-strong);
+}
+
+.whatsapp-send__preview {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(14, 42, 34, 0.05);
+  border: 1px dashed var(--line);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: var(--ink-soft);
+}
+
+.whatsapp-send__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .request-form__legal {
   display: flex;
   align-items: flex-start;
