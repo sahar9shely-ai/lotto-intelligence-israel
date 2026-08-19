@@ -2,6 +2,7 @@ import { PersonalAssistant } from "./PersonalAssistant";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { isAdminAccount } from "../utils/roles";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 
@@ -41,10 +42,9 @@ export function AppShell() {
   const primaryLinks = links.filter((l) => PRIMARY_PATHS.has(l.to));
   const moreLinks = links.filter((l) => !PRIMARY_PATHS.has(l.to));
   const displayName = user?.investor_name || user?.username || "";
-  const isAdminAccount =
-    user?.username === "admin" || (isManager && user?.investor_name === "מנהל מערכת");
-  const roleLabel = isAdminAccount ? "ADMIN" : isManager ? "מנהל" : "משקיע";
-  const roleChipClass = isAdminAccount
+  const isAdminAccountUser = isAdminAccount(user);
+  const roleLabel = isAdminAccountUser ? "ADMIN" : isManager ? "מנהל" : "משקיע";
+  const roleChipClass = isAdminAccountUser
     ? "role-chip role-chip--admin"
     : isManager
       ? "role-chip role-chip--manager"

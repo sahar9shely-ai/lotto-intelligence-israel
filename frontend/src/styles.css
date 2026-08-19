@@ -3126,6 +3126,28 @@ input[type="date"] {
   gap: 18px;
 }
 
+.manager-income__hero--admin {
+  background: linear-gradient(145deg, rgba(30, 61, 86, 0.12), rgba(213, 235, 226, 0.35));
+  border-color: color-mix(in srgb, var(--admin) 22%, var(--line));
+}
+
+.manager-income__hero--admin .manager-income__hero-value {
+  color: var(--admin);
+}
+
+.panel--admin-profit::before {
+  background: linear-gradient(90deg, var(--admin), color-mix(in srgb, var(--gold) 40%, var(--admin)));
+}
+
+.panel--admin-profit .manager-income__subtotal {
+  background: color-mix(in srgb, var(--admin-soft) 80%, #fff);
+  border-color: color-mix(in srgb, var(--admin) 18%, var(--line));
+}
+
+.panel--admin-profit .manager-income__subtotal strong {
+  color: var(--admin);
+}
+
 .manager-income__hero {
   display: grid;
   gap: 14px;

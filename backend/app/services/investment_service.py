@@ -2475,7 +2475,11 @@ def get_manager_income_board(db: Session) -> dict:
 
     fee_rows.sort(key=lambda r: (-r["monthly_fee"], r["investor_name"]))
 
-    manager_inv = next((i for i in investors if i.is_manager), None)
+    from app.services.auth_service import PERSONAL_INVESTOR_NAME
+
+    manager_inv = next((i for i in investors if i.name == PERSONAL_INVESTOR_NAME), None)
+    if manager_inv is None:
+        manager_inv = next((i for i in investors if i.is_manager), None)
     own_plans_out: list[dict] = []
     own_principal = 0.0
     own_cash = 0.0

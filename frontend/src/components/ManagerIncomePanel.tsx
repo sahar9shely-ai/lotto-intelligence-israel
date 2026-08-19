@@ -5,7 +5,16 @@ import { formatMoney, formatPercent, formatCalendarMonth } from "../utils/format
 import { planTypeLabel } from "../utils/planTypes";
 import { Panel } from "./Panel";
 
-export function ManagerIncomePanel() {
+type ManagerIncomePanelProps = {
+  /** ADMIN: רק עמלות ממשקיעים · מלא: עמלות + החזר אישי */
+  variant?: "admin" | "full";
+  investorId?: number | null;
+};
+
+export function ManagerIncomePanel({
+  variant = "full",
+  investorId = null,
+}: ManagerIncomePanelProps) {
   const { data, error, loading, reload } = useAsync(
     () => api.managerIncome(),
     [],
@@ -13,15 +22,21 @@ export function ManagerIncomePanel() {
 
   if (loading) {
     return (
-      <Panel title="הכנסות מנהל" subtitle="טוען...">
-        <p className="muted">טוען נתוני עמלות והחזר...</p>
+      <Panel
+        title={variant === "admin" ? "רווח חודשי ממשקיעים" : "הכנסות מנהל"}
+        subtitle="טוען..."
+      >
+        <p className="muted">טוען נתוני עמלות...</p>
       </Panel>
     );
   }
 
   if (error || !data) {
     return (
-      <Panel title="הכנסות מנהל" subtitle="למנהל בלבד">
+      <Panel
+        title={variant === "admin" ? "רווח חודשי ממשקיעים" : "הכנסות מנהל"}
+        subtitle="למנהל בלבד"
+      >
         <p className="form-error">{error || "לא ניתן לטעון"}</p>
         <button type="button" className="btn btn--small" onClick={reload}>
           נסה שוב
@@ -30,45 +45,72 @@ export function ManagerIncomePanel() {
     );
   }
 
-  return <ManagerIncomeBoardView data={data} />;
+  const filtered =
+    investorId != null
+      ? {
+          ...data,
+          investors: data.investors.filter((row) => row.investor_id === investorId),
+          monthly_fees_total: data.investors
+            .filter((row) => row.investor_id === investorId)
+            .reduce((sum, row) => sum + row.monthly_fee, 0),
+        }
+      : data;
+
+  return <ManagerIncomeBoardView data={filtered} variant={variant} />;
 }
 
-export function ManagerIncomeBoardView({ data }: { data: ManagerIncomeBoard }) {
+export function ManagerIncomeBoardView({
+  data,
+  variant = "full",
+}: {
+  data: ManagerIncomeBoard;
+  variant?: "admin" | "full";
+}) {
   const own = data.manager_own;
   const name = data.manager_name || own.investor_name || "סהר";
+  const feesOnly = variant === "admin";
+  const heroTotal = feesOnly ? data.monthly_fees_total : data.monthly_grand_total;
 
   return (
     <Panel
-      title="הכנסות מנהל · כל חודש"
-      subtitle={`למנהל בלבד · עמלות ממשקיעים + החזר ${name} לפי ההשקעה`}
+      title={feesOnly ? "רווח חודשי ממשקיעים" : "הכנסות מנהל · כל חודש"}
+      subtitle={
+        feesOnly
+          ? "עמלת ניהול מכל משקיע פעיל — סיכום חודשי"
+          : `למנהל בלבד · עמלות ממשקיעים + החזר ${name} לפי ההשקעה`
+      }
+      className={feesOnly ? "panel--admin-profit" : undefined}
     >
       <div className="manager-income">
-        <div className="manager-income__hero">
+        <div className={`manager-income__hero${feesOnly ? " manager-income__hero--admin" : ""}`}>
           <div className="manager-income__hero-main">
-            <span className="stat__label">סה״כ כל חודש אליי</span>
-            <strong className="manager-income__hero-value">
-              {formatMoney(data.monthly_grand_total)}
-            </strong>
+            <span className="stat__label">
+              {feesOnly ? "סה״כ רווח חודשי ממשקיעים" : "סה״כ כל חודש אליי"}
+            </span>
+            <strong className="manager-income__hero-value">{formatMoney(heroTotal)}</strong>
             <span className="muted">
-              עמלות {formatMoney(data.monthly_fees_total)} + החזר {name}{" "}
-              {formatMoney(own.monthly_total)}
+              {feesOnly
+                ? `${data.investors.length} משקיעים פעילים עם עמלה`
+                : `עמלות ${formatMoney(data.monthly_fees_total)} + החזר ${name} ${formatMoney(own.monthly_total)}`}
             </span>
           </div>
-          <div className="manager-income__hero-split">
-            <div>
-              <span className="stat__label">עמלות ממשקיעים</span>
-              <strong>{formatMoney(data.monthly_fees_total)}</strong>
+          {!feesOnly ? (
+            <div className="manager-income__hero-split">
+              <div>
+                <span className="stat__label">עמלות ממשקיעים</span>
+                <strong>{formatMoney(data.monthly_fees_total)}</strong>
+              </div>
+              <div>
+                <span className="stat__label">החזר {name}</span>
+                <strong>{formatMoney(own.monthly_total)}</strong>
+              </div>
             </div>
-            <div>
-              <span className="stat__label">החזר {name}</span>
-              <strong>{formatMoney(own.monthly_total)}</strong>
-            </div>
-          </div>
+          ) : null}
         </div>
 
         <section className="manager-income__section">
           <h3 className="manager-income__section-title">
-            כמה כל משקיע מביא לי (עמלת ניהול)
+            {feesOnly ? "רווח חודשי לפי משקיע" : "כמה כל משקיע מביא לי (עמלת ניהול)"}
           </h3>
           {data.investors.length === 0 ? (
             <p className="muted">אין משקיעים פעילים עם עמלה כרגע.</p>
@@ -86,7 +128,9 @@ export function ManagerIncomeBoardView({ data }: { data: ManagerIncomeBoard }) {
                     </span>
                   </div>
                   <div className="manager-income__row-fee">
-                    <span className="stat__label">מביא לי בחודש</span>
+                    <span className="stat__label">
+                      {feesOnly ? "רווח חודשי" : "מביא לי בחודש"}
+                    </span>
                     <strong>
                       {row.monthly_fee > 0
                         ? formatMoney(row.monthly_fee)
@@ -98,11 +142,12 @@ export function ManagerIncomeBoardView({ data }: { data: ManagerIncomeBoard }) {
             </ul>
           )}
           <div className="manager-income__subtotal">
-            <span>סה״כ עמלות בחודש</span>
+            <span>{feesOnly ? "סה״כ רווח חודשי" : "סה״כ עמלות בחודש"}</span>
             <strong>{formatMoney(data.monthly_fees_total)}</strong>
           </div>
         </section>
 
+        {!feesOnly ? (
         <section className="manager-income__section manager-income__section--own">
           <h3 className="manager-income__section-title">
             החזר {name} · לפי ההשקעה
@@ -162,6 +207,7 @@ export function ManagerIncomeBoardView({ data }: { data: ManagerIncomeBoard }) {
             </>
           )}
         </section>
+        ) : null}
       </div>
     </Panel>
   );

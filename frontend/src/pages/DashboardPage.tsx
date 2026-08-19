@@ -7,10 +7,12 @@ import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import { formatDate, formatMoney, formatPercent, statusLabel } from "../utils/format";
+import { isAdminAccount } from "../utils/roles";
 
 export function DashboardPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
+  const isAdmin = isAdminAccount(user);
   const [filterId, setFilterId] = useState<number | null>(null);
 
   const { data: investors } = useAsync(
@@ -48,22 +50,31 @@ export function DashboardPage() {
     filterId != null
       ? investors?.find((i) => i.id === filterId)?.name ?? "משקיע"
       : null;
+  const investorScopeOptions = (investors ?? []).filter((inv) => !inv.is_manager);
 
   return (
     <div className="page">
-      <header className="page-intro">
+      <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
         <div>
           <p className="page-intro__eyebrow">
-            {isManager ? "ניהול שותפים" : "המסלול שלך"}
+            {isAdmin ? "ADMIN · ניהול" : isManager ? "ניהול שותפים" : "המסלול שלך"}
           </p>
           <h1 className="page-intro__title">
-            {`שלום ${user?.investor_name || user?.username || ""}`}
+            {isAdmin
+              ? scopeName
+                ? `רווח חודשי · ${scopeName}`
+                : "רווח חודשי ממשקיעים"
+              : `שלום ${user?.investor_name || user?.username || ""}`}
           </h1>
           {isManager ? (
             <p className="page-intro__lead">
-              {scopeName
-                ? `סיכום של ${scopeName} — מזומן וחיסכון בנפרד.`
-                : "סיכום כולם — מזומן וחיסכון בנפרד. לחצו על משקיע ברשימה כדי לצמצם."}
+              {isAdmin
+                ? scopeName
+                  ? `עמלת ניהול חודשית מ${scopeName} — לפי מסלולים פעילים.`
+                  : "סיכום עמלות ניהול מכל המשקיעים — רווח חודשי ברור לפי שותף."
+                : scopeName
+                  ? `סיכום של ${scopeName} — מזומן וחיסכון בנפרד.`
+                  : "סיכום כולם — מזומן וחיסכון בנפרד. לחצו על משקיע ברשימה כדי לצמצם."}
             </p>
           ) : null}
         </div>
@@ -126,7 +137,7 @@ export function DashboardPage() {
         </Panel>
       ) : null}
 
-      {isManager && (investors?.length ?? 0) > 0 ? (
+      {isManager && investorScopeOptions.length > 0 ? (
         <div className="scope-bar" role="tablist" aria-label="סינון סיכום">
           <button
             type="button"
@@ -135,9 +146,9 @@ export function DashboardPage() {
             className={filterId == null ? "scope-bar__btn is-active" : "scope-bar__btn"}
             onClick={() => setFilterId(null)}
           >
-            סה״כ כולם
+            {isAdmin ? "כל המשקיעים" : "סה״כ כולם"}
           </button>
-          {investors!.map((inv) => (
+          {investorScopeOptions.map((inv) => (
             <button
               key={inv.id}
               type="button"
@@ -152,6 +163,10 @@ export function DashboardPage() {
         </div>
       ) : null}
 
+      {isAdmin ? (
+        <ManagerIncomePanel variant="admin" investorId={filterId} />
+      ) : (
+        <>
       <div className="money-ledger">
         <div className="money-ledger__item money-ledger__item--accent">
           <span>{isManager && !scopeName ? "סך קרן פעילה" : "קרן"}</span>
@@ -184,7 +199,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {isManager && filterId == null ? (
+      {isManager && filterId == null && !isAdmin ? (
         <div className="stats-grid stats-grid--compact">
           <Stat
             label="עמלת ניהול חודשית"
@@ -201,7 +216,9 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      {isManager && filterId == null ? <ManagerIncomePanel /> : null}
+      {isManager && filterId == null && !isAdmin ? <ManagerIncomePanel /> : null}
+        </>
+      )}
 
       {isManager && (alerts?.length ?? 0) > 0 ? (
         <Panel
@@ -245,8 +262,8 @@ export function DashboardPage() {
         </Panel>
       ) : null}
 
-      <div className="grid-2">
-        {isManager ? (
+      <div className={isAdmin ? "stack" : "grid-2"}>
+        {isManager && !isAdmin ? (
           <Panel
             title={scopeName ? `פירוט · ${scopeName}` : "משקיעים"}
             subtitle={`${data.active_plans} מסלולים פעילים`}
@@ -257,7 +274,7 @@ export function DashboardPage() {
             }
             delay={80}
           >
-            {data.investors_summary.length === 0 ? (
+            {data.investors_summary.filter((inv) => !inv.is_manager).length === 0 ? (
               <div className="empty-block">
                 <p className="empty">עדיין אין משקיעים.</p>
                 <Link className="btn btn--small btn--primary" to="/investors">
@@ -266,17 +283,16 @@ export function DashboardPage() {
               </div>
             ) : (
               <ul className="list">
-                {data.investors_summary.map((inv) => (
+                {data.investors_summary
+                  .filter((inv) => !inv.is_manager)
+                  .map((inv) => (
                   <li key={inv.id} className="list__row">
                     <button
                       type="button"
                       className="list__pick"
                       onClick={() => setFilterId(inv.id)}
                     >
-                      <strong>
-                        {inv.name}
-                        {inv.is_manager ? <span className="chip">מנהל</span> : null}
-                      </strong>
+                      <strong>{inv.name}</strong>
                       <span className="muted">
                         מזומן {formatPercent(inv.cash_rate_percent ?? 0)}
                         {(inv.savings_rate_percent ?? 0) > 0
@@ -298,7 +314,7 @@ export function DashboardPage() {
               </ul>
             )}
           </Panel>
-        ) : (
+        ) : !isManager ? (
           <Panel title="הסיכום שלי" subtitle="רק הנתונים שלך" delay={80}>
             <ul className="list">
               {data.investors_summary.map((inv) => (
@@ -320,11 +336,15 @@ export function DashboardPage() {
               ))}
             </ul>
           </Panel>
-        )}
+        ) : null}
 
         <Panel
-          title="תשלומים קרובים"
-          subtitle="מזומן בלבד — לפי לוח הזמנים"
+          title={isAdmin ? "תשלומים קרובים · העמלות שלך" : "תשלומים קרובים"}
+          subtitle={
+            isAdmin
+              ? "עמלת ניהול לפי תשלום מתוכנן"
+              : "מזומן בלבד — לפי לוח הזמנים"
+          }
           action={
             <Link className="text-link" to="/payments">
               היסטוריה
@@ -345,10 +365,19 @@ export function DashboardPage() {
                     <span className="muted">{formatDate(p.due_date)}</span>
                   </div>
                   <div className="list__meta">
-                    <span>{formatMoney(p.investor_amount)}</span>
-                    {isManager ? (
-                      <span className="muted">עמלה {formatMoney(p.manager_amount)}</span>
-                    ) : null}
+                    {isAdmin ? (
+                      <>
+                        <span>{formatMoney(p.manager_amount)}</span>
+                        <span className="muted">עמלה · תשלום {formatMoney(p.investor_amount)}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>{formatMoney(p.investor_amount)}</span>
+                        {isManager ? (
+                          <span className="muted">עמלה {formatMoney(p.manager_amount)}</span>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 </li>
               ))}
@@ -358,11 +387,28 @@ export function DashboardPage() {
       </div>
 
       <Panel
-        title="סיכום שנתי וסה״כ"
-        subtitle="שולם בפועל במזומן · חיסכון לא נספר כאן כתשלום"
+        title={isAdmin ? "סיכום עמלות" : "סיכום שנתי וסה״כ"}
+        subtitle={
+          isAdmin
+            ? "עמלות ניהול ששולמו בפועל"
+            : "שולם בפועל במזומן · חיסכון לא נספר כאן כתשלום"
+        }
         delay={200}
       >
         <div className="stats-grid stats-grid--compact">
+          {isAdmin ? (
+            <>
+              <Stat label="עמלות השנה" value={formatMoney(data.ytd_manager_earned)} tone="manager" />
+              <Stat
+                label="סה״כ עמלות"
+                value={formatMoney(data.lifetime_manager_earned ?? 0)}
+                tone="manager"
+              />
+              <Stat label="משקיעים פעילים" value={String(data.active_investors)} />
+              <Stat label="מסלולים פעילים" value={String(data.active_plans)} />
+            </>
+          ) : (
+            <>
           <Stat
             label={isManager ? "שולם למשקיעים השנה" : "שולם לי השנה"}
             value={formatMoney(data.ytd_investor_paid)}
@@ -387,8 +433,10 @@ export function DashboardPage() {
           ) : (
             <Stat label="מסלולים פעילים" value={String(data.active_plans)} />
           )}
+            </>
+          )}
         </div>
-        {data.recent_payments.length > 0 ? (
+        {!isAdmin && data.recent_payments.length > 0 ? (
           <ul className="list list--tight">
             {data.recent_payments.map((p) => (
               <li key={p.id} className="list__row">
@@ -403,9 +451,9 @@ export function DashboardPage() {
               </li>
             ))}
           </ul>
-        ) : (
+        ) : !isAdmin ? (
           <p className="empty">אין תשלומים אחרונים להצגה.</p>
-        )}
+        ) : null}
       </Panel>
     </div>
   );
