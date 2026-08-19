@@ -265,6 +265,18 @@ def ensure_schema(engine: Engine) -> None:
                         "WHERE savings_redeemed_total IS NULL"
                     )
                 )
+            if "rollover_savings_balance" not in cols:
+                _add_column(
+                    conn,
+                    "investment_plans",
+                    "rollover_savings_balance FLOAT DEFAULT 0",
+                )
+                conn.execute(
+                    text(
+                        "UPDATE investment_plans SET rollover_savings_balance = 0 "
+                        "WHERE rollover_savings_balance IS NULL"
+                    )
+                )
             if "successor_plan_id" not in cols:
                 _add_column(conn, "investment_plans", "successor_plan_id INTEGER")
 

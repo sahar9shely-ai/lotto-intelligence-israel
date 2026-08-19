@@ -60,6 +60,7 @@ def init_investment_db() -> None:
     try:
         svc.seed_defaults(db)
         svc.repair_reporting_year_plans(db)
+        svc.sync_track_continuity(db)
     finally:
         db.close()
 
@@ -282,6 +283,8 @@ def list_investors(
     if not is_manager(user):
         query = query.filter(Investor.id == user.investor_id)
     investors = query.order_by(Investor.is_manager.desc(), Investor.name).all()
+    for investor in investors:
+        svc.sync_investor_track_continuity(db, investor)
     rows = [svc.serialize_investor(i, db=db) for i in investors]
     db.commit()
     return rows
@@ -366,6 +369,11 @@ def list_plans(
         query = query.filter(InvestmentPlan.investor_id == scoped)
     if status:
         query = query.filter(InvestmentPlan.status == status)
+    if scoped is not None:
+        svc.sync_track_continuity(db, investor_id=scoped)
+    else:
+        svc.sync_track_continuity(db)
+    db.commit()
     plans = query.order_by(InvestmentPlan.start_date.desc()).all()
     hide_fees = not is_manager(user)
     return [svc.serialize_plan(p, hide_fees=hide_fees) for p in plans]

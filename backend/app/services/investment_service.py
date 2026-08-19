@@ -372,7 +372,8 @@ def available_savings_for_plan(
     """Savings still available to withdraw or move into principal."""
     accrued = accrued_savings_for_plan(plan, today)
     redeemed = float(getattr(plan, "savings_redeemed_total", 0.0) or 0.0)
-    return max(0.0, round(accrued - redeemed, 2))
+    rollover = float(getattr(plan, "rollover_savings_balance", 0.0) or 0.0)
+    return max(0.0, round(accrued - redeemed + rollover, 2))
 
 
 def current_savings_for_plan(
@@ -427,6 +428,9 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
         "accrued_savings_balance": round(accrued, 2),
         "current_savings_balance": available,
         "savings_redeemed_total": round(redeemed, 2),
+        "rollover_savings_balance": round(
+            float(getattr(plan, "rollover_savings_balance", 0.0) or 0.0), 2
+        ),
         "accrual_principal": round(accrual_principal, 2),
         "successor_plan_id": getattr(plan, "successor_plan_id", None),
         "track_end_date": plan_track_end_date(plan),
@@ -715,6 +719,183 @@ def settle_savings_action(
         "closed_plan": serialize_plan(plan),
         "new_plan": new_serialized,
     }
+
+
+AUTO_EXTEND_MONTHS = 12
+
+
+def _plan_blocks_auto_continue(plan: InvestmentPlan) -> bool:
+    notes = plan.notes or ""
+    if "נסגר לגמרי" in notes:
+        return True
+    if reporting_year_from_notes(notes):
+        return True
+    return False
+
+
+def _plan_savings_already_rolled(plan: InvestmentPlan) -> bool:
+    notes = plan.notes or ""
+    return "חיסכון הועבר" in notes
+
+
+def _primary_active_savings_plan(
+    plans: list[InvestmentPlan],
+) -> Optional[InvestmentPlan]:
+    candidates: list[InvestmentPlan] = []
+    for plan in plans:
+        if plan.status != "active":
+            continue
+        kind, _, savings_rate = normalize_plan_rates(
+            getattr(plan, "plan_type", None) or "monthly",
+            plan.monthly_rate_percent,
+            getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+        )
+        if kind != "monthly" and savings_rate > 0:
+            candidates.append(plan)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: (p.start_date or date.min, p.id))
+
+
+def _inject_rollover_into_plan(
+    db: Session,
+    *,
+    to_plan: InvestmentPlan,
+    amount: float,
+    from_plan_id: int,
+) -> None:
+    """Credit rolled savings onto the active track's available balance."""
+    to_plan.rollover_savings_balance = round(
+        float(getattr(to_plan, "rollover_savings_balance", 0.0) or 0.0) + amount,
+        2,
+    )
+    db.add(
+        SavingsAction(
+            plan_id=to_plan.id,
+            investor_id=to_plan.investor_id,
+            action_type="transfer_to_principal",
+            amount=amount,
+            principal_after=to_plan.principal,
+            available_after=available_savings_for_plan(to_plan),
+            notes=f"העברת חיסכון אוטומטית ממסלול #{from_plan_id}",
+        )
+    )
+
+
+def roll_savings_to_active_plan(
+    db: Session,
+    *,
+    from_plan: InvestmentPlan,
+    to_plan: InvestmentPlan,
+    today: Optional[date] = None,
+) -> float:
+    """Transfer leftover savings from a closed track into the investor's active track."""
+    if from_plan.id == to_plan.id:
+        return 0.0
+    if from_plan.status != "completed":
+        return 0.0
+    if _plan_blocks_auto_continue(from_plan) or _plan_savings_already_rolled(from_plan):
+        return 0.0
+
+    amount = available_savings_for_plan(from_plan, today)
+    if amount <= 0.001:
+        return 0.0
+
+    from_plan.savings_redeemed_total = round(
+        float(getattr(from_plan, "savings_redeemed_total", 0.0) or 0.0) + amount,
+        2,
+    )
+    db.add(
+        SavingsAction(
+            plan_id=from_plan.id,
+            investor_id=from_plan.investor_id,
+            action_type="withdraw",
+            amount=amount,
+            principal_after=from_plan.principal,
+            available_after=available_savings_for_plan(from_plan, today),
+            notes=f"הועבר למסלול פעיל #{to_plan.id}",
+        )
+    )
+    _inject_rollover_into_plan(
+        db, to_plan=to_plan, amount=amount, from_plan_id=from_plan.id
+    )
+    if not from_plan.successor_plan_id:
+        from_plan.successor_plan_id = to_plan.id
+    from_plan.notes = (
+        (from_plan.notes + " · " if from_plan.notes else "")
+        + f"חיסכון הועבר למסלול #{to_plan.id}"
+    )
+    return amount
+
+
+def auto_extend_active_plan(
+    db: Session,
+    plan: InvestmentPlan,
+    today: Optional[date] = None,
+) -> bool:
+    """Extend an active track by 12 months once its term ends (unless explicitly closed)."""
+    today = today or date.today()
+    if plan.status != "active" or _plan_blocks_auto_continue(plan):
+        return False
+
+    metrics = plan_metrics(plan, today)
+    if metrics["months_remaining"] > 0:
+        return False
+
+    plan.duration_months = int(plan.duration_months or 0) + AUTO_EXTEND_MONTHS
+    marker = f"המשך אוטומטי +{AUTO_EXTEND_MONTHS} ח׳"
+    if marker not in (plan.notes or ""):
+        plan.notes = (plan.notes + " · " if plan.notes else "") + marker
+    generate_payment_schedule(db, plan, realign_dates=False, commit=False)
+    return True
+
+
+def sync_investor_track_continuity(
+    db: Session,
+    investor: Investor,
+    today: Optional[date] = None,
+) -> dict:
+    """Roll closed-track savings into the active track and auto-extend active timelines."""
+    today = today or date.today()
+    plans = list(investor.plans or [])
+    target = _primary_active_savings_plan(plans)
+    extended = 0
+    rolled = 0.0
+
+    for plan in plans:
+        if auto_extend_active_plan(db, plan, today):
+            extended += 1
+
+    if target is not None:
+        for plan in sorted(plans, key=lambda p: p.id):
+            moved = roll_savings_to_active_plan(
+                db, from_plan=plan, to_plan=target, today=today
+            )
+            rolled += moved
+
+    return {"extended": extended, "rolled_amount": round(rolled, 2)}
+
+
+def sync_track_continuity(
+    db: Session,
+    *,
+    investor_id: Optional[int] = None,
+    today: Optional[date] = None,
+) -> dict:
+    """Apply savings rollover + auto-extension for one or all investors."""
+    today = today or date.today()
+    query = db.query(Investor).options(
+        joinedload(Investor.plans).joinedload(InvestmentPlan.payments)
+    )
+    if investor_id is not None:
+        query = query.filter(Investor.id == investor_id)
+    totals = {"investors": 0, "extended": 0, "rolled_amount": 0.0}
+    for investor in query.all():
+        result = sync_investor_track_continuity(db, investor, today)
+        totals["investors"] += 1
+        totals["extended"] += result["extended"]
+        totals["rolled_amount"] = round(totals["rolled_amount"] + result["rolled_amount"], 2)
+    return totals
 
 
 def serialize_plan(plan: InvestmentPlan, *, hide_fees: bool = False) -> dict:

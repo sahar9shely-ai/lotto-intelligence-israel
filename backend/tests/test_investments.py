@@ -928,6 +928,14 @@ def test_reporting_board_savings_do_not_overlap_next_year():
         # Lifetime = 4×1100 + 8×1100
         assert abs(summary["current_savings_balance"] - 13199.88) < 0.1
 
+        # Reporting-year boards must not roll savings into the next active plan.
+        svc.sync_investor_track_continuity(db, investor, today)
+        db.commit()
+        db.refresh(board)
+        db.refresh(active)
+        assert abs(svc.plan_metrics(board, today)["current_savings_balance"] - 4400.04) < 0.05
+        assert abs(svc.plan_metrics(active, today)["current_savings_balance"] - 8799.84) < 0.05
+
         clipped = svc.clip_reporting_year_plan_spans(db)
         assert clipped["clipped"] >= 1
         db.refresh(board)
@@ -1164,3 +1172,142 @@ def test_settle_savings_continue_and_close():
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
     client.delete(f"/api/v1/investments/plans/{new_id}", headers=headers)
     client.delete(f"/api/v1/investments/plans/{plan2_id}", headers=headers)
+
+
+def test_closed_track_savings_roll_to_active_plan():
+    """Leftover savings on a completed track move into the investor's active track."""
+    from datetime import date as date_cls
+
+    from app.db.investment_session import InvestmentSessionLocal
+    from app.models.investments import InvestmentPlan
+    from app.services import investment_service as svc
+
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    created = client.post(
+        "/api/v1/investments/investors",
+        headers=headers,
+        json={
+            "name": "בדיקת העברת חיסכון",
+            "username": "rollsave",
+            "password": "RollSave12!",
+        },
+    )
+    assert created.status_code == 201, created.text
+    inv_id = created.json()["id"]
+
+    db = InvestmentSessionLocal()
+    try:
+        closed = InvestmentPlan(
+            investor_id=inv_id,
+            principal=30000,
+            accrual_principal=30000,
+            plan_type="hybrid",
+            monthly_rate_percent=8.3333,
+            savings_rate_percent=3.6667,
+            manager_fee_percent=0,
+            start_date=date_cls(2025, 9, 1),
+            duration_months=4,
+            status="completed",
+            notes="מסלול ישן",
+        )
+        active = InvestmentPlan(
+            investor_id=inv_id,
+            principal=43000,
+            accrual_principal=43000,
+            plan_type="hybrid",
+            monthly_rate_percent=8.8372,
+            savings_rate_percent=2.5581,
+            manager_fee_percent=0,
+            start_date=date_cls(2026, 1, 1),
+            duration_months=12,
+            status="active",
+            notes="מסלול פעיל",
+        )
+        db.add(closed)
+        db.add(active)
+        db.commit()
+        db.refresh(closed)
+        db.refresh(active)
+
+        today = date_cls(2026, 8, 7)
+        before_closed = svc.plan_metrics(closed, today)["current_savings_balance"]
+        before_active = svc.plan_metrics(active, today)["current_savings_balance"]
+        assert before_closed > 1000
+        assert before_active > 1000
+
+        from app.models.investments import Investor
+        from sqlalchemy.orm import joinedload
+
+        investor = (
+            db.query(Investor)
+            .options(joinedload(Investor.plans).joinedload(InvestmentPlan.payments))
+            .filter(Investor.id == inv_id)
+            .one()
+        )
+        result = svc.sync_investor_track_continuity(db, investor, today)
+        db.commit()
+        db.refresh(closed)
+        db.refresh(active)
+
+        assert result["rolled_amount"] > 0
+        assert svc.plan_metrics(closed, today)["current_savings_balance"] < 0.02
+        after_active = svc.plan_metrics(active, today)["current_savings_balance"]
+        assert abs(after_active - (before_active + before_closed)) < 0.05
+        assert float(active.rollover_savings_balance or 0) > 0
+        assert "חיסכון הועבר" in (closed.notes or "")
+    finally:
+        db.close()
+
+
+def test_auto_extend_active_plan_at_term_end():
+    """An active track auto-extends by 12 months once its term ends."""
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    created = client.post(
+        "/api/v1/investments/investors",
+        headers=headers,
+        json={
+            "name": "בדיקת המשך",
+            "username": "autoext",
+            "password": "AutoExt12!",
+        },
+    )
+    assert created.status_code == 201, created.text
+    inv_id = created.json()["id"]
+
+    start = date.today().replace(day=1)
+    month = start.month - 11
+    year = start.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    start = start.replace(year=year, month=month)
+
+    create_plan = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": inv_id,
+            "principal": 50000,
+            "plan_type": "hybrid",
+            "monthly_rate_percent": 2,
+            "savings_rate_percent": 2,
+            "manager_fee_percent": 0,
+            "start_date": start.isoformat(),
+            "duration_months": 12,
+            "generate_schedule": True,
+        },
+    )
+    assert create_plan.status_code == 201, create_plan.text
+    plan_id = create_plan.json()["id"]
+
+    listed = client.get(
+        f"/api/v1/investments/plans?investor_id={inv_id}",
+        headers=headers,
+    )
+    assert listed.status_code == 200, listed.text
+    plan = listed.json()[0]
+    assert plan["duration_months"] == 24
+    assert plan["months_remaining"] > 0
+    assert "המשך אוטומטי" in (plan.get("notes") or "")
+
+    client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)

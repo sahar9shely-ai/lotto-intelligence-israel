@@ -47,6 +47,7 @@ export type Plan = {
   monthly_savings_accrual: number;
   projected_savings_balance: number;
   current_savings_balance?: number;
+  rollover_savings_balance?: number;
   accrued_savings_balance?: number;
   savings_redeemed_total?: number;
   successor_plan_id?: number | null;

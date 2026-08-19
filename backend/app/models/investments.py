@@ -40,6 +40,8 @@ class InvestmentPlan(Base):
     accrual_principal: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # Sum of withdrawals + transfers out of the savings pot.
     savings_redeemed_total: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # Savings rolled in from closed tracks — counts toward available balance immediately.
+    rollover_savings_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     # monthly = החזר חודשי | savings = חיסכון ריבית דריבית | hybrid = משולב
     plan_type: Mapped[str] = mapped_column(String(32), nullable=False, default="monthly")
     monthly_rate_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
