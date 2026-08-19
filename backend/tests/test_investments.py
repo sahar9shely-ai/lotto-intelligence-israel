@@ -1311,3 +1311,101 @@ def test_auto_extend_active_plan_at_term_end():
     assert "המשך אוטומטי" in (plan.get("notes") or "")
 
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
+
+
+def test_rollover_no_double_count_and_idempotent():
+    """After savings rollover, investor total equals plan sum — sync is safe to run twice."""
+    from datetime import date as date_cls
+
+    from app.db.investment_session import InvestmentSessionLocal
+    from app.models.investments import Investor, InvestmentPlan
+    from app.services import investment_service as svc
+    from sqlalchemy.orm import joinedload
+
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    created = client.post(
+        "/api/v1/investments/investors",
+        headers=headers,
+        json={
+            "name": "בדיקת כפל אחרי העברה",
+            "username": "noduproll",
+            "password": "NoDupRoll1!",
+        },
+    )
+    assert created.status_code == 201, created.text
+    inv_id = created.json()["id"]
+
+    db = InvestmentSessionLocal()
+    try:
+        closed = InvestmentPlan(
+            investor_id=inv_id,
+            principal=30000,
+            accrual_principal=30000,
+            plan_type="hybrid",
+            monthly_rate_percent=8.3333,
+            savings_rate_percent=3.6667,
+            manager_fee_percent=0,
+            start_date=date_cls(2025, 9, 1),
+            duration_months=4,
+            status="completed",
+            notes="מסלול סגור",
+        )
+        active = InvestmentPlan(
+            investor_id=inv_id,
+            principal=43000,
+            accrual_principal=43000,
+            plan_type="hybrid",
+            monthly_rate_percent=8.8372,
+            savings_rate_percent=2.5581,
+            manager_fee_percent=0,
+            start_date=date_cls(2026, 1, 1),
+            duration_months=12,
+            status="active",
+            notes="מסלול פעיל",
+        )
+        db.add(closed)
+        db.add(active)
+        db.commit()
+
+        today = date_cls(2026, 8, 7)
+        investor = (
+            db.query(Investor)
+            .options(joinedload(Investor.plans).joinedload(InvestmentPlan.payments))
+            .filter(Investor.id == inv_id)
+            .one()
+        )
+
+        def savings_plan_sum() -> float:
+            total = 0.0
+            for plan in investor.plans:
+                kind, _, savings_rate = svc.normalize_plan_rates(
+                    getattr(plan, "plan_type", None) or "monthly",
+                    plan.monthly_rate_percent,
+                    getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+                )
+                if kind == "monthly" or savings_rate <= 0:
+                    continue
+                total += svc.plan_metrics(plan, today)["current_savings_balance"]
+            return round(total, 2)
+
+        before_sum = savings_plan_sum()
+        before_inv = svc.serialize_investor(investor, today, db=db)
+        assert abs(before_sum - before_inv["current_savings_balance"]) < 0.05
+
+        svc.sync_investor_track_continuity(db, investor, today)
+        db.commit()
+        db.refresh(investor)
+        after1_sum = savings_plan_sum()
+        after1_inv = svc.serialize_investor(investor, today, db=db)
+        assert abs(after1_sum - after1_inv["current_savings_balance"]) < 0.05
+        assert abs(after1_sum - before_sum) < 0.05
+        assert after1_inv["monthly_savings"] == before_inv["monthly_savings"]
+
+        svc.sync_investor_track_continuity(db, investor, today)
+        db.commit()
+        after2_sum = savings_plan_sum()
+        after2_inv = svc.serialize_investor(investor, today, db=db)
+        assert after2_sum == after1_sum
+        assert after2_inv["current_savings_balance"] == after1_inv["current_savings_balance"]
+    finally:
+        db.close()
