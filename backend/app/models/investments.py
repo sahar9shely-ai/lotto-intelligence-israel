@@ -208,3 +208,5 @@ class AppSettings(Base):
     slack_webhook_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     assistant_provider: Mapped[str] = mapped_column(String(32), default="gemini", nullable=False)
     assistant_api_key: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Once true, demo investors (בר/אופק/…) are never auto-recreated after delete.
+    demo_investors_seeded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

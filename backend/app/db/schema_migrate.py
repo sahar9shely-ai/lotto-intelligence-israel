@@ -241,6 +241,23 @@ def ensure_schema(engine: Engine) -> None:
                 )
             if "assistant_api_key" not in cols:
                 _add_column(conn, "app_settings", "assistant_api_key VARCHAR(200)")
+            if "demo_investors_seeded" not in cols:
+                default_bool = "FALSE" if _dialect(engine) != "sqlite" else "0"
+                _add_column(
+                    conn,
+                    "app_settings",
+                    f"demo_investors_seeded BOOLEAN DEFAULT {default_bool}",
+                )
+                # Existing DBs already went through seed — never resurrect deleted demos.
+                if _table_exists(engine, "investors"):
+                    inv_count = conn.execute(text("SELECT COUNT(*) FROM investors")).scalar() or 0
+                    if inv_count > 0:
+                        true_bool = "TRUE" if _dialect(engine) != "sqlite" else "1"
+                        conn.execute(
+                            text(
+                                f"UPDATE app_settings SET demo_investors_seeded = {true_bool}"
+                            )
+                        )
 
     if _table_exists(engine, "investment_plans"):
         cols = _table_columns(engine, "investment_plans")

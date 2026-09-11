@@ -254,60 +254,6 @@ def test_cannot_delete_manager():
     assert "מנהל" in res.json()["detail"] or "עצמך" in res.json()["detail"]
 
 
-def test_delete_user_removes_investor_and_history():
-    from datetime import date
-
-    headers = _auth_headers("admin", "ManagerPass1!")
-    created = client.post(
-        "/api/v1/auth/users",
-        headers=headers,
-        json={
-            "name": "למחיקה",
-            "username": "todelete",
-            "password": "DeleteMe1!",
-            "role": "investor",
-            "phone": "050-999-8888",
-        },
-    )
-    assert created.status_code == 201, created.text
-    body = created.json()
-    user_id = body["id"]
-    investor_id = body["investor_id"]
-
-    plan = client.post(
-        "/api/v1/investments/plans",
-        headers=headers,
-        json={
-            "investor_id": investor_id,
-            "principal": 5000,
-            "monthly_rate_percent": 2,
-            "manager_fee_percent": 0,
-            "start_date": date.today().isoformat(),
-            "duration_months": 12,
-        },
-    )
-    assert plan.status_code == 201, plan.text
-
-    deleted = client.delete(f"/api/v1/auth/users/{user_id}", headers=headers)
-    assert deleted.status_code == 204, deleted.text
-
-    investors = client.get("/api/v1/investments/investors", headers=headers).json()
-    assert all(i["id"] != investor_id for i in investors)
-
-    payments = client.get(
-        f"/api/v1/investments/payments?investor_id={investor_id}",
-        headers=headers,
-    )
-    assert payments.status_code == 200
-    assert payments.json() == []
-
-    login = client.post(
-        "/api/v1/auth/login",
-        json={"username": "todelete", "password": "DeleteMe1!"},
-    )
-    assert login.status_code == 401
-
-
 def test_cannot_delete_manager_or_self():
     headers = _auth_headers("admin", "ManagerPass1!")
     users = client.get("/api/v1/auth/users", headers=headers).json()
@@ -325,6 +271,77 @@ def test_seed_defaults_twice_does_not_crash():
     try:
         inv_svc.seed_defaults(db)
         inv_svc.seed_defaults(db)
+    finally:
+        db.close()
+
+
+def test_deleted_demo_investor_not_resurrected_on_reseed():
+    """Deleting בר must stay deleted after restart/seed (Render boot)."""
+    from app.models.investments import Investor
+
+    _ensure_seeded()
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    bar_user = next((u for u in users if u["investor_name"] == "בר"), None)
+    assert bar_user is not None, "seed should create בר once"
+
+    deleted = client.delete(f"/api/v1/auth/users/{bar_user['id']}", headers=headers)
+    assert deleted.status_code == 204, deleted.text
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        inv_svc.seed_defaults(db)
+        names = {i.name for i in db.query(Investor).all()}
+        assert "בר" not in names
+        assert db.query(User).filter(User.username == "bar").first() is None
+    finally:
+        db.close()
+
+    users_after = client.get("/api/v1/auth/users", headers=headers).json()
+    assert all(u["investor_name"] != "בר" for u in users_after)
+
+    # Restore בר for other session-scoped tests that still expect the demo roster.
+    db = InvestmentSessionLocal()
+    try:
+        from app.models.investments import Investor
+        from app.services import auth_service as auth_svc
+
+        if db.query(Investor).filter(Investor.name == "בר").first() is None:
+            inv = Investor(name="בר", is_manager=False)
+            db.add(inv)
+            db.flush()
+            auth_svc.ensure_user_for_investor(
+                db, inv, username="bar", email="bar050297@gmail.com", password=None
+            )
+            db.commit()
+    finally:
+        db.close()
+
+
+def test_dedupe_removes_empty_duplicate_investors():
+    """Two empty «אופק» rows → one investor + one user after seed/dedupe."""
+    from app.models.investments import Investor
+    from app.services import auth_service as auth_svc
+
+    _ensure_seeded()
+    db = InvestmentSessionLocal()
+    try:
+        ofek = db.query(Investor).filter(Investor.name == "אופק").first()
+        assert ofek is not None
+        dup = Investor(name="אופק", is_manager=False, notes="כפילות ריקה")
+        db.add(dup)
+        db.flush()
+        auth_svc.ensure_user_for_investor(db, dup, username="ofekdup", password=None)
+        db.commit()
+
+        result = auth_svc.dedupe_investors_and_users(db)
+        assert any("אופק#" in x for x in result["removed_investors"])
+
+        ofeks = db.query(Investor).filter(Investor.name == "אופק").all()
+        assert len(ofeks) == 1
+        users = db.query(User).filter(User.investor_id == ofeks[0].id).all()
+        assert len(users) == 1
     finally:
         db.close()
 

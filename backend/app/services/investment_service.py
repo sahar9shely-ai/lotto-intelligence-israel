@@ -284,11 +284,19 @@ def ensure_settings(db: Session) -> AppSettings:
     return settings
 
 
+DEMO_INVESTOR_NAMES = ("בר", "אופק", "אלמוג", "שושי")
+SYSTEM_INVESTOR_NAMES = frozenset({"מנהל מערכת", "סהר", "מנהל", "מנהלת"})
+
+
 def seed_defaults(db: Session) -> dict:
-    """Seed investors + users. Idempotent; safe on legacy DBs with a combined manager row."""
+    """Seed investors + users. Idempotent; safe on legacy DBs with a combined manager row.
+
+    Demo investors (בר/אופק/…) are created only on first bootstrap. After that they are
+    never recreated — deleting a user stays deleted across restarts/deploys.
+    """
     from app.services.auth_service import ADMIN_INVESTOR_NAME, PERSONAL_INVESTOR_NAME
 
-    ensure_settings(db)
+    settings = ensure_settings(db)
     created: list[str] = []
     updated: list[str] = []
 
@@ -342,20 +350,32 @@ def seed_defaults(db: Session) -> dict:
             )
             created.append(f"{ADMIN_INVESTOR_NAME}:shell")
 
-    # 3) Demo investors (skip names already present).
-    for name in ("בר", "אופק", "אלמוג", "שושי"):
-        if name not in investor_names():
-            db.add(Investor(name=name, is_manager=False))
-            created.append(name)
+    db.flush()
+
+    # 3) Demo investors — first bootstrap only (never resurrect after delete).
+    demo_seeded = bool(getattr(settings, "demo_investors_seeded", False))
+    if not demo_seeded:
+        names = investor_names()
+        non_system = names - SYSTEM_INVESTOR_NAMES
+        # Fresh install: only system rows (or empty) → create demo roster once.
+        if not non_system:
+            for name in DEMO_INVESTOR_NAMES:
+                if name not in names:
+                    db.add(Investor(name=name, is_manager=False))
+                    created.append(name)
+        settings.demo_investors_seeded = True
+        updated.append("demo_investors_seeded")
 
     db.commit()
 
     from app.services import auth_service as auth_svc
 
+    deduped = auth_svc.dedupe_investors_and_users(db)
     users = auth_svc.seed_users(db)
     return {
         "created": created,
         "updated": updated,
+        "deduped": deduped,
         "users": users,
     }
 

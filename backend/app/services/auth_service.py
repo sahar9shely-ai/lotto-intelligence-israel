@@ -369,6 +369,119 @@ def split_admin_and_personal_accounts(db: Session) -> dict:
     }
 
 
+def dedupe_investors_and_users(db: Session) -> dict:
+    """Remove empty duplicate investors (same name) and orphaned double logins.
+
+    Keeps the richest row (most plans/payments). Never touches admin/sahar system rows
+    against each other. Safe to run on every startup.
+    """
+    from collections import defaultdict
+
+    from app.models.auth import (
+        LoginAlert,
+        PasswordResetRequest,
+        PasswordResetToken,
+        User,
+    )
+    from app.models.investments import (
+        InvestmentPlan,
+        InvestmentTopupRequest,
+        Payment,
+        Quote,
+        SavingsAction,
+    )
+
+    removed_investors: list[str] = []
+    removed_users: list[str] = []
+
+    by_name: dict[str, list[Investor]] = defaultdict(list)
+    for inv in db.query(Investor).order_by(Investor.id.asc()).all():
+        by_name[inv.name].append(inv)
+
+    for name, group in by_name.items():
+        if len(group) < 2:
+            continue
+        # Never collapse admin shell with personal portfolio even if names somehow match.
+        if name in {ADMIN_INVESTOR_NAME, PERSONAL_INVESTOR_NAME}:
+            # Keep the intended role row; drop empty extras with same name.
+            if name == ADMIN_INVESTOR_NAME:
+                preferred = [i for i in group if i.is_manager] or group
+            else:
+                preferred = [i for i in group if not i.is_manager] or group
+            group = preferred + [i for i in group if i not in preferred]
+
+        def score(inv: Investor) -> tuple[int, int, int]:
+            plans = (
+                db.query(InvestmentPlan)
+                .filter(InvestmentPlan.investor_id == inv.id)
+                .count()
+            )
+            payments = (
+                db.query(Payment).filter(Payment.investor_id == inv.id).count()
+            )
+            return (plans, payments, -inv.id)
+
+        ordered = sorted(group, key=score, reverse=True)
+        keeper = ordered[0]
+        for dup in ordered[1:]:
+            plans = (
+                db.query(InvestmentPlan)
+                .filter(InvestmentPlan.investor_id == dup.id)
+                .count()
+            )
+            payments = (
+                db.query(Payment).filter(Payment.investor_id == dup.id).count()
+            )
+            if plans > 0 or payments > 0:
+                # Has financial history — leave alone (manual merge needed).
+                continue
+
+            user = db.query(User).filter(User.investor_id == dup.id).first()
+            if user and user.role == "manager":
+                continue
+            if user:
+                db.query(LoginAlert).filter(
+                    (LoginAlert.user_id == user.id) | (LoginAlert.investor_id == dup.id)
+                ).delete(synchronize_session=False)
+                db.query(PasswordResetRequest).filter(
+                    PasswordResetRequest.user_id == user.id
+                ).delete(synchronize_session=False)
+                db.query(PasswordResetToken).filter(
+                    PasswordResetToken.user_id == user.id
+                ).delete(synchronize_session=False)
+                removed_users.append(user.username)
+                db.delete(user)
+            else:
+                db.query(LoginAlert).filter(LoginAlert.investor_id == dup.id).delete(
+                    synchronize_session=False
+                )
+
+            db.query(InvestmentTopupRequest).filter(
+                InvestmentTopupRequest.investor_id == dup.id
+            ).delete(synchronize_session=False)
+            db.query(SavingsAction).filter(SavingsAction.investor_id == dup.id).delete(
+                synchronize_session=False
+            )
+            db.query(Quote).filter(Quote.converted_investor_id == dup.id).update(
+                {"converted_investor_id": None}, synchronize_session=False
+            )
+            removed_investors.append(f"{dup.name}#{dup.id}")
+            db.delete(dup)
+
+    # Extra login rows on the same investor_id cannot exist (unique), but usernames
+    # like bar / bar12 for same person name are cleaned when empty investor removed above.
+
+    if removed_investors or removed_users:
+        db.commit()
+    else:
+        db.flush()
+
+    return {
+        "removed_investors": removed_investors,
+        "removed_users": removed_users,
+    }
+
+
 def seed_users(db: Session) -> dict:
     from app.models.investments import AppSettings
 
@@ -416,10 +529,32 @@ def seed_users(db: Session) -> dict:
             desired_email = normalize_email(DEFAULT_USER_EMAILS.get(ADMIN_INVESTOR_NAME))
 
         if user is None:
-            password = ADMIN_DEMO_PASSWORD if investor.is_manager else None
+            # Avoid second login for the same person name (bar + bar12 style duplicates).
             desired_username = (
                 ADMIN_USERNAME if investor.is_manager else desired_username or username_for_investor(investor)
             )
+            clash_user = db.query(User).filter(User.username == desired_username).first()
+            if (
+                clash_user is not None
+                and clash_user.investor is not None
+                and clash_user.investor.name == investor.name
+                and clash_user.investor_id != investor.id
+            ):
+                # Empty duplicate investor row — drop it instead of inventing bar{id}.
+                plans = (
+                    db.query(InvestmentPlan)
+                    .filter(InvestmentPlan.investor_id == investor.id)
+                    .count()
+                )
+                payments = (
+                    db.query(Payment).filter(Payment.investor_id == investor.id).count()
+                )
+                if plans == 0 and payments == 0 and not investor.is_manager:
+                    db.delete(investor)
+                    updated.append(f"dropped-dup:{investor.name}")
+                    continue
+
+            password = ADMIN_DEMO_PASSWORD if investor.is_manager else None
             user = ensure_user_for_investor(
                 db,
                 investor,
