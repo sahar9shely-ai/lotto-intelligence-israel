@@ -41,12 +41,12 @@ export function LoginPage() {
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <p className="auth-card__eyebrow">ברוכים הבאים</p>
+        <p className="auth-card__eyebrow">כניסה מאובטחת</p>
         <h1 className="auth-card__brand">תזרים</h1>
         <p className="auth-card__welcome">
-          מערכת ניהול השקעות ותזרים — פשוט, ברור ומעודכן.
+          מעקב יתרות, תשלומים והשקעות — ברור במבט ראשון.
         </p>
-        <p className="muted">הזינו את שם המשתמש והסיסמה שקיבלתם מהמנהל.</p>
+        <p className="muted">שם משתמש וסיסמה שקיבלתם מהמנהל.</p>
 
         <form className="form" onSubmit={onSubmit} autoComplete="on">
           <label>

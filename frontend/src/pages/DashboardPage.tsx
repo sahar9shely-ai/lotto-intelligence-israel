@@ -68,13 +68,19 @@ export function DashboardPage() {
 
   return (
     <div className="page">
-      <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
+      <header
+        className={`page-intro${isAdmin ? " page-intro--admin" : ""}${
+          !isManager ? " page-intro--investor" : ""
+        }`}
+      >
         <div>
           {isManager ? (
             <p className="page-intro__eyebrow">
               {isAdmin ? "ADMIN · ניהול" : "ניהול שותפים"}
             </p>
-          ) : null}
+          ) : (
+            <p className="page-intro__eyebrow">החשבון שלי</p>
+          )}
           <h1 className="page-intro__title">
             {isAdmin
               ? scopeName
@@ -92,20 +98,39 @@ export function DashboardPage() {
                   ? `סיכום של ${scopeName} — מזומן וחיסכון בנפרד.`
                   : "סיכום כולם — מזומן וחיסכון בנפרד. לחצו על משקיע ברשימה כדי לצמצם."}
             </p>
-          ) : null}
+          ) : (
+            <p className="page-intro__lead">
+              יתרות, תשלומים לאישור והיסטוריה — הכל במבט אחד.
+            </p>
+          )}
         </div>
-        <div className="page-head__actions">
-          <Link
-            className={`btn ${isManager ? "btn--admin" : "btn--gold"}`}
-            to="/investors"
-          >
-            {isManager ? "למשקיעים" : "המסלול שלי"}
-          </Link>
-          <Link className="btn btn--ghost" to="/payments">
-            {isManager ? "תשלומים" : "התשלומים שלי"}
-          </Link>
-        </div>
+        {isManager ? (
+          <div className="page-head__actions">
+            <Link className="btn btn--admin" to="/investors">
+              למשקיעים
+            </Link>
+            <Link className="btn btn--ghost" to="/payments">
+              תשלומים
+            </Link>
+          </div>
+        ) : (
+          <div className="page-head__actions">
+            <Link className="btn btn--primary" to="/payments">
+              לתשלומים
+            </Link>
+          </div>
+        )}
       </header>
+
+      {!isManager ? (
+        <div className="investor-quick-balance" aria-label="סיכום חודשי">
+          <span>סה״כ חודשי (מזומן + חיסכון)</span>
+          <strong>{formatMoney(data.monthly_investor_total ?? cash + savings)}</strong>
+          <em>
+            מזומן {formatMoney(cash)} · חיסכון {formatMoney(savings)}
+          </em>
+        </div>
+      ) : null}
 
       {isManager ? (
         <RoleJourneyHub
