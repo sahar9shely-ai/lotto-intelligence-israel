@@ -104,6 +104,26 @@ def test_username_login_and_investor_scope_alerts_manager():
     assert alerts.status_code == 200
     assert any(a["display_name"] == "בר" for a in alerts.json())
 
+    activity = client.get(
+        "/api/v1/auth/activity",
+        headers={"Authorization": f"Bearer {m_token}"},
+    )
+    assert activity.status_code == 200
+    assert any(
+        e["kind"] == "login" and e["investor_name"] == "בר" and e["is_unread"]
+        for e in activity.json()
+    )
+
+    summary = client.get(
+        "/api/v1/auth/activity/summary",
+        headers={"Authorization": f"Bearer {m_token}"},
+    )
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["unread_login_count"] >= 1
+    assert body["latest_login_id"] > 0
+    assert body["latest_login"]["kind"] == "login"
+
 
 def test_password_reset_requires_manager_approval():
     _ensure_seeded()

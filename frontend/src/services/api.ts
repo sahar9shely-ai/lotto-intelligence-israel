@@ -1,5 +1,7 @@
 import type {
   AuthUser,
+  ActivityEvent,
+  ActivitySummary,
   EmailOutboxItem,
   LoginAlert,
   PasswordResetRequestItem,
@@ -159,6 +161,23 @@ export const api = {
     request<{ message: string }>("/api/v1/auth/login-alerts/read-all", {
       method: "POST",
     }),
+  activity: (params?: { unreadOnly?: boolean; kind?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.unreadOnly) qs.set("unread_only", "true");
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return request<ActivityEvent[]>(`/api/v1/auth/activity${suffix}`);
+  },
+  activitySummary: () => request<ActivitySummary>("/api/v1/auth/activity/summary"),
+  markActivityRead: (id: number) =>
+    request<ActivityEvent>(`/api/v1/auth/activity/${id}/read`, { method: "POST" }),
+  markAllActivityRead: (kind?: string) => {
+    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+    return request<{ message: string }>(`/api/v1/auth/activity/read-all${qs}`, {
+      method: "POST",
+    });
+  },
   emailOutbox: () => request<EmailOutboxItem[]>("/api/v1/auth/email-outbox"),
 
   dashboard: (params?: { investor_id?: number | null }) => {

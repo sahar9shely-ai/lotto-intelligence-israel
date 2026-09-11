@@ -1,4 +1,5 @@
 import { PersonalAssistant } from "./PersonalAssistant";
+import { NotificationCenter } from "./NotificationCenter";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -170,9 +171,12 @@ export function AppShell() {
                 </NavLink>
               ))}
             </nav>
-            <button type="button" className="topbar__logout" onClick={signOut}>
-              יציאה
-            </button>
+            <div className="topbar__tools">
+              {isManager ? <NotificationCenter /> : null}
+              <button type="button" className="topbar__logout" onClick={signOut}>
+                יציאה
+              </button>
+            </div>
           </header>
         </div>
       </div>

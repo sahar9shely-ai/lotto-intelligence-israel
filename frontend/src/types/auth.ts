@@ -25,6 +25,34 @@ export type LoginAlert = {
   read_at?: string | null;
 };
 
+export type ActivityEvent = {
+  id: number;
+  kind: string;
+  title: string;
+  body: string;
+  severity: "info" | "success" | "warning" | "urgent" | string;
+  actor_user_id?: number | null;
+  actor_name?: string | null;
+  investor_id?: number | null;
+  investor_name?: string | null;
+  entity_type?: string | null;
+  entity_id?: number | null;
+  href?: string | null;
+  meta_json?: string | null;
+  created_at: string;
+  read_at?: string | null;
+  is_unread: boolean;
+};
+
+export type ActivitySummary = {
+  unread_count: number;
+  unread_login_count: number;
+  latest_id: number;
+  latest_login_id: number;
+  latest?: ActivityEvent | null;
+  latest_login?: ActivityEvent | null;
+};
+
 export type PasswordResetRequestItem = {
   id: number;
   user_id: number;

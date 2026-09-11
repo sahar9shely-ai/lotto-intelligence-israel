@@ -86,6 +86,32 @@ class LoginAlert(Base):
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class ActivityEvent(Base):
+    """Unified activity + notification stream for managers (tracking + alerts)."""
+
+    __tablename__ = "activity_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="info")
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    investor_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("investors.id", ondelete="SET NULL"), nullable=True
+    )
+    investor_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    entity_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    href: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class EmailOutbox(Base):
     __tablename__ = "email_outbox"
 

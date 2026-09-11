@@ -85,6 +85,27 @@ def notify_manager_login(db: Session, user: User) -> LoginAlert:
     db.add(alert)
     db.flush()
 
+    from app.services import activity_service as activity_svc
+
+    is_manager_login = user.role == "manager" or bool(
+        getattr(user.investor, "is_manager", False)
+    )
+    activity_svc.log_activity(
+        db,
+        kind="login",
+        title=f"{name} התחבר למערכת",
+        body=f"שם משתמש: {user.username}"
+        + (" · מנהל" if is_manager_login else " · משקיע"),
+        severity="urgent" if not is_manager_login else "warning",
+        actor=user,
+        investor_id=user.investor_id,
+        investor_name=name,
+        entity_type="user",
+        entity_id=user.id,
+        href="/users" if is_manager_login else "/investors",
+        meta={"login_alert_id": alert.id, "username": user.username},
+    )
+
     manager = (
         db.query(User)
         .options(joinedload(User.investor))
@@ -703,6 +724,21 @@ def request_password_reset(
         note=(note or "").strip()[:255] or None,
     )
     db.add(req)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="password_reset_request",
+        title=f"בקשת איפוס סיסמה · {req.display_name}",
+        body=note.strip()[:200] if note else f"משתמש {user.username} מבקש סיסמה חדשה",
+        severity="urgent",
+        actor=user,
+        investor_id=user.investor_id,
+        investor_name=req.display_name,
+        entity_type="password_reset",
+        entity_id=req.id,
+        href="/users",
+    )
     db.commit()
     return generic
 

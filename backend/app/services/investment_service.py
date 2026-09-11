@@ -2085,7 +2085,7 @@ def remove_investor_from_calendar_year(
 
 def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
     """Remove an investor, login user, and all related financial history."""
-    from app.models.auth import LoginAlert, PasswordResetRequest, PasswordResetToken, User
+    from app.models.auth import ActivityEvent, LoginAlert, PasswordResetRequest, PasswordResetToken, User
 
     investor = db.query(Investor).filter(Investor.id == investor_id).first()
     if not investor:
@@ -2109,6 +2109,15 @@ def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
     db.query(InvestmentTopupRequest).filter(
         InvestmentTopupRequest.investor_id == investor_id
     ).update({"created_plan_id": None}, synchronize_session=False)
+
+    # Keep activity trail; detach FKs so history survives user/investor deletion.
+    db.query(ActivityEvent).filter(ActivityEvent.investor_id == investor_id).update(
+        {"investor_id": None}, synchronize_session=False
+    )
+    if user:
+        db.query(ActivityEvent).filter(ActivityEvent.actor_user_id == user.id).update(
+            {"actor_user_id": None}, synchronize_session=False
+        )
 
     deleted = {
         "investor_id": investor_id,

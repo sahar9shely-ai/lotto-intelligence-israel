@@ -31,6 +31,14 @@ export function DashboardPage() {
     reload: reloadAlerts,
   } = useAsync(() => (isManager ? api.loginAlerts(true) : Promise.resolve([])), [isManager]);
 
+  const {
+    data: activity,
+    reload: reloadActivity,
+  } = useAsync(
+    () => (isManager ? api.activity({ limit: 25 }) : Promise.resolve([])),
+    [isManager],
+  );
+
   const { data: topupRequests } = useAsync(() => api.topupRequests(), []);
 
   const { data: quotes } = useAsync(
@@ -241,6 +249,63 @@ export function DashboardPage() {
       {isManager && filterId == null && !isAdmin ? <ManagerIncomePanel /> : null}
         </>
       )}
+
+      {isManager ? (
+        <Panel
+          title="יומן מעקב"
+          subtitle="כניסות, תשלומים, הצעות ובקשות — הכול במקום אחד"
+          action={
+            <button
+              type="button"
+              className="btn btn--small btn--ghost"
+              onClick={async () => {
+                await api.markAllActivityRead();
+                reloadActivity();
+                reloadAlerts();
+              }}
+            >
+              סמן הכל כנקרא
+            </button>
+          }
+        >
+          {(activity?.length ?? 0) === 0 ? (
+            <p className="muted">עדיין אין אירועים במעקב</p>
+          ) : (
+            <ul className="list activity-feed">
+              {(activity ?? []).map((ev) => (
+                <li
+                  key={ev.id}
+                  className={`list__row activity-feed__row${ev.is_unread ? " is-unread" : ""}${
+                    ev.kind === "login" ? " activity-feed__row--login" : ""
+                  }`}
+                >
+                  <div>
+                    <strong>{ev.title}</strong>
+                    <span className="muted">
+                      {ev.body ? `${ev.body} · ` : ""}
+                      {formatDate(ev.created_at)}
+                    </span>
+                  </div>
+                  {ev.is_unread ? (
+                    <button
+                      type="button"
+                      className="btn btn--small"
+                      onClick={async () => {
+                        await api.markActivityRead(ev.id);
+                        reloadActivity();
+                      }}
+                    >
+                      נקרא
+                    </button>
+                  ) : (
+                    <span className="muted">נקרא</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      ) : null}
 
       {isManager && (alerts?.length ?? 0) > 0 ? (
         <Panel

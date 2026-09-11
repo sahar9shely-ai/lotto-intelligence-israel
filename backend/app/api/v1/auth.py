@@ -147,10 +147,28 @@ def delete_user(
         raise HTTPException(status_code=400, detail="לא ניתן למחוק את עצמך")
     if user.role == "manager" or bool(getattr(user.investor, "is_manager", False)):
         raise HTTPException(status_code=400, detail="לא ניתן למחוק משתמש מנהל")
+    display = user.investor.name if user.investor else user.username
+    username_snapshot = user.username
     try:
         inv_svc.delete_investor_and_history(db, investor_id=user.investor_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="user_deleted",
+        title=f"משתמש נמחק · {display}",
+        body=f"שם משתמש: {username_snapshot}",
+        severity="warning",
+        actor=current,
+        investor_id=None,
+        investor_name=display,
+        entity_type="user",
+        entity_id=user_id,
+        href="/users",
+        commit=True,
+    )
     return None
 
 
@@ -208,6 +226,21 @@ def create_access_user(
         .options(joinedload(User.investor))
         .filter(User.id == user.id)
         .one()
+    )
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="user_created",
+        title=f"משתמש חדש · {investor.name}",
+        body=f"שם משתמש: {username} · תפקיד: {payload.role}",
+        severity="info",
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="user",
+        entity_id=user.id,
+        href="/users",
+        commit=True,
     )
     return auth_svc.serialize_user(user)
 
@@ -330,6 +363,59 @@ def mark_all_alerts_read(
     )
     db.commit()
     return {"message": "כל ההתראות סומנו כנקראו"}
+
+
+@router.get("/activity")
+def list_activity_events(
+    unread_only: bool = False,
+    kind: str | None = None,
+    limit: int = 80,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    from app.services import activity_service as activity_svc
+
+    events = activity_svc.list_activity(
+        db, unread_only=unread_only, kind=kind, limit=limit
+    )
+    return [activity_svc.serialize_activity(e) for e in events]
+
+
+@router.get("/activity/summary")
+def activity_summary(
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    from app.services import activity_service as activity_svc
+
+    return activity_svc.activity_summary(db)
+
+
+@router.post("/activity/{event_id}/read")
+def mark_activity_read(
+    event_id: int,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    from app.services import activity_service as activity_svc
+
+    try:
+        event = activity_svc.mark_activity_read(db, event_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return activity_svc.serialize_activity(event)
+
+
+@router.post("/activity/read-all", response_model=MessageOut)
+def mark_all_activity_read(
+    kind: str | None = None,
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    from app.services import activity_service as activity_svc
+
+    count = activity_svc.mark_all_activity_read(db, kind=kind)
+    return {"message": f"סומנו {count} התראות כנקראו"}
 
 
 @router.get("/email-outbox", response_model=list[EmailOutboxOut])

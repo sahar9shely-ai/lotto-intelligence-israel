@@ -577,6 +577,22 @@ def create_investment_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="topup_created",
+        title=f"בקשת מסלול חדשה · {investor.name}",
+        body=f"סכום מבוקש: {payload.amount:,.0f} ₪",
+        severity="warning",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="topup",
+        entity_id=request.id,
+        href="/investors",
+        commit=True,
+    )
     return _serialize_topup(request, user)
 
 
@@ -622,6 +638,23 @@ def reject_investment_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="topup_rejected",
+        title=f"בקשת מסלול נדחתה · {inv_name}",
+        body=payload.notes or "הבקשה נדחתה על ידי מנהל",
+        severity="warning",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
     return _serialize_topup(updated, user)
 
 
@@ -652,6 +685,23 @@ def approve_investment_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="topup_approved",
+        title=f"בקשת מסלול אושרה · {inv_name}",
+        body="נפתח מסלול חדש לפי הבקשה",
+        severity="success",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
     return _serialize_topup(updated, user)
 
 
@@ -1045,6 +1095,22 @@ def update_payment(
     if data.get("status") == "paid":
         svc.request_payment_confirmation(db, payment=payment, actor=user)
         db.refresh(payment)
+        from app.services import activity_service as activity_svc
+
+        activity_svc.log_activity(
+            db,
+            kind="payment_awaiting",
+            title=f"תשלום נשלח לאישור · {payment.investor.name if payment.investor else ''}",
+            body=f"סכום למשקיע ממתין לאישור קבלה",
+            severity="warning",
+            actor=user,
+            investor_id=payment.investor_id,
+            investor_name=payment.investor.name if payment.investor else None,
+            entity_type="payment",
+            entity_id=payment.id,
+            href="/payments",
+            commit=True,
+        )
         return svc.serialize_payment(payment)
 
     if data.get("status") in {"scheduled", "skipped"}:
@@ -1076,6 +1142,22 @@ def confirm_payment(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="payment_confirmed",
+        title=f"תשלום אושר · {payment.investor.name if payment.investor else ''}",
+        body="המשקיע אישר קבלת תשלום",
+        severity="success",
+        actor=user,
+        investor_id=payment.investor_id,
+        investor_name=payment.investor.name if payment.investor else None,
+        entity_type="payment",
+        entity_id=payment.id,
+        href="/payments",
+        commit=True,
+    )
     db.refresh(payment)
     return svc.serialize_payment(payment)
 
@@ -1100,6 +1182,22 @@ def reject_payment(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="payment_rejected",
+        title=f"אישור תשלום נדחה · {payment.investor.name if payment.investor else ''}",
+        body="המשקיע דחה קבלת תשלום — יש לבדוק",
+        severity="urgent",
+        actor=user,
+        investor_id=payment.investor_id,
+        investor_name=payment.investor.name if payment.investor else None,
+        entity_type="payment",
+        entity_id=payment.id,
+        href="/payments",
+        commit=True,
+    )
     db.refresh(payment)
     return svc.serialize_payment(payment)
 
@@ -1146,6 +1244,20 @@ def create_quote(
     db.add(quote)
     db.commit()
     db.refresh(quote)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="quote_created",
+        title=f"הצעה חדשה · {quote.prospect_name}",
+        body=f"קרן {quote.principal:,.0f} ₪ · {quote.duration_months} חודשים",
+        severity="info",
+        investor_name=quote.prospect_name,
+        entity_type="quote",
+        entity_id=quote.id,
+        href="/quotes",
+        commit=True,
+    )
     return svc.serialize_quote(quote)
 
 
@@ -1183,8 +1295,25 @@ def update_quote(
     quote.plan_type = kind
     quote.monthly_rate_percent = monthly_rate
     quote.savings_rate_percent = savings_rate
+    status_changed = "status" in payload.model_dump(exclude_unset=True)
     db.commit()
     db.refresh(quote)
+    if status_changed:
+        from app.services import activity_service as activity_svc
+
+        st = svc.normalize_quote_status(quote.status)
+        activity_svc.log_activity(
+            db,
+            kind=f"quote_{st}",
+            title=f"הצעה · {quote.prospect_name} · {st}",
+            body=f"סטטוס הצעה עודכן ל־{st}",
+            severity="success" if st == "approved" else "warning" if st == "rejected" else "info",
+            investor_name=quote.prospect_name,
+            entity_type="quote",
+            entity_id=quote.id,
+            href="/quotes",
+            commit=True,
+        )
     return svc.serialize_quote(quote)
 
 
@@ -1295,5 +1424,20 @@ def convert_quote(
         .options(joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments))
         .filter(InvestmentPlan.id == plan.id)
         .one()
+    )
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="quote_converted",
+        title=f"משקיע חדש מקליטת הצעה · {investor.name}",
+        body=f"נפתח מסלול · משתמש {username}",
+        severity="success",
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="quote",
+        entity_id=quote.id,
+        href="/investors",
+        commit=True,
     )
     return svc.serialize_plan(plan)
