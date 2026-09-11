@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { SavingsActions } from "../components/SavingsActions";
@@ -94,6 +95,7 @@ function planTotalToDate(plan: Plan): number {
 export function PaymentsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const yearNow = new Date().getFullYear();
   const [year, setYear] = useState(yearNow);
   const [status, setStatus] = useState<string>("");
@@ -509,6 +511,15 @@ export function PaymentsPage() {
   }
 
   async function confirmPayment(id: number) {
+    const payment = payments.find((p) => p.id === id);
+    const ok = await confirm({
+      title: "אישור קבלת תשלום",
+      message: payment
+        ? `לאשר קבלה של ${formatMoney(payment.investor_amount, true)} עבור ${formatCalendarMonth(payment.due_date)}?`
+        : "לאשר את קבלת התשלום?",
+      confirmLabel: "אשר קבלה",
+    });
+    if (!ok) return;
     setMarkBusyId(id);
     setMessage(null);
     try {
@@ -523,6 +534,16 @@ export function PaymentsPage() {
   }
 
   async function rejectPayment(id: number) {
+    const payment = payments.find((p) => p.id === id);
+    const ok = await confirm({
+      title: "דחיית תשלום",
+      message: payment
+        ? `לדחות את הבקשה על ${formatMoney(payment.investor_amount, true)}? התשלום יחזור למתוכנן.`
+        : "לדחות את בקשת האישור?",
+      confirmLabel: "דחה",
+      danger: true,
+    });
+    if (!ok) return;
     setMarkBusyId(id);
     setMessage(null);
     try {
@@ -676,6 +697,7 @@ export function PaymentsPage() {
 
   return (
     <div className={`page${refreshing ? " page--refreshing" : ""}`}>
+      {confirmDialog}
       <Toast message={message} onClear={clearMessage} />
       <header className="page-intro">
         <div>
@@ -740,10 +762,9 @@ export function PaymentsPage() {
 
       {!isManager &&
       payments.some((p) => p.status === "awaiting_confirmation") ? (
-        <Panel
-          title="ממתין לאישור שלך"
-          subtitle="המנהל שלח בקשה — אשר או דחה למטה ברשימה, או כאן"
-        >
+        <div className="step-window step-window--urgent" role="region" aria-label="ממתין לאישור">
+          <p className="step-window__eyebrow">דחוף · אישור קבלה</p>
+          <p className="step-window__title">המנהל שלח תשלום לאישור שלך</p>
           <ul className="list">
             {payments
               .filter((p) => p.status === "awaiting_confirmation")
@@ -776,7 +797,7 @@ export function PaymentsPage() {
                 </li>
               ))}
           </ul>
-        </Panel>
+        </div>
       ) : null}
 
       <div className="filters">

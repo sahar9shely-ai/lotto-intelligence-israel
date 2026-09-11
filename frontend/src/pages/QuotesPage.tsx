@@ -1,5 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useConfirm } from "../components/ConfirmDialog";
+import { FlowFunnel } from "../components/FlowFunnel";
 import { QuotePipelineStepper, quoteNextStepHint } from "../components/QuotePipelineStepper";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
@@ -23,6 +25,7 @@ import {
   isRejectedQuote,
   normalizeQuoteStatus,
   quoteMoneyPhaseLabel,
+  quotePipelineStepIndex,
   quoteStatusLabel,
   type QuoteViewTab,
 } from "../utils/quoteStatus";
@@ -41,6 +44,7 @@ export function QuotesPage() {
   const { data: settings } = useAsync(() => api.settings(), []);
   const { data: siteStatus } = useAsync(() => api.siteStatus(), []);
   const { data, error, loading, reload } = useAsync(() => api.quotes(), []);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Quote | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -190,7 +194,13 @@ export function QuotesPage() {
   }
 
   async function rejectQuote(quote: Quote) {
-    if (!window.confirm(`לסמן את ההצעה ל-${quote.prospect_name} כ"לא אושר"?`)) return;
+    const ok = await confirm({
+      title: "סימון כלא אושר",
+      message: `לסמן את ההצעה ל-${quote.prospect_name} כ"לא אושר"? ההצעה תעבור ללשונית «לא אושרו».`,
+      confirmLabel: "לא אושר",
+      danger: true,
+    });
+    if (!ok) return;
     await setQuoteStatus(quote, "rejected");
   }
 
@@ -199,7 +209,13 @@ export function QuotesPage() {
       setMessage("לא ניתן למחוק הצעה שהושלמה ונפתח מסלול");
       return;
     }
-    if (!window.confirm(`למחוק את ההצעה ל-${quote.prospect_name}?`)) return;
+    const ok = await confirm({
+      title: "מחיקת הצעה",
+      message: `למחוק את ההצעה ל-${quote.prospect_name}? לא ניתן לשחזר.`,
+      confirmLabel: "מחיקה",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.deleteQuote(quote.id);
       if (editing?.id === quote.id) closeForm();
@@ -364,12 +380,13 @@ export function QuotesPage() {
 
   return (
     <div className="page">
+      {confirmDialog}
       <header className="page-intro page-intro--admin">
         <div>
           <p className="page-intro__eyebrow">ניהול הצעות</p>
           <h1 className="page-intro__title">הצעות למשקיעים חדשים</h1>
           <p className="page-intro__lead">
-            PDF, וואטסאפ ואישור — מעקב ברור מטיוטה ועד קליטה כמשקיע במערכת.
+            משפך ברור: הצעה → אישור → קליטה כמשקיע → שליחת כניסה.
           </p>
         </div>
         <div className="page-head__actions">
@@ -385,6 +402,27 @@ export function QuotesPage() {
           </button>
         </div>
       </header>
+
+      <FlowFunnel
+        className="flow-funnel--page"
+        steps={[
+          { id: "draft", label: "הצעה", hint: "שמירה + PDF" },
+          { id: "send", label: "שליחה", hint: "וואטסאפ" },
+          { id: "ok", label: "אושר", hint: "סימון" },
+          { id: "in", label: "קליטה", hint: "משקיע חדש" },
+        ]}
+        current={
+          viewTab === "completed"
+            ? 3
+            : viewTab === "rejected"
+              ? 0
+              : pipelineQuotes.some((q) => normalizeQuoteStatus(q.status) === "approved")
+                ? 2
+                : pipelineQuotes.length > 0
+                  ? 1
+                  : 0
+        }
+      />
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
@@ -610,7 +648,54 @@ export function QuotesPage() {
                 </header>
                 <p className="quote-phase-line">{quoteMoneyPhaseLabel(q.status)}</p>
                 {nextHint && viewTab === "pipeline" ? (
-                  <p className="quote-next-hint">{nextHint}</p>
+                  <div className="step-window">
+                    <p className="step-window__eyebrow">
+                      שלב {quotePipelineStepIndex(q.status) + 1} מתוך 3
+                    </p>
+                    <p className="step-window__title">{nextHint}</p>
+                    <div className="step-window__cta">
+                      {canApproveQuote(q.status) ? (
+                        <button
+                          type="button"
+                          className="btn btn--admin btn--small"
+                          onClick={() => void setQuoteStatus(q, "approved")}
+                        >
+                          סימון כאושר
+                        </button>
+                      ) : null}
+                      {canConvertQuote(q.status) ? (
+                        <button
+                          type="button"
+                          className="btn btn--gold btn--small"
+                          onClick={() => {
+                            setConvertError(null);
+                            setConverting(q);
+                          }}
+                        >
+                          הכנס כמשקיע חדש
+                        </button>
+                      ) : null}
+                      {!canApproveQuote(q.status) && !canConvertQuote(q.status) ? (
+                        <button
+                          type="button"
+                          className="btn btn--whatsapp btn--small"
+                          disabled={pdfBusyId === q.id}
+                          onClick={() => sendWhatsApp(q)}
+                        >
+                          {pdfBusyId === q.id ? "מכינים..." : "שליחת PDF בוואטסאפ"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn--whatsapp btn--small"
+                          disabled={pdfBusyId === q.id}
+                          onClick={() => sendWhatsApp(q)}
+                        >
+                          וואטסאפ
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ) : null}
                 <p className="quote-card__lead">
                   {planTypeLabel(q.plan_type)} · קרן {formatMoney(q.principal)} ·{" "}

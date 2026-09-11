@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useState } from "react";
+import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
 import { Toast } from "../components/Toast";
@@ -33,6 +34,7 @@ function canSendAccess(user: AuthUser, passwordOverride?: string): boolean {
 
 export function UsersPage() {
   const { user: currentUser } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { data: users, error, loading, reload } = useAsync(() => api.users(), []);
   const {
     data: resetRequests,
@@ -181,18 +183,23 @@ export function UsersPage() {
   }
 
   async function deleteUserAccount(user: AuthUser) {
-    const warning = [
-      `למחוק לצמיתות את ${user.investor_name} (${user.username})?`,
-      "",
-      "יפעל מחיקה מלאה:",
-      "• משתמש וכניסה לאתר",
-      "• כל המסלולים והתשלומים",
-      "• בקשות הוספת מסלול",
-      "• הצעות שהומרו למשקיע הזה",
-      "",
-      "לא ניתן לשחזר.",
-    ].join("\n");
-    if (!window.confirm(warning)) return;
+    const ok = await confirm({
+      title: `מחיקת ${user.investor_name}`,
+      message: [
+        `למחוק לצמיתות את ${user.investor_name} (${user.username})?`,
+        "",
+        "יפעל מחיקה מלאה:",
+        "• משתמש וכניסה לאתר",
+        "• כל המסלולים והתשלומים",
+        "• בקשות הוספת מסלול",
+        "• הצעות שהומרו למשקיע הזה",
+        "",
+        "לא ניתן לשחזר.",
+      ].join("\n"),
+      confirmLabel: "מחיקה לצמיתות",
+      danger: true,
+    });
+    if (!ok) return;
     setErrorMsg(null);
     try {
       await api.deleteUser(user.id);
@@ -226,6 +233,7 @@ export function UsersPage() {
 
   return (
     <div className="page">
+      {confirmDialog}
       <header className="page-intro page-intro--admin">
         <div>
           <p className="page-intro__eyebrow">ניהול גישה</p>

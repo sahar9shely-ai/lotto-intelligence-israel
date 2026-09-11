@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ManagerIncomePanel } from "../components/ManagerIncomePanel";
 import { Panel } from "../components/Panel";
+import { RoleJourneyHub } from "../components/RoleJourneyHub";
 import { Stat } from "../components/Stat";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -31,6 +32,16 @@ export function DashboardPage() {
   } = useAsync(() => (isManager ? api.loginAlerts(true) : Promise.resolve([])), [isManager]);
 
   const { data: topupRequests } = useAsync(() => api.topupRequests(), []);
+
+  const { data: quotes } = useAsync(
+    () => (isManager ? api.quotes() : Promise.resolve([])),
+    [isManager],
+  );
+
+  const { data: investorPayments } = useAsync(
+    () => (!isManager ? api.payments() : Promise.resolve([])),
+    [isManager],
+  );
 
   if (loading) return <div className="state state--loading">טוען את לוח הבקרה...</div>;
   if (error || !data)
@@ -90,6 +101,17 @@ export function DashboardPage() {
           </Link>
         </div>
       </header>
+
+      <RoleJourneyHub
+        isAdmin={isAdmin}
+        isManager={isManager}
+        dashboard={data}
+        topupRequests={topupRequests}
+        quotes={quotes}
+        awaitingConfirmCount={
+          (investorPayments ?? []).filter((p) => p.status === "awaiting_confirmation").length
+        }
+      />
 
       {(topupRequests ?? []).some(
         (r) => r.status === "pending" || r.status === "contract" || r.can_reverse_investment,
