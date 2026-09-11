@@ -5513,6 +5513,16 @@ input[type="date"] {
     box-shadow: none;
   }
 
+  .more-sheet {
+    z-index: 80;
+  }
+
+  .shell:has(.more-sheet) .assistant-fab,
+  .shell:has(.more-sheet) .assistant-panel {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   .more-sheet__panel {
     inset-inline: 10px;
     bottom: calc(78px + env(safe-area-inset-bottom, 0px));
@@ -5543,6 +5553,7 @@ input[type="date"] {
   .assistant-fab {
     inset-inline-start: 12px;
     bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+    z-index: 46;
   }
 
   .assistant-panel {
