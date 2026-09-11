@@ -684,6 +684,71 @@ export function PaymentsPage() {
     }
   }
 
+  function paymentRowActions(p: (typeof payments)[number]) {
+    if (isManager) {
+      if (p.status === "scheduled") {
+        return (
+          <button
+            type="button"
+            className="btn btn--small btn--admin"
+            disabled={markBusyId === p.id}
+            onClick={() => markPaid(p.id)}
+          >
+            {markBusyId === p.id ? "שולח..." : "שלח לאישור"}
+          </button>
+        );
+      }
+      if (p.status === "awaiting_confirmation") {
+        return (
+          <button
+            type="button"
+            className="btn btn--small btn--ghost"
+            disabled={markBusyId === p.id}
+            onClick={() => markScheduled(p.id)}
+          >
+            {markBusyId === p.id ? "מבטל..." : "בטל בקשה"}
+          </button>
+        );
+      }
+      if (p.status === "paid") {
+        return (
+          <button
+            type="button"
+            className="btn btn--small btn--ghost"
+            disabled={markBusyId === p.id}
+            onClick={() => markScheduled(p.id)}
+          >
+            {markBusyId === p.id ? "מעדכן..." : "החזר למתוכנן"}
+          </button>
+        );
+      }
+      return null;
+    }
+    if (p.status === "awaiting_confirmation") {
+      return (
+        <>
+          <button
+            type="button"
+            className="btn btn--small btn--gold"
+            disabled={markBusyId === p.id}
+            onClick={() => confirmPayment(p.id)}
+          >
+            {markBusyId === p.id ? "מאשר..." : "אשר קבלה"}
+          </button>
+          <button
+            type="button"
+            className="btn btn--small btn--ghost btn--danger"
+            disabled={markBusyId === p.id}
+            onClick={() => rejectPayment(p.id)}
+          >
+            דחה
+          </button>
+        </>
+      );
+    }
+    return null;
+  }
+
   if (loading && !data) return <div className="state state--loading">טוען היסטוריית תשלומים...</div>;
   if (error && !data)
     return (
@@ -1373,7 +1438,8 @@ export function PaymentsPage() {
             ) : null}
           </div>
         ) : (
-          <div className="table-wrap">
+          <>
+          <div className="table-wrap table-wrap--desktop">
             <table className="table">
               <thead>
                 <tr>
@@ -1439,62 +1505,38 @@ export function PaymentsPage() {
                     <td>
                       <span className={`badge badge--${p.status}`}>{statusLabel(p.status)}</span>
                     </td>
-                    <td className="table__actions">
-                      {isManager ? (
-                        p.status === "scheduled" ? (
-                          <button
-                            type="button"
-                            className="btn btn--small btn--admin"
-                            disabled={markBusyId === p.id}
-                            onClick={() => markPaid(p.id)}
-                          >
-                            {markBusyId === p.id ? "שולח..." : "שלח לאישור"}
-                          </button>
-                        ) : p.status === "awaiting_confirmation" ? (
-                          <button
-                            type="button"
-                            className="btn btn--small btn--ghost"
-                            disabled={markBusyId === p.id}
-                            onClick={() => markScheduled(p.id)}
-                          >
-                            {markBusyId === p.id ? "מבטל..." : "בטל בקשה"}
-                          </button>
-                        ) : p.status === "paid" ? (
-                          <button
-                            type="button"
-                            className="btn btn--small btn--ghost"
-                            disabled={markBusyId === p.id}
-                            onClick={() => markScheduled(p.id)}
-                          >
-                            {markBusyId === p.id ? "מעדכן..." : "החזר למתוכנן"}
-                          </button>
-                        ) : null
-                      ) : p.status === "awaiting_confirmation" ? (
-                        <>
-                          <button
-                            type="button"
-                            className={`btn btn--small ${isManager ? "btn--admin" : "btn--gold"}`}
-                            disabled={markBusyId === p.id}
-                            onClick={() => confirmPayment(p.id)}
-                          >
-                            {markBusyId === p.id ? "מאשר..." : "אשר קבלה"}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--small btn--ghost btn--danger"
-                            disabled={markBusyId === p.id}
-                            onClick={() => rejectPayment(p.id)}
-                          >
-                            דחה
-                          </button>
-                        </>
-                      ) : null}
-                    </td>
+                    <td className="table__actions">{paymentRowActions(p)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <ul className="pay-cards">
+            {payments.map((p) => (
+              <li key={`card-${p.id}`} className={`pay-card pay-card--${p.status}`}>
+                <div className="pay-card__top">
+                  <div>
+                    <strong className="pay-card__title">
+                      {isManager ? p.investor_name : formatCalendarMonth(p.due_date)}
+                    </strong>
+                    <span className="muted">
+                      {isManager
+                        ? `${formatCalendarMonth(p.due_date)}${allYears ? ` · ${p.due_date.slice(0, 4)}` : ""} · ${formatDate(p.due_date)}`
+                        : formatDate(p.due_date)}
+                    </span>
+                  </div>
+                  <span className={`badge badge--${p.status}`}>{statusLabel(p.status)}</span>
+                </div>
+                <div className="pay-card__amount">
+                  <span>{isManager ? "סכום למשקיע" : "הסכום שלך"}</span>
+                  <strong>{formatMoney(p.investor_amount, true)}</strong>
+                  {isManager ? <em>עמלה {formatMoney(p.manager_amount, true)}</em> : null}
+                </div>
+                <div className="pay-card__actions">{paymentRowActions(p)}</div>
+              </li>
+            ))}
+          </ul>
+          </>
         )}
       </Panel>
       </div>

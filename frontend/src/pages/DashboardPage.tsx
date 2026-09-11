@@ -218,7 +218,7 @@ export function DashboardPage() {
         <ManagerIncomePanel variant="admin" investorId={filterId} />
       ) : (
         <>
-      <div className="money-ledger">
+      <div className={`money-ledger${!isManager ? " money-ledger--with-hero" : ""}`}>
         <div className="money-ledger__item money-ledger__item--accent">
           <span>{isManager && !scopeName ? "סך קרן פעילה" : "קרן"}</span>
           <strong>{formatMoney(data.total_principal)}</strong>

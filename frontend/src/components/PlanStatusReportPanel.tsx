@@ -90,7 +90,7 @@ export function PlanStatusReportPanel({
               : null}
           </p>
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stackable">
               <thead>
                 <tr>
                   <th>חודש #</th>
@@ -106,21 +106,25 @@ export function PlanStatusReportPanel({
               <tbody>
                 {months.map((m) => (
                   <tr key={m.month_number}>
-                    <td>
+                    <td data-label="חודש #">
                       {m.month_number}
                       {m.compounded ? " · ריבית דריבית" : ""}
                     </td>
-                    <td>{formatCalendarMonth(m.due_date)}</td>
-                    <td>{formatDate(m.due_date)}</td>
-                    {showCash ? <td>{formatMoney(m.cash_amount, true)}</td> : null}
-                    {showSavings ? (
-                      <td>{formatMoney(m.savings_accrual, true)}</td>
+                    <td data-label="חודש">{formatCalendarMonth(m.due_date)}</td>
+                    <td data-label="תאריך">{formatDate(m.due_date)}</td>
+                    {showCash ? (
+                      <td data-label="מקבל (מזומן)">{formatMoney(m.cash_amount, true)}</td>
                     ) : null}
                     {showSavings ? (
-                      <td>{formatMoney(m.cumulative_savings)}</td>
+                      <td data-label="נכנס לחיסכון">{formatMoney(m.savings_accrual, true)}</td>
                     ) : null}
-                    {showCash ? <td>{formatMoney(m.cumulative_cash)}</td> : null}
-                    <td>
+                    {showSavings ? (
+                      <td data-label="יתרת חיסכון">{formatMoney(m.cumulative_savings)}</td>
+                    ) : null}
+                    {showCash ? (
+                      <td data-label="מזומן מצטבר">{formatMoney(m.cumulative_cash)}</td>
+                    ) : null}
+                    <td data-label="סטטוס">
                       <span className={`badge badge--${m.status}`}>
                         {statusLabel(m.status)}
                       </span>

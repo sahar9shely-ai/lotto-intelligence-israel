@@ -371,7 +371,7 @@ export function InvestorsPage() {
           </Panel>
 
           <Panel title="פירוט לפי משקיע" subtitle="לחצו על שם כדי לפתוח את הכרטיס המלא">
-            <div className="investor-table-wrap">
+            <div className="investor-table-wrap table-wrap--desktop">
               <table className="investor-table">
                 <thead>
                   <tr>
@@ -417,6 +417,54 @@ export function InvestorsPage() {
                 </tbody>
               </table>
             </div>
+            <ul className="investor-cards">
+              {investors.map((inv) => (
+                <li key={`card-${inv.id}`}>
+                  <button
+                    type="button"
+                    className="investor-card"
+                    onClick={() => setScope(inv.id)}
+                  >
+                    <div className="investor-card__top">
+                      <div>
+                        <strong>
+                          {inv.name}
+                          {inv.is_manager ? " · מנהל" : ""}
+                        </strong>
+                        <span className="muted">
+                          {(inv.plan_types ?? [])
+                            .map((t) => planTypeLabel(t))
+                            .join(" · ") || "אין מסלול פעיל"}
+                        </span>
+                      </div>
+                      <span className="investor-card__cta">לכרטיס</span>
+                    </div>
+                    <div className="investor-card__hero">
+                      <span>סה״כ חודשי</span>
+                      <strong>{formatMoney(totalMonthlyOf(inv))}</strong>
+                    </div>
+                    <div className="investor-card__grid">
+                      <div>
+                        <span>קרן</span>
+                        <strong>{formatMoney(inv.active_principal)}</strong>
+                      </div>
+                      <div>
+                        <span>מזומן</span>
+                        <strong>{formatMoney(cashOf(inv))}</strong>
+                      </div>
+                      <div>
+                        <span>חיסכון חודשי</span>
+                        <strong>{formatMoney(savingsOf(inv))}</strong>
+                      </div>
+                      <div>
+                        <span>יתרת חיסכון</span>
+                        <strong>{formatMoney(inv.current_savings_balance ?? 0)}</strong>
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
           </Panel>
         </div>
       ) : selected ? (

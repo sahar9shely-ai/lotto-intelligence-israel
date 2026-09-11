@@ -1,6 +1,6 @@
 import { PersonalAssistant } from "./PersonalAssistant";
 import { NotificationCenter } from "./NotificationCenter";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SVGProps } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isAdminAccount } from "../utils/roles";
@@ -8,6 +8,86 @@ import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 
 const PRIMARY_PATHS = new Set(["/", "/investors", "/payments", "/activity"]);
+
+function DockGlyph({ path }: { path: string }) {
+  const common: SVGProps<SVGSVGElement> = {
+    viewBox: "0 0 24 24",
+    width: 22,
+    height: 22,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": true,
+  };
+  if (path === "/") {
+    return (
+      <svg {...common}>
+        <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" />
+      </svg>
+    );
+  }
+  if (path === "/investors") {
+    return (
+      <svg {...common}>
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3.5 19a5.5 5.5 0 0 1 11 0" />
+        <circle cx="17" cy="8.5" r="2.4" />
+        <path d="M16 14.2a4.8 4.8 0 0 1 5 4.8" />
+      </svg>
+    );
+  }
+  if (path === "/payments") {
+    return (
+      <svg {...common}>
+        <rect x="3" y="6" width="18" height="13" rx="2.2" />
+        <path d="M3 10h18" />
+        <path d="M8 15h4" />
+      </svg>
+    );
+  }
+  if (path === "/activity") {
+    return (
+      <svg {...common}>
+        <path d="M4 13h3l2-6 3 10 2-4h4" />
+        <circle cx="19" cy="7" r="2.2" />
+      </svg>
+    );
+  }
+  if (path === "/quotes") {
+    return (
+      <svg {...common}>
+        <path d="M7 3.5h8.5L20 8v12.5H7z" />
+        <path d="M15.5 3.5V8H20" />
+        <path d="M10 12h6M10 16h4" />
+      </svg>
+    );
+  }
+  if (path === "/users") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="8" r="3.2" />
+        <path d="M5 19.5a7 7 0 0 1 14 0" />
+      </svg>
+    );
+  }
+  if (path === "/settings") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M12 4.2v1.8M12 18v1.8M4.2 12h1.8M18 12h1.8M6.4 6.4l1.3 1.3M16.3 16.3l1.3 1.3M17.6 6.4l-1.3 1.3M7.7 16.3l-1.3 1.3" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <circle cx="6" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="18" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
 
 export function AppShell() {
   const { user, logout } = useAuth();
@@ -32,13 +112,18 @@ export function AppShell() {
   }, [reloadStatus]);
 
   const links = [
-    { to: "/", label: "לוח בקרה", end: true, managerOnly: false },
-    { to: "/investors", label: isManager ? "משקיעים" : "ההשקעה שלי", managerOnly: false },
-    { to: "/payments", label: isManager ? "תשלומים" : "תשלומים", managerOnly: false },
-    { to: "/activity", label: "מעקב", managerOnly: true },
-    { to: "/quotes", label: "הצעות", managerOnly: true },
-    { to: "/users", label: "משתמשים", managerOnly: true },
-    { to: "/settings", label: "הגדרות", managerOnly: true },
+    { to: "/", label: "לוח בקרה", dockLabel: "לוח", end: true, managerOnly: false },
+    {
+      to: "/investors",
+      label: isManager ? "משקיעים" : "ההשקעה שלי",
+      dockLabel: isManager ? "משקיעים" : "השקעה",
+      managerOnly: false,
+    },
+    { to: "/payments", label: "תשלומים", dockLabel: "תשלומים", managerOnly: false },
+    { to: "/activity", label: "מעקב", dockLabel: "מעקב", managerOnly: true },
+    { to: "/quotes", label: "הצעות", dockLabel: "הצעות", managerOnly: true },
+    { to: "/users", label: "משתמשים", dockLabel: "משתמשים", managerOnly: true },
+    { to: "/settings", label: "הגדרות", dockLabel: "הגדרות", managerOnly: true },
   ].filter((l) => !l.managerOnly || isManager);
 
   const primaryLinks = links.filter((l) => PRIMARY_PATHS.has(l.to));
@@ -197,7 +282,8 @@ export function AppShell() {
             className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
             onClick={() => setMoreOpen(false)}
           >
-            {link.label}
+            <DockGlyph path={link.to} />
+            <span>{link.dockLabel}</span>
           </NavLink>
         ))}
         {moreLinks.length > 0 ? (
@@ -207,7 +293,8 @@ export function AppShell() {
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen((v) => !v)}
           >
-            עוד
+            <DockGlyph path="more" />
+            <span>עוד</span>
           </button>
         ) : null}
       </nav>
@@ -221,7 +308,7 @@ export function AppShell() {
             onClick={() => setMoreOpen(false)}
           />
           <div className="more-sheet__panel">
-            <p className="more-sheet__title">עוד</p>
+            <p className="more-sheet__title">עוד פעולות</p>
             {moreLinks.map((link) => (
               <NavLink
                 key={`more-${link.to}`}
@@ -229,11 +316,12 @@ export function AppShell() {
                 className="more-sheet__link"
                 onClick={() => setMoreOpen(false)}
               >
-                {link.label}
+                <DockGlyph path={link.to} />
+                <span>{link.label}</span>
               </NavLink>
             ))}
             <button type="button" className="more-sheet__link more-sheet__link--danger" onClick={signOut}>
-              יציאה
+              <span>יציאה מהחשבון</span>
             </button>
           </div>
         </div>

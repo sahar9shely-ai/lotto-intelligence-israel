@@ -48,12 +48,13 @@ export function LoginPage() {
         </p>
         <p className="muted">שם משתמש וסיסמה שקיבלתם מהמנהל.</p>
 
-        <form className="form" onSubmit={onSubmit} autoComplete="on">
+        <form className="form auth-card__form" onSubmit={onSubmit} autoComplete="on">
           <label>
             שם משתמש
             <input
               type="text"
               name="username"
+              inputMode="text"
               autoComplete="username"
               autoCorrect="off"
               autoCapitalize="off"

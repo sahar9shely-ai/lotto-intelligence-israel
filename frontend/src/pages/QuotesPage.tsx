@@ -770,7 +770,7 @@ export function QuotesPage() {
 
                 {open ? (
                   <div className="table-wrap quote-months">
-                    <table className="table">
+                    <table className="table table--stackable">
                       <thead>
                         <tr>
                           <th>חודש</th>
@@ -782,17 +782,17 @@ export function QuotesPage() {
                       <tbody>
                         {rows.map((r) => (
                           <tr key={r.month}>
-                            <td>
+                            <td data-label="חודש">
                               {r.month}
                               {r.compounded ? " · ריבית דריבית" : ""}
                             </td>
                             {q.plan_type !== "savings" ? (
-                              <td>{formatMoney(r.profit, true)}</td>
+                              <td data-label="החזר חודשי">{formatMoney(r.profit, true)}</td>
                             ) : null}
                             {q.plan_type !== "monthly" ? (
-                              <td>{formatMoney(r.savings, true)}</td>
+                              <td data-label="לחיסכון">{formatMoney(r.savings, true)}</td>
                             ) : null}
-                            <td>
+                            <td data-label="רווח מצטבר">
                               {formatMoney(
                                 r.cumulative + (q.plan_type === "monthly" ? 0 : r.cumulativeSavings),
                                 true,
