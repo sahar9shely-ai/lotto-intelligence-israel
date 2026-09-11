@@ -96,7 +96,7 @@ export function ForgotPasswordPage() {
           </label>
           {error ? <p className="form-error">{error}</p> : null}
           {message ? <p className="toast">{message}</p> : null}
-          <button type="submit" className="btn btn--primary" disabled={busy || !username.trim()}>
+          <button type="submit" className="btn btn--primary btn--wide" disabled={busy || !username.trim()}>
             {busy ? "שולח..." : "שלח בקשה למנהל"}
           </button>
         </form>
