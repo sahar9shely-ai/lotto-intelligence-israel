@@ -1,19 +1,41 @@
 {
+  "id": "/",
   "name": "תזרים",
   "short_name": "תזרים",
-  "description": "מעקב השקעות שותפים ותשלומים חודשיים",
+  "description": "מעקב השקעות שותפים, תשלומים חודשיים והצעות למשקיעים חדשים",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#E7F0EA",
   "theme_color": "#0E2A22",
   "dir": "rtl",
   "lang": "he",
+  "categories": ["finance", "business"],
   "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
     {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

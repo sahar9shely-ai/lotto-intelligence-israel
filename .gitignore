@@ -30,3 +30,8 @@ backend/data/
 backend/app/data/
 /data/
 
+# Local Cloudflare / tunnel session URLs
+.public-url
+.public-url-backup
+.slack-webhook
+

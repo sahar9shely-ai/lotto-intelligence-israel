@@ -11,23 +11,35 @@ from app.db.investment_session import get_investment_db, investment_engine
 from app.models import auth as auth_models  # noqa: F401
 from app.models import investments as investment_models  # noqa: F401
 from app.models.auth import User
-from app.models.investments import Investor, InvestmentPlan, Payment, Quote
+from app.models.investments import Investor, InvestmentPlan, InvestmentTopupRequest, Payment, Quote
 from app.schemas.investments import (
     DashboardOut,
     InvestorCreate,
     InvestorOut,
     InvestorUpdate,
     PaymentOut,
+    PaymentReportOut,
     PaymentUpdate,
     PlanCreate,
     PlanOut,
+    PlanSettleRequest,
+    PlanSettleResult,
     PlanUpdate,
     QuoteConvert,
     QuoteCreate,
     QuoteOut,
     QuoteUpdate,
+    SavingsActionRequest,
+    SavingsActionResult,
     SettingsOut,
     SettingsUpdate,
+    SiteStatusOut,
+    SlackAnnounceOut,
+    TopupRequestApprove,
+    TopupRequestCreate,
+    TopupRequestDecision,
+    TopupRequestOut,
+    TopupRequestSign,
 )
 from app.security.auth import get_current_user, is_manager, require_manager
 from app.services import auth_service as auth_svc
@@ -40,10 +52,15 @@ InvestmentBase.metadata.create_all(bind=investment_engine)
 
 def init_investment_db() -> None:
     from app.db.investment_session import InvestmentSessionLocal
+    from app.db.schema_migrate import ensure_schema
+
+    ensure_schema(investment_engine)
 
     db = InvestmentSessionLocal()
     try:
         svc.seed_defaults(db)
+        svc.repair_reporting_year_plans(db)
+        svc.sync_track_continuity(db)
     finally:
         db.close()
 
@@ -66,10 +83,15 @@ def seed(
 
 @router.get("/dashboard", response_model=DashboardOut)
 def dashboard(
+    investor_id: int | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
-    scoped = None if is_manager(user) else user.investor_id
+    # Investors always see themselves. Managers may filter to one investor or all.
+    if is_manager(user):
+        scoped = investor_id
+    else:
+        scoped = user.investor_id
     return svc.get_dashboard(db, investor_id=scoped)
 
 
@@ -78,26 +100,188 @@ def get_settings(
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    return svc.ensure_settings(db)
+    return _serialize_settings(svc.ensure_settings(db))
+
+
+@router.get("/site-status", response_model=SiteStatusOut)
+def get_site_status(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Readable by every logged-in user — drives the global update banner."""
+    settings = svc.ensure_settings(db)
+    public_url = None
+    # Managers see the live tunnel URL so bookmarks stay current after free-tunnel rotates.
+    if getattr(user, "role", None) == "manager" or bool(
+        getattr(getattr(user, "investor", None), "is_manager", False)
+    ):
+        public_url = _read_public_url()
+    return {
+        "site_updating": bool(getattr(settings, "site_updating", False)),
+        "site_updating_message": getattr(settings, "site_updating_message", None)
+        or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
+        "public_url": public_url,
+    }
 
 
 @router.patch("/settings", response_model=SettingsOut)
 def update_settings(
     payload: SettingsUpdate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     settings = svc.ensure_settings(db)
     data = payload.model_dump(exclude_unset=True)
+    # Empty string clears the assistant key; omit field to leave unchanged.
+    if "assistant_api_key" in data and data["assistant_api_key"] is not None:
+        raw = str(data["assistant_api_key"]).strip()
+        data["assistant_api_key"] = raw or None
+    if "assistant_provider" in data and data["assistant_provider"]:
+        prov = str(data["assistant_provider"]).strip().lower()
+        if prov not in {"gemini", "openai"}:
+            raise HTTPException(status_code=400, detail="ספק לא נתמך")
+        data["assistant_provider"] = prov
+    changed = sorted(data.keys())
     for key, value in data.items():
         setattr(settings, key, value)
     if "manager_display_name" in data:
         manager = db.query(Investor).filter(Investor.is_manager.is_(True)).first()
         if manager:
             manager.name = data["manager_display_name"]
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="settings_updated",
+        title="הגדרות המערכת עודכנו",
+        body="שדות: " + (", ".join(changed) if changed else "ללא שינוי"),
+        severity="info",
+        actor=user,
+        entity_type="settings",
+        href="/settings",
+    )
     db.commit()
     db.refresh(settings)
-    return settings
+    return _serialize_settings(settings)
+
+
+def _serialize_settings(settings) -> dict:
+    key = (getattr(settings, "assistant_api_key", None) or "").strip()
+    return {
+        "default_monthly_rate_percent": settings.default_monthly_rate_percent,
+        "default_manager_fee_percent": settings.default_manager_fee_percent,
+        "default_duration_months": settings.default_duration_months,
+        "currency_symbol": settings.currency_symbol,
+        "manager_display_name": settings.manager_display_name,
+        "site_updating": bool(getattr(settings, "site_updating", False)),
+        "site_updating_message": getattr(settings, "site_updating_message", None)
+        or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
+        "slack_webhook_url": getattr(settings, "slack_webhook_url", None) or None,
+        "assistant_provider": getattr(settings, "assistant_provider", None) or "gemini",
+        "assistant_api_key_set": bool(key),
+        "assistant_api_key_hint": (f"…{key[-4:]}" if len(key) >= 4 else None) if key else None,
+    }
+
+
+def _read_public_url() -> str | None:
+    from pathlib import Path
+
+    for candidate in (
+        Path("/workspace/.public-url"),
+        Path(__file__).resolve().parents[4] / ".public-url",
+        Path.cwd() / ".public-url",
+    ):
+        try:
+            if candidate.is_file():
+                value = candidate.read_text(encoding="utf-8").strip() or None
+                if value:
+                    return value
+        except OSError:
+            continue
+    return None
+
+
+def _post_slack_open_link(webhook: str, public_url: str) -> tuple[bool, str]:
+    import json
+    import urllib.error
+    import urllib.request
+
+    text = (
+        "*תזרים — כניסה מהירה*\n"
+        f"<{public_url}|לחצו כאן לפתיחת המערכת>\n"
+        f"`{public_url}`"
+    )
+    payload = {
+        "text": text,
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*תזרים — כניסה מהירה לעבודה*",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "פתח את תזרים", "emoji": True},
+                        "url": public_url,
+                        "style": "primary",
+                    }
+                ],
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"קישור חי: `{public_url}`",
+                    }
+                ],
+            },
+        ],
+    }
+    req = urllib.request.Request(
+        webhook,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            if resp.status < 300:
+                return True, "נשלח ל-Slack"
+            return False, body or f"HTTP {resp.status}"
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        return False, detail or str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+@router.post("/announce-public-url", response_model=SlackAnnounceOut)
+def announce_public_url(
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Post the live public URL to Slack for one-click open from work chat."""
+    settings = svc.ensure_settings(db)
+    webhook = (getattr(settings, "slack_webhook_url", None) or "").strip()
+    public_url = _read_public_url()
+    if not public_url:
+        raise HTTPException(status_code=400, detail="אין קישור ציבורי פעיל כרגע")
+    if not webhook:
+        raise HTTPException(
+            status_code=400,
+            detail="חסר Slack Webhook — הגדירו בהגדרות כדי לשתף לצ'אט העבודה",
+        )
+    ok, detail = _post_slack_open_link(webhook, public_url)
+    if not ok:
+        raise HTTPException(status_code=502, detail=f"שליחה ל-Slack נכשלה: {detail}")
+    return {"sent": True, "detail": detail, "public_url": public_url}
 
 
 @router.get("/investors", response_model=list[InvestorOut])
@@ -105,42 +289,65 @@ def list_investors(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_investment_db),
 ):
-    query = db.query(Investor).options(joinedload(Investor.plans), joinedload(Investor.user))
+    query = db.query(Investor).options(
+        joinedload(Investor.plans).joinedload(InvestmentPlan.payments),
+        joinedload(Investor.user),
+    )
     if not is_manager(user):
         query = query.filter(Investor.id == user.investor_id)
     investors = query.order_by(Investor.is_manager.desc(), Investor.name).all()
-    return [svc.serialize_investor(i) for i in investors]
+    for investor in investors:
+        svc.sync_investor_track_continuity(db, investor)
+    rows = [svc.serialize_investor(i, db=db) for i in investors]
+    db.commit()
+    return rows
 
 
 @router.post("/investors", response_model=InvestorOut, status_code=201)
 def create_investor(
     payload: InvestorCreate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    data = payload.model_dump(exclude={"email", "send_invite"})
+    data = payload.model_dump(exclude={"email", "username", "password"})
     investor = Investor(**data)
     db.add(investor)
-    db.commit()
-    db.refresh(investor)
+    db.flush()
 
-    email = payload.email.strip() if payload.email else None
-    if email:
+    try:
         auth_svc.ensure_user_for_investor(
-            db, investor, email=email, send_invite=payload.send_invite
+            db,
+            investor,
+            username=payload.username,
+            email=payload.email.strip() if payload.email else None,
+            password=payload.password,
         )
-        db.commit()
-    else:
-        auth_svc.ensure_user_for_investor(db, investor, send_invite=False)
-        db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="investor_created",
+        title=f"משקיע חדש · {investor.name}",
+        body=(f"משתמש: {payload.username}" if payload.username else "ללא משתמש גישה"),
+        severity="success",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="investor",
+        entity_id=investor.id,
+        href="/investors",
+    )
+    db.commit()
     investor = (
         db.query(Investor)
         .options(joinedload(Investor.plans), joinedload(Investor.user))
         .filter(Investor.id == investor.id)
         .one()
     )
-    return svc.serialize_investor(investor)
+    return svc.serialize_investor(investor, db=db)
 
 
 @router.patch("/investors/{investor_id}", response_model=InvestorOut)
@@ -166,11 +373,27 @@ def update_investor(
     )
     if not investor:
         raise HTTPException(status_code=404, detail="Investor not found")
+    changed = sorted(payload.model_dump(exclude_unset=True).keys())
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(investor, key, value)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="investor_updated",
+        title=f"פרטי משקיע עודכנו · {investor.name}",
+        body="שדות: " + (", ".join(changed) if changed else "ללא שינוי"),
+        severity="info",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="investor",
+        entity_id=investor.id,
+        href="/investors",
+    )
     db.commit()
     db.refresh(investor)
-    return svc.serialize_investor(investor)
+    return svc.serialize_investor(investor, db=db)
 
 
 @router.get("/plans", response_model=list[PlanOut])
@@ -182,20 +405,28 @@ def list_plans(
 ):
     scoped = _scope_investor_id(user, investor_id)
     query = db.query(InvestmentPlan).options(
-        joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments)
+        joinedload(InvestmentPlan.investor),
+        joinedload(InvestmentPlan.payments),
+        joinedload(InvestmentPlan.source_request),
     )
     if scoped is not None:
         query = query.filter(InvestmentPlan.investor_id == scoped)
     if status:
         query = query.filter(InvestmentPlan.status == status)
+    if scoped is not None:
+        svc.sync_track_continuity(db, investor_id=scoped)
+    else:
+        svc.sync_track_continuity(db)
+    db.commit()
     plans = query.order_by(InvestmentPlan.start_date.desc()).all()
-    return [svc.serialize_plan(p) for p in plans]
+    hide_fees = not is_manager(user)
+    return [svc.serialize_plan(p, hide_fees=hide_fees) for p in plans]
 
 
 @router.post("/plans", response_model=PlanOut, status_code=201)
 def create_plan(
     payload: PlanCreate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     investor = db.query(Investor).filter(Investor.id == payload.investor_id).first()
@@ -203,8 +434,34 @@ def create_plan(
         raise HTTPException(status_code=404, detail="Investor not found")
 
     data = payload.model_dump(exclude={"generate_schedule"})
+    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
+        data.get("plan_type") or "monthly",
+        data.get("monthly_rate_percent") or 0,
+        data.get("savings_rate_percent") or 0,
+    )
+    data["plan_type"] = kind
+    data["monthly_rate_percent"] = monthly_rate
+    data["savings_rate_percent"] = savings_rate
+    data["accrual_principal"] = float(data.get("principal") or 0)
+    data["savings_redeemed_total"] = 0.0
     plan = InvestmentPlan(**data)
     db.add(plan)
+    db.flush()
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="plan_created",
+        title=f"מסלול חדש · {investor.name}",
+        body=f"קרן {float(plan.principal or 0):,.0f} ₪ · {plan.duration_months} חודשים",
+        severity="success",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="plan",
+        entity_id=plan.id,
+        href="/investors",
+    )
     db.commit()
     db.refresh(plan)
 
@@ -224,7 +481,7 @@ def create_plan(
 def update_plan(
     plan_id: int,
     payload: PlanUpdate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     plan = (
@@ -236,23 +493,62 @@ def update_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
+    old_start = plan.start_date
+    old_duration = plan.duration_months
     data = payload.model_dump(exclude_unset=True, exclude={"regenerate_schedule"})
     for key, value in data.items():
         setattr(plan, key, value)
+    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
+        getattr(plan, "plan_type", None) or "monthly",
+        plan.monthly_rate_percent,
+        getattr(plan, "savings_rate_percent", 0.0) or 0.0,
+    )
+    plan.plan_type = kind
+    plan.monthly_rate_percent = monthly_rate
+    plan.savings_rate_percent = savings_rate
+    # Manager principal edit rebases accrual base (full terms change).
+    if "principal" in data:
+        plan.accrual_principal = float(plan.principal or 0)
+    inv_name = plan.investor.name if plan.investor else ""
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="plan_updated",
+        title=f"מסלול עודכן · {inv_name}",
+        body="שדות: " + (", ".join(sorted(data.keys())) if data else "ללא שינוי"),
+        severity="info",
+        actor=user,
+        investor_id=plan.investor_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan.id,
+        href="/investors",
+    )
     db.commit()
 
-    should_regen = payload.regenerate_schedule or any(
+    start_changed = plan.start_date != old_start
+    duration_changed = plan.duration_months != old_duration
+    money_changed = any(
         field in data
         for field in (
             "principal",
+            "plan_type",
             "monthly_rate_percent",
+            "savings_rate_percent",
             "manager_fee_percent",
-            "start_date",
-            "duration_months",
         )
     )
+    should_regen = (
+        payload.regenerate_schedule or money_changed or start_changed or duration_changed
+    )
     if should_regen:
-        svc.generate_payment_schedule(db, plan)
+        # Only move due dates when start/duration were explicitly changed.
+        svc.generate_payment_schedule(
+            db,
+            plan,
+            realign_dates=start_changed or duration_changed,
+        )
 
     plan = (
         db.query(InvestmentPlan)
@@ -263,16 +559,547 @@ def update_plan(
     return svc.serialize_plan(plan)
 
 
+@router.delete("/plans/{plan_id}", status_code=204)
+def delete_plan(
+    plan_id: int,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    plan = (
+        db.query(InvestmentPlan)
+        .options(joinedload(InvestmentPlan.investor))
+        .filter(InvestmentPlan.id == plan_id)
+        .first()
+    )
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    inv_name = plan.investor.name if plan.investor else ""
+    inv_id = plan.investor_id
+    principal = float(plan.principal or 0)
+    # Clear successor links pointing at this plan so SQLite FK allows delete.
+    db.query(InvestmentPlan).filter(
+        InvestmentPlan.successor_plan_id == plan_id
+    ).update({"successor_plan_id": None}, synchronize_session=False)
+    db.query(InvestmentTopupRequest).filter(
+        InvestmentTopupRequest.created_plan_id == plan_id
+    ).update({"created_plan_id": None}, synchronize_session=False)
+    db.delete(plan)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="plan_deleted",
+        title=f"מסלול נמחק · {inv_name}",
+        body=f"קרן הייתה {principal:,.0f} ₪",
+        severity="warning",
+        actor=user,
+        investor_id=inv_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan_id,
+        href="/investors",
+    )
+    db.commit()
+    return None
+
+
+def _require_owned_topup(user: User, request: InvestmentTopupRequest) -> None:
+    if is_manager(user):
+        return
+    if request.investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="אין הרשאה לבקשה הזו")
+
+
+def _serialize_topup(request, user: User, *, include_signatures: bool = False) -> dict:
+    return svc.serialize_topup_request(
+        request,
+        hide_fees=not is_manager(user),
+        include_signatures=include_signatures,
+    )
+
+
+@router.get("/investment-requests", response_model=list[TopupRequestOut])
+def list_investment_requests(
+    status: Optional[str] = None,
+    investor_id: Optional[int] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    scoped = _scope_investor_id(user, investor_id)
+    return svc.list_topup_requests(
+        db,
+        investor_id=scoped,
+        status=status,
+        hide_fees=not is_manager(user),
+    )
+
+
+@router.get("/investment-requests/{request_id}", response_model=TopupRequestOut)
+def get_investment_request(
+    request_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    _require_owned_topup(user, request)
+    return _serialize_topup(request, user, include_signatures=True)
+
+
+@router.post("/investment-requests", response_model=TopupRequestOut, status_code=201)
+def create_investment_request(
+    payload: TopupRequestCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    if is_manager(user):
+        target_id = payload.investor_id or user.investor_id
+        if not target_id:
+            raise HTTPException(status_code=400, detail="בחרו משקיע לבקשה")
+    else:
+        target_id = user.investor_id
+        if payload.investor_id and payload.investor_id != user.investor_id:
+            raise HTTPException(status_code=403, detail="אפשר לפתוח בקשה רק עבור עצמך")
+    if not target_id:
+        raise HTTPException(status_code=400, detail="אין משקיע משויך לחשבון")
+    investor = db.query(Investor).filter(Investor.id == target_id).first()
+    if not investor:
+        raise HTTPException(status_code=404, detail="Investor not found")
+    try:
+        request = svc.create_topup_request(
+            db,
+            investor=investor,
+            amount=payload.amount,
+            notes=payload.notes,
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="topup_created",
+        title=f"בקשת מסלול חדשה · {investor.name}",
+        body=f"סכום מבוקש: {payload.amount:,.0f} ₪",
+        severity="warning",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="topup",
+        entity_id=request.id,
+        href="/investors",
+        commit=True,
+    )
+    return _serialize_topup(request, user)
+
+
+@router.post("/investment-requests/{request_id}/cancel", response_model=TopupRequestOut)
+def cancel_investment_request(
+    request_id: int,
+    payload: TopupRequestDecision = TopupRequestDecision(),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    _require_owned_topup(user, request)
+    try:
+        updated = svc.cancel_topup_request(
+            db,
+            request=request,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="topup_cancelled",
+        title=f"בקשת מסלול בוטלה · {inv_name}",
+        body=payload.notes or "הבקשה בוטלה",
+        severity="info",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
+    return _serialize_topup(updated, user)
+
+
+@router.post("/investment-requests/{request_id}/reject", response_model=TopupRequestOut)
+def reject_investment_request(
+    request_id: int,
+    payload: TopupRequestDecision = TopupRequestDecision(),
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    try:
+        updated = svc.reject_topup_request(
+            db,
+            request=request,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="topup_rejected",
+        title=f"בקשת מסלול נדחתה · {inv_name}",
+        body=payload.notes or "הבקשה נדחתה על ידי מנהל",
+        severity="warning",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
+    return _serialize_topup(updated, user)
+
+
+@router.post("/investment-requests/{request_id}/approve", response_model=TopupRequestOut)
+def approve_investment_request(
+    request_id: int,
+    payload: TopupRequestApprove,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    try:
+        updated = svc.approve_topup_request(
+            db,
+            request=request,
+            plan_type=payload.plan_type,
+            monthly_rate_percent=payload.monthly_rate_percent,
+            savings_rate_percent=payload.savings_rate_percent,
+            manager_fee_percent=payload.manager_fee_percent,
+            start_date=payload.start_date,
+            duration_months=payload.duration_months,
+            actor_user_id=user.id,
+            principal=payload.principal,
+            notes=payload.notes,
+            generate_schedule=payload.generate_schedule,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="topup_approved",
+        title=f"בקשת מסלול אושרה · {inv_name}",
+        body="נפתח מסלול חדש לפי הבקשה",
+        severity="success",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
+    return _serialize_topup(updated, user)
+
+
+@router.post("/investment-requests/{request_id}/sign", response_model=TopupRequestOut)
+def sign_investment_request(
+    request_id: int,
+    payload: TopupRequestSign,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    if is_manager(user):
+        party = "manager"
+    else:
+        _require_owned_topup(user, request)
+        party = "investor"
+    try:
+        updated = svc.sign_topup_contract(
+            db,
+            request=request,
+            party=party,
+            typed_name=payload.typed_name,
+            signature_png=payload.signature_png,
+            accepted_terms=payload.accepted_terms,
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    party_label = "מנהל" if party == "manager" else "משקיע"
+    activity_svc.log_activity(
+        db,
+        kind="topup_signed",
+        title=f"חתימה על בקשת מסלול · {inv_name}",
+        body=f"נחתם על ידי {party_label}",
+        severity="warning",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
+    return _serialize_topup(updated, user, include_signatures=True)
+
+
+@router.post("/investment-requests/{request_id}/reverse", response_model=TopupRequestOut)
+def reverse_investment_request(
+    request_id: int,
+    payload: TopupRequestDecision = TopupRequestDecision(),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    request = svc._load_topup_request(db, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    _require_owned_topup(user, request)
+    try:
+        updated = svc.reverse_topup_investment(
+            db,
+            request=request,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="topup_reversed",
+        title=f"ביטול מסלול מבקשה · {inv_name}",
+        body=payload.notes or "המסלול בוטל והבקשה הוחזרה",
+        severity="urgent",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
+    return _serialize_topup(updated, user)
+
+
+def _load_plan_for_savings(db: Session, plan_id: int) -> InvestmentPlan:
+    plan = (
+        db.query(InvestmentPlan)
+        .options(
+            joinedload(InvestmentPlan.investor),
+            joinedload(InvestmentPlan.payments),
+            joinedload(InvestmentPlan.savings_actions),
+        )
+        .filter(InvestmentPlan.id == plan_id)
+        .first()
+    )
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return plan
+
+
+def _assert_plan_access(user: User, plan: InvestmentPlan) -> None:
+    if is_manager(user):
+        return
+    if plan.investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@router.post(
+    "/plans/{plan_id}/savings/withdraw",
+    response_model=SavingsActionResult,
+)
+def withdraw_savings(
+    plan_id: int,
+    payload: SavingsActionRequest,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Pull available savings out of the pot (does not change קרן). Manager only."""
+    plan = _load_plan_for_savings(db, plan_id)
+    inv_name = plan.investor.name if plan.investor else ""
+    inv_id = plan.investor_id
+    plan_pk = plan.id
+    try:
+        result = svc.redeem_savings(
+            db,
+            plan=plan,
+            action_type="withdraw",
+            amount=payload.amount,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="savings_withdraw",
+        title=f"משיכת חיסכון · {inv_name}",
+        body=f"סכום: {float(payload.amount or 0):,.0f} ₪",
+        severity="warning",
+        actor=user,
+        investor_id=inv_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan_pk,
+        href="/investors",
+        commit=True,
+    )
+    return result
+
+
+@router.post(
+    "/plans/{plan_id}/savings/transfer-to-principal",
+    response_model=SavingsActionResult,
+)
+def transfer_savings_to_principal(
+    plan_id: int,
+    payload: SavingsActionRequest,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Move available savings into קרן. Manager only."""
+    plan = _load_plan_for_savings(db, plan_id)
+    inv_name = plan.investor.name if plan.investor else ""
+    inv_id = plan.investor_id
+    plan_pk = plan.id
+    try:
+        result = svc.redeem_savings(
+            db,
+            plan=plan,
+            action_type="transfer_to_principal",
+            amount=payload.amount,
+            actor_user_id=user.id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="savings_transfer",
+        title=f"העברת חיסכון לקרן · {inv_name}",
+        body=f"סכום: {float(payload.amount or 0):,.0f} ₪",
+        severity="info",
+        actor=user,
+        investor_id=inv_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan_pk,
+        href="/investors",
+        commit=True,
+    )
+    return result
+
+
+@router.post(
+    "/plans/{plan_id}/savings/settle",
+    response_model=PlanSettleResult,
+)
+def settle_savings_action(
+    plan_id: int,
+    payload: PlanSettleRequest,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Redeem savings then close the track or open a new successor plan (manager)."""
+    plan = _load_plan_for_savings(db, plan_id)
+    if plan.status == "completed":
+        raise HTTPException(status_code=400, detail="המסלול כבר סגור")
+    inv_name = plan.investor.name if plan.investor else ""
+    inv_id = plan.investor_id
+    try:
+        result = svc.settle_savings_action(
+            db,
+            plan=plan,
+            action_type=payload.action_type,
+            amount=payload.amount,
+            outcome=payload.outcome,
+            actor_user_id=user.id,
+            notes=payload.notes,
+            withdraw_remaining=payload.withdraw_remaining,
+            compound_savings=payload.compound_savings,
+            include_monthly_cash=payload.include_monthly_cash,
+            monthly_rate_percent=payload.monthly_rate_percent,
+            savings_rate_percent=payload.savings_rate_percent,
+            manager_fee_percent=payload.manager_fee_percent,
+            new_principal=payload.new_principal,
+            new_duration_months=payload.new_duration_months,
+            new_start_date=payload.new_start_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="savings_settle",
+        title=f"סגירת/גלגול מסלול · {inv_name}",
+        body=f"פעולה: {payload.action_type} · תוצאה: {payload.outcome}",
+        severity="warning",
+        actor=user,
+        investor_id=inv_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan_id,
+        href="/investors",
+        commit=True,
+    )
+    return result
+
+
+@router.post("/remove-from-calendar-year")
+def remove_from_calendar_year(
+    year: int = Query(...),
+    investor_id: int = Query(...),
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Remove an investor from a reporting year so they no longer appear in that year's report."""
+    return svc.remove_investor_from_calendar_year(db, year=year, investor_id=investor_id)
+
+
 @router.post("/plans/{plan_id}/regenerate-schedule", response_model=list[PaymentOut])
 def regenerate_schedule(
     plan_id: int,
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
+    realign_dates: bool = Query(default=False),
 ):
     plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    svc.generate_payment_schedule(db, plan)
+    svc.generate_payment_schedule(db, plan, realign_dates=realign_dates)
     payments = (
         db.query(Payment)
         .options(joinedload(Payment.investor))
@@ -281,6 +1108,76 @@ def regenerate_schedule(
         .all()
     )
     return [svc.serialize_payment(p) for p in payments]
+
+
+@router.get("/plans/{plan_id}/status-report")
+def plan_status_report(
+    plan_id: int,
+    year: Optional[int] = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Month-by-month portfolio status from plan start: cash + savings + cumulative."""
+    plan = (
+        db.query(InvestmentPlan)
+        .options(joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments))
+        .filter(InvestmentPlan.id == plan_id)
+        .first()
+    )
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if not is_manager(user) and plan.investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    report = svc.build_plan_status_report(plan, year=year)
+    if not is_manager(user):
+        for month in report.get("months") or []:
+            month.pop("manager_amount", None)
+    return report
+
+
+@router.post("/sync-payment-amounts")
+def sync_all_payment_amounts(
+    year: Optional[int] = Query(default=None),
+    investor_id: Optional[int] = Query(default=None),
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Sync cash amounts on payments to current plan rates without moving dates."""
+    # Clip mid-year reporting boards to December so savings don't overlap next year.
+    restored = svc.repair_midyear_reporting_plans(db)
+    query = db.query(InvestmentPlan).options(
+        joinedload(InvestmentPlan.payments),
+        joinedload(InvestmentPlan.investor),
+    )
+    if investor_id is not None:
+        query = query.filter(InvestmentPlan.investor_id == investor_id)
+    plans = query.all()
+    synced = []
+    for plan in plans:
+        if year is not None:
+            has_year = any(
+                p.due_date and p.due_date.year == year for p in (plan.payments or [])
+            ) or (plan.start_date and plan.start_date.year == year)
+            if not has_year:
+                continue
+        result = svc.sync_payment_amounts(db, plan)
+        # Also fill any missing months without moving dates.
+        svc.generate_payment_schedule(db, plan, realign_dates=False)
+        synced.append(
+            {
+                "plan_id": plan.id,
+                "investor_id": plan.investor_id,
+                "investor_name": plan.investor.name if plan.investor else "",
+                **result,
+            }
+        )
+    return {
+        "year": year,
+        "synced": synced,
+        "count": len(synced),
+        "reporting_plans_clipped": restored.get("clipped", 0),
+        "reporting_plans_restored": restored.get("restored", 0),
+    }
 
 
 @router.get("/payments", response_model=list[PaymentOut])
@@ -305,15 +1202,92 @@ def list_payments(
             Payment.due_date >= date(year, 1, 1),
             Payment.due_date <= date(year, 12, 31),
         )
-    payments = query.order_by(Payment.due_date.desc(), Payment.id.desc()).all()
-    return [svc.serialize_payment(p) for p in payments]
+        payments = query.order_by(Payment.due_date.asc(), Payment.id.asc()).all()
+    else:
+        payments = query.order_by(Payment.due_date.desc(), Payment.id.desc()).all()
+
+    # Safety net: never return two rows for the same investor on the same due date.
+    priority = {
+        "paid": 3,
+        "awaiting_confirmation": 2,
+        "scheduled": 1,
+        "skipped": 0,
+    }
+    unique: dict[tuple[int, date], Payment] = {}
+    for payment in payments:
+        key = (payment.investor_id, payment.due_date)
+        prior = unique.get(key)
+        if prior is None or priority.get(payment.status, 0) > priority.get(prior.status, 0):
+            unique[key] = payment
+    ordered = sorted(
+        unique.values(),
+        key=lambda p: (p.due_date, p.id),
+        reverse=year is None,
+    )
+    return [svc.serialize_payment(p) for p in ordered]
+
+
+@router.get("/manager-income")
+def manager_income(
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Manager-only: fee from each investor + own (Sahar) investment return per month."""
+    return svc.get_manager_income_board(db)
+
+
+@router.get("/payment-report", response_model=PaymentReportOut)
+def payment_report(
+    year: int = Query(...),
+    investor_id: Optional[int] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    scoped = _scope_investor_id(user, investor_id)
+    return svc.get_payment_report(db, year=year, investor_id=scoped)
+
+
+@router.post("/open-calendar-year")
+def open_calendar_year(
+    year: int = Query(...),
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Open a Jan–Dec reporting year for all investors who already have a plan."""
+    try:
+        return svc.open_calendar_year_plans(db, year=year)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/payments/mark-year-paid")
+def mark_year_paid(
+    year: int = Query(...),
+    investor_id: Optional[int] = None,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Send confirmation requests for all scheduled payments in a calendar year."""
+    return svc.mark_year_payments_paid(
+        db, year=year, investor_id=investor_id, actor=user
+    )
+
+
+@router.post("/align-calendar-year")
+def align_calendar_year(
+    year: Optional[int] = Query(default=None),
+    _: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Align active plans to 1 Jan–Dec of the calendar year."""
+    return svc.align_plans_to_calendar_year(db, year=year)
 
 
 @router.patch("/payments/{payment_id}", response_model=PaymentOut)
 def update_payment(
     payment_id: int,
     payload: PaymentUpdate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     payment = (
@@ -326,13 +1300,114 @@ def update_payment(
         raise HTTPException(status_code=404, detail="Payment not found")
 
     data = payload.model_dump(exclude_unset=True)
-    if data.get("status") == "paid" and "paid_at" not in data:
-        data["paid_at"] = date.today()
+
+    # Manager "mark paid" becomes a confirmation request to the investor.
+    if data.get("status") == "paid":
+        svc.request_payment_confirmation(db, payment=payment, actor=user)
+        db.refresh(payment)
+        from app.services import activity_service as activity_svc
+
+        activity_svc.log_activity(
+            db,
+            kind="payment_awaiting",
+            title=f"תשלום נשלח לאישור · {payment.investor.name if payment.investor else ''}",
+            body=f"סכום למשקיע ממתין לאישור קבלה",
+            severity="warning",
+            actor=user,
+            investor_id=payment.investor_id,
+            investor_name=payment.investor.name if payment.investor else None,
+            entity_type="payment",
+            entity_id=payment.id,
+            href="/payments",
+            commit=True,
+        )
+        return svc.serialize_payment(payment)
+
     if data.get("status") in {"scheduled", "skipped"}:
         data["paid_at"] = None
     for key, value in data.items():
         setattr(payment, key, value)
     db.commit()
+    db.refresh(payment)
+    return svc.serialize_payment(payment)
+
+
+@router.post("/payments/{payment_id}/confirm", response_model=PaymentOut)
+def confirm_payment(
+    payment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    payment = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.id == payment_id)
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    try:
+        svc.confirm_payment(db, payment=payment, actor=user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="payment_confirmed",
+        title=f"תשלום אושר · {payment.investor.name if payment.investor else ''}",
+        body="המשקיע אישר קבלת תשלום",
+        severity="success",
+        actor=user,
+        investor_id=payment.investor_id,
+        investor_name=payment.investor.name if payment.investor else None,
+        entity_type="payment",
+        entity_id=payment.id,
+        href="/payments",
+        commit=True,
+    )
+    db.refresh(payment)
+    return svc.serialize_payment(payment)
+
+
+@router.post("/payments/{payment_id}/reject", response_model=PaymentOut)
+def reject_payment(
+    payment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    payment = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.id == payment_id)
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    try:
+        svc.reject_payment_confirmation(db, payment=payment, actor=user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="payment_rejected",
+        title=f"אישור תשלום נדחה · {payment.investor.name if payment.investor else ''}",
+        body="המשקיע דחה קבלת תשלום — יש לבדוק",
+        severity="urgent",
+        actor=user,
+        investor_id=payment.investor_id,
+        investor_name=payment.investor.name if payment.investor else None,
+        entity_type="payment",
+        entity_id=payment.id,
+        href="/payments",
+        commit=True,
+    )
     db.refresh(payment)
     return svc.serialize_payment(payment)
 
@@ -346,16 +1421,54 @@ def list_quotes(
     return [svc.serialize_quote(q) for q in quotes]
 
 
+def _quote_access_username(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return auth_svc.validate_username(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
 def create_quote(
     payload: QuoteCreate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    quote = Quote(**payload.model_dump())
+    data = payload.model_dump()
+    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
+        data.get("plan_type") or "monthly",
+        data.get("monthly_rate_percent") or 0,
+        data.get("savings_rate_percent") or 0,
+    )
+    data["plan_type"] = kind
+    data["monthly_rate_percent"] = monthly_rate
+    data["savings_rate_percent"] = savings_rate
+    data["phone"] = (data.get("phone") or "").strip() or None
+    data["access_username"] = _quote_access_username(data.get("access_username"))
+    data["access_password"] = (data.get("access_password") or "").strip() or None
+    data["status"] = "pending"
+    quote = Quote(**data)
     db.add(quote)
     db.commit()
     db.refresh(quote)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="quote_created",
+        title=f"הצעה חדשה · {quote.prospect_name}",
+        body=f"קרן {quote.principal:,.0f} ₪ · {quote.duration_months} חודשים",
+        severity="info",
+        actor=user,
+        investor_name=quote.prospect_name,
+        entity_type="quote",
+        entity_id=quote.id,
+        href="/quotes",
+        commit=True,
+    )
     return svc.serialize_quote(quote)
 
 
@@ -363,35 +1476,132 @@ def create_quote(
 def update_quote(
     quote_id: int,
     payload: QuoteUpdate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
+    if not svc.quote_is_editable(quote.status):
+        payload_data = payload.model_dump(exclude_unset=True)
+        if payload_data.keys() - {"status"}:
+            raise HTTPException(status_code=400, detail="לא ניתן לערוך הצעה סגורה או שהושלמה")
     for key, value in payload.model_dump(exclude_unset=True).items():
+        if key == "status":
+            try:
+                svc.validate_quote_status_transition(quote.status, str(value))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            value = svc.normalize_quote_status(str(value))
+        if key == "access_username":
+            value = _quote_access_username(value if isinstance(value, str) else None)
+        elif key in {"phone", "access_password"}:
+            value = (value or "").strip() or None
         setattr(quote, key, value)
+    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
+        getattr(quote, "plan_type", None) or "monthly",
+        quote.monthly_rate_percent,
+        getattr(quote, "savings_rate_percent", 0.0) or 0.0,
+    )
+    quote.plan_type = kind
+    quote.monthly_rate_percent = monthly_rate
+    quote.savings_rate_percent = savings_rate
+    status_changed = "status" in payload.model_dump(exclude_unset=True)
     db.commit()
     db.refresh(quote)
+    if status_changed:
+        from app.services import activity_service as activity_svc
+
+        st = svc.normalize_quote_status(quote.status)
+        activity_svc.log_activity(
+            db,
+            kind=f"quote_{st}",
+            title=f"הצעה · {quote.prospect_name} · {st}",
+            body=f"סטטוס הצעה עודכן ל־{st}",
+            severity="success" if st == "approved" else "warning" if st == "rejected" else "info",
+            actor=user,
+            investor_name=quote.prospect_name,
+            entity_type="quote",
+            entity_id=quote.id,
+            href="/quotes",
+            commit=True,
+        )
     return svc.serialize_quote(quote)
 
 
-@router.post("/quotes/{quote_id}/convert", response_model=PlanOut)
-def convert_quote(
+@router.delete("/quotes/{quote_id}", status_code=204)
+def delete_quote(
     quote_id: int,
-    payload: QuoteConvert,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     if quote.status == "converted":
-        raise HTTPException(status_code=400, detail="Quote already converted")
+        raise HTTPException(
+            status_code=400,
+            detail="לא ניתן למחוק הצעה שהושלמה ונפתח מסלול",
+        )
+    name = quote.prospect_name
+    db.delete(quote)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="quote_deleted",
+        title=f"הצעה נמחקה · {name}",
+        body="ההצעה הוסרה מהמערכת",
+        severity="warning",
+        actor=user,
+        investor_name=name,
+        entity_type="quote",
+        entity_id=quote_id,
+        href="/quotes",
+    )
+    db.commit()
+    return None
+
+
+@router.post("/quotes/{quote_id}/convert", response_model=PlanOut)
+def convert_quote(
+    quote_id: int,
+    payload: QuoteConvert,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="ההצעה לא נמצאה")
+    if quote.status == "converted":
+        raise HTTPException(status_code=400, detail="ההצעה כבר הומרה למשקיע")
+    if svc.normalize_quote_status(quote.status) != "approved":
+        raise HTTPException(
+            status_code=400,
+            detail="יש לאשר את ההצעה לפני קליטת המשקיע ופתיחת המסלול",
+        )
+
+    start_date = payload.start_date or quote.start_date
+    if start_date is None:
+        raise HTTPException(status_code=400, detail="יש לבחור תאריך התחלת מסלול")
+    username_raw = (payload.username or quote.access_username or "").strip()
+    password = (payload.password or quote.access_password or "").strip()
+    try:
+        username = auth_svc.validate_username(username_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="הסיסמה חייבת להכיל לפחות 8 תווים")
+    taken = db.query(User).filter(User.username == username).first()
+    if taken:
+        raise HTTPException(
+            status_code=400,
+            detail=f"שם המשתמש {username} כבר תפוס — בחרו שם אחר",
+        )
 
     investor = Investor(
         name=quote.prospect_name,
-        phone=payload.phone,
+        phone=payload.phone or quote.phone,
         notes=payload.notes or quote.notes,
     )
     db.add(investor)
@@ -400,30 +1610,62 @@ def convert_quote(
     plan = InvestmentPlan(
         investor_id=investor.id,
         principal=quote.principal,
+        plan_type=getattr(quote, "plan_type", None) or "monthly",
         monthly_rate_percent=quote.monthly_rate_percent,
+        savings_rate_percent=getattr(quote, "savings_rate_percent", 0.0) or 0.0,
         manager_fee_percent=quote.manager_fee_percent,
-        start_date=payload.start_date,
+        start_date=start_date,
         duration_months=quote.duration_months,
         notes=quote.notes,
         status="active",
     )
     db.add(plan)
+    db.flush()
     quote.status = "converted"
     quote.converted_investor_id = investor.id
-    auth_svc.ensure_user_for_investor(
-        db,
-        investor,
-        email=payload.email,
-        send_invite=payload.send_invite and bool(payload.email),
-    )
-    db.commit()
-    db.refresh(plan)
+    quote.start_date = start_date
+    quote.access_username = username
+    quote.access_password = password
+    try:
+        auth_svc.ensure_user_for_investor(
+            db,
+            investor,
+            username=username,
+            email=payload.email,
+            password=password,
+        )
+        svc.generate_payment_schedule(db, plan, commit=False)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="לא ניתן להוסיף את המשקיע — בדקו שם משתמש, סיסמה ותאריך התחלה",
+        ) from exc
 
-    svc.generate_payment_schedule(db, plan)
     plan = (
         db.query(InvestmentPlan)
         .options(joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments))
         .filter(InvestmentPlan.id == plan.id)
         .one()
+    )
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="quote_converted",
+        title=f"משקיע חדש מקליטת הצעה · {investor.name}",
+        body=f"נפתח מסלול · משתמש {username}",
+        severity="success",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="quote",
+        entity_id=quote.id,
+        href="/investors",
+        commit=True,
     )
     return svc.serialize_plan(plan)

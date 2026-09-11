@@ -14,8 +14,10 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    access_password: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="investor")
     must_reset_password: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -28,9 +30,16 @@ class User(Base):
     reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    password_reset_requests: Mapped[list["PasswordResetRequest"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="PasswordResetRequest.user_id",
+    )
 
 
 class PasswordResetToken(Base):
+    """Legacy invite/forgot tokens — kept for DB compatibility; unused by new auth."""
+
     __tablename__ = "password_reset_tokens"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -44,6 +53,27 @@ class PasswordResetToken(Base):
     user: Mapped["User"] = relationship(back_populates="reset_tokens")
 
 
+class PasswordResetRequest(Base):
+    """Client asks manager to reset password — no self-service reset."""
+
+    __tablename__ = "password_reset_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    note: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resolved_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    user: Mapped["User"] = relationship(
+        back_populates="password_reset_requests",
+        foreign_keys=[user_id],
+    )
+
+
 class LoginAlert(Base):
     __tablename__ = "login_alerts"
 
@@ -53,6 +83,32 @@ class LoginAlert(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     logged_in_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class ActivityEvent(Base):
+    """Unified activity + notification stream for managers (tracking + alerts)."""
+
+    __tablename__ = "activity_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="info")
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    investor_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("investors.id", ondelete="SET NULL"), nullable=True
+    )
+    investor_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    entity_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    href: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 

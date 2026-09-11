@@ -1,12 +1,36 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../services/api";
 
 export function ForgotPasswordPage() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [note, setNote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
+  const userRef = useRef<HTMLInputElement>(null);
+
+  // Always start empty; strip any browser autofill (e.g. saved "bar").
+  useEffect(() => {
+    setUsername("");
+    const el = userRef.current;
+    if (el) el.value = "";
+    const wipe = () => {
+      if (!el || document.activeElement === el) return;
+      el.value = "";
+      setUsername("");
+    };
+    const timers = [0, 50, 100, 250, 500, 1000, 2000].map((ms) =>
+      window.setTimeout(wipe, ms),
+    );
+    el?.addEventListener("animationstart", wipe);
+    setReady(true);
+    return () => {
+      timers.forEach(clearTimeout);
+      el?.removeEventListener("animationstart", wipe);
+    };
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -14,10 +38,13 @@ export function ForgotPasswordPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await api.forgotPassword(email.trim());
+      const res = await api.requestPasswordReset(
+        username.trim(),
+        note.trim() || undefined,
+      );
       setMessage(res.message);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "שליחה נכשלה");
+      setError(err instanceof Error ? err.message : "שליחת הבקשה נכשלה");
     } finally {
       setBusy(false);
     }
@@ -27,26 +54,53 @@ export function ForgotPasswordPage() {
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <h1 className="auth-card__brand">שחזור סיסמה</h1>
+        <p className="hero__eyebrow">איפוס סיסמה</p>
+        <h1 className="auth-card__brand">תזרים</h1>
         <p className="muted">
-          הזיני את המייל שלך. נשלח קישור להגדרת סיסמה חדשה (גם לכניסה ראשונה).
+          הלקוח לא מאפס סיסמה לבד. שולחים בקשה למנהל — רק הוא מגדיר סיסמה חדשה.
         </p>
-        <form className="form" onSubmit={onSubmit}>
+
+        <form className="form" onSubmit={onSubmit} autoComplete="off">
           <label>
-            מייל
+            שם משתמש
             <input
-              type="email"
+              ref={userRef}
+              key={ready ? "user-ready" : "user-boot"}
+              type="search"
+              name="tazrim_reset_account"
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              readOnly={!ready}
+              value={username}
+              onFocus={(e) => {
+                e.currentTarget.readOnly = false;
+              }}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder=""
+            />
+          </label>
+          <label>
+            הערה למנהל (אופציונלי)
+            <input
+              type="text"
+              name="tazrim_reset_note"
+              autoComplete="off"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="למשל: שכחתי את הסיסמה"
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
           {message ? <p className="toast">{message}</p> : null}
-          <button type="submit" className="btn btn--primary" disabled={busy}>
-            {busy ? "שולח..." : "שלחי קישור למייל"}
+          <button type="submit" className="btn btn--primary" disabled={busy || !username.trim()}>
+            {busy ? "שולח..." : "שלח בקשה למנהל"}
           </button>
         </form>
+
         <div className="auth-links">
           <Link to="/login">חזרה להתחברות</Link>
         </div>

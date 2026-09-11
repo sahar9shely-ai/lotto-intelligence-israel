@@ -11,6 +11,10 @@ from app.core.config import settings
 from app.models.auth import EmailOutbox
 
 
+def smtp_configured() -> bool:
+    return bool(settings.smtp_host and settings.smtp_from)
+
+
 def send_email(
     db: Session,
     *,
@@ -19,7 +23,8 @@ def send_email(
     body: str,
     kind: str = "generic",
     meta: Optional[dict] = None,
-) -> EmailOutbox:
+) -> tuple[EmailOutbox, bool]:
+    """Persist outbox row and optionally deliver via SMTP. Returns (entry, delivered)."""
     entry = EmailOutbox(
         to_email=to_email,
         subject=subject,
@@ -30,7 +35,8 @@ def send_email(
     db.add(entry)
     db.flush()
 
-    if settings.smtp_host and settings.smtp_from:
+    delivered = False
+    if smtp_configured():
         try:
             msg = EmailMessage()
             msg["Subject"] = subject
@@ -43,9 +49,11 @@ def send_email(
                 if settings.smtp_user:
                     smtp.login(settings.smtp_user, settings.smtp_password)
                 smtp.send_message(msg)
+            delivered = True
         except Exception as exc:  # noqa: BLE001 — keep outbox even if SMTP fails
             print(f"[email] SMTP failed for {to_email}: {exc}")
+            delivered = False
     else:
         print(f"[email:{kind}] to={to_email} subject={subject}\n{body}\n")
 
-    return entry
+    return entry, delivered

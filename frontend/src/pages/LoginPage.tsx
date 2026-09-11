@@ -1,55 +1,73 @@
-import { FormEvent, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { FormEvent, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
   const { user, loading, login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!loading && user) return <Navigate to="/" replace />;
+  useEffect(() => {
+    if (!loading && user) navigate("/", { replace: true });
+  }, [loading, user, navigate]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await login(email.trim(), password);
-      navigate("/", { replace: true });
+      await login(username.trim(), password);
+      navigate("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "התחברות נכשלה");
+      setError(err instanceof Error ? err.message : "ההתחברות נכשלה");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="auth-screen">
+        <div className="atmosphere" aria-hidden="true" />
+        <div className="state state--loading">טוען...</div>
+      </div>
+    );
   }
 
   return (
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <p className="hero__eyebrow">גישה למשתמשים רשומים בלבד</p>
+        <p className="auth-card__eyebrow">כניסה מאובטחת</p>
         <h1 className="auth-card__brand">תזרים</h1>
-        <p className="muted">התחברות אישית — כל משתמש רואה רק את הנתונים שלו.</p>
+        <p className="auth-card__welcome">
+          מעקב יתרות, תשלומים והשקעות — ברור במבט ראשון.
+        </p>
+        <p className="muted">שם משתמש וסיסמה שקיבלתם מהמנהל.</p>
 
-        <form className="form" onSubmit={onSubmit}>
+        <form className="form" onSubmit={onSubmit} autoComplete="on">
           <label>
-            מייל
+            שם משתמש
             <input
-              type="email"
+              type="text"
+              name="username"
               autoComplete="username"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@example.com"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
             />
           </label>
           <label>
             סיסמה
             <input
               type="password"
+              name="password"
               autoComplete="current-password"
               required
               value={password}
@@ -57,17 +75,14 @@ export function LoginPage() {
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
-          <button type="submit" className="btn btn--primary" disabled={busy}>
-            {busy ? "מתחבר..." : "התחברות"}
+          <button type="submit" className="btn btn--primary btn--wide" disabled={busy}>
+            {busy ? "מתחבר..." : "כניסה למערכת"}
           </button>
         </form>
 
         <div className="auth-links">
-          <Link to="/forgot-password">שכחתי סיסמה / כניסה ראשונה</Link>
+          <Link to="/forgot-password">שכחתי סיסמה</Link>
         </div>
-        <p className="hint">
-          בכניסה הראשונה יש להגדיר סיסמה דרך המייל. אין כניסת אורחים.
-        </p>
       </div>
     </div>
   );

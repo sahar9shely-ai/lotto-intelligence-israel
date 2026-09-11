@@ -7,22 +7,29 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=1)
 
 
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+class RequestPasswordResetRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=64)
+    note: Optional[str] = Field(default=None, max_length=255)
 
 
-class ResetPasswordRequest(BaseModel):
-    token: str = Field(min_length=10)
+class SetPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class FulfillPasswordResetRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
 class UserOut(BaseModel):
     id: int
-    email: str
+    username: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    access_password: Optional[str] = None
     role: str
     investor_id: int
     investor_name: str
@@ -30,7 +37,6 @@ class UserOut(BaseModel):
     is_active: bool = True
     must_reset_password: bool
     has_password: bool
-    email_needs_update: bool = False
     last_login_at: Optional[datetime] = None
     password_set_at: Optional[datetime] = None
 
@@ -57,25 +63,37 @@ class LoginAlertOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class UpdateUserEmailRequest(BaseModel):
-    email: EmailStr
+class PasswordResetRequestOut(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    display_name: str
+    status: str
+    note: Optional[str] = None
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+    resolved_by_user_id: Optional[int] = None
+
+    model_config = {"from_attributes": True}
 
 
 class UpdateUserRequest(BaseModel):
+    username: Optional[str] = Field(default=None, min_length=2, max_length=64)
     email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, max_length=40)
     role: Optional[str] = Field(default=None, pattern="^(manager|investor)$")
     is_active: Optional[bool] = None
     investor_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
-    send_invite: bool = True
 
 
 class CreateAccessUserRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    email: EmailStr
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+    email: Optional[EmailStr] = None
     role: str = Field(default="investor", pattern="^(manager|investor)$")
     phone: Optional[str] = None
     notes: Optional[str] = None
-    send_invite: bool = True
 
 
 class EmailOutboxOut(BaseModel):

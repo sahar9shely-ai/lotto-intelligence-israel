@@ -1,80 +1,824 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
+import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
+import { SavingsActions } from "../components/SavingsActions";
+import { Stat } from "../components/Stat";
+import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
-import { formatDate, formatMoney, statusLabel } from "../utils/format";
+import {
+  formatCalendarMonth,
+  formatDate,
+  formatMoney,
+  formatPercent,
+  statusLabel,
+  trackEndISO,
+} from "../utils/format";
+import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
+import { planTypeLabel } from "../utils/planTypes";
+import type { Plan } from "../types/investments";
+
+type DetailFocus =
+  | "yearly-paid"
+  | "yearly-planned"
+  | "yearly-fees"
+  | "yearly-awaiting"
+  | "yearly-scheduled"
+  | "lifetime-paid"
+  | "lifetime-planned"
+  | "lifetime-fees"
+  | "lifetime-paid-count"
+  | "lifetime-savings-now"
+  | "lifetime-savings-end";
+
+const DETAIL_LABELS: Record<DetailFocus, string> = {
+  "yearly-paid": "שולם למשקיעים (שנתי)",
+  "yearly-planned": "מתוכנן לשנה",
+  "yearly-fees": "עמלות ששולמו (שנתי)",
+  "yearly-awaiting": "ממתינים לאישור",
+  "yearly-scheduled": "מתוכננים",
+  "lifetime-paid": "סה״כ שולם למשקיעים",
+  "lifetime-planned": "סה״כ מתוכנן",
+  "lifetime-fees": "סה״כ עמלות",
+  "lifetime-paid-count": "תשלומים ששולמו (כל השנים)",
+  "lifetime-savings-now": "חיסכון עד עכשיו",
+  "lifetime-savings-end": "חיסכון עד סוף מסלול",
+};
+
+function primaryPlanForInvestor(
+  plans: Plan[] | null | undefined,
+  investorId: number,
+  year?: number,
+): Plan | null {
+  const mine = (plans ?? []).filter((p) => p.investor_id === investorId);
+  if (mine.length === 0) return null;
+  if (year != null) {
+    const inYear = mine.filter(
+      (p) => p.start_date && Number(p.start_date.slice(0, 4)) === year,
+    );
+    if (inYear.length > 0) {
+      const activeInYear = inYear.find((p) => p.status === "active");
+      if (activeInYear) return activeInYear;
+      return [...inYear].sort((a, b) =>
+        a.start_date < b.start_date ? 1 : -1,
+      )[0];
+    }
+  }
+  const active = mine.find((p) => p.status === "active");
+  if (active) return active;
+  return [...mine].sort((a, b) => (a.start_date < b.start_date ? 1 : -1))[0];
+}
+
+function planTrackEnd(plan: Plan): string {
+  return plan.track_end_date || trackEndISO(plan.start_date, plan.duration_months);
+}
+
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function planCashToDate(plan: Plan): number {
+  // Prefer actual paid cash; fall back to elapsed × monthly for hybrid/monthly cash leg.
+  if (Number(plan.paid_investor_total || 0) > 0) return Number(plan.paid_investor_total);
+  if (plan.plan_type === "savings") return 0;
+  return round2(
+    Number(plan.monthly_investor_payout || 0) * Number(plan.months_elapsed || 0),
+  );
+}
+
+function planTotalToDate(plan: Plan): number {
+  return round2(planCashToDate(plan) + Number(plan.current_savings_balance || 0));
+}
 
 export function PaymentsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const yearNow = new Date().getFullYear();
   const [year, setYear] = useState(yearNow);
   const [status, setStatus] = useState<string>("");
   const [investorId, setInvestorId] = useState<string>("");
+  const [allYears, setAllYears] = useState(false);
+  const [detailFocus, setDetailFocus] = useState<DetailFocus | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const clearMessage = useCallback(() => setMessage(null), []);
+  const [markBusyId, setMarkBusyId] = useState<number | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [alignBusy, setAlignBusy] = useState(false);
+  const [openBusy, setOpenBusy] = useState(false);
+  const [markBusy, setMarkBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [removeBusyId, setRemoveBusyId] = useState<number | null>(null);
+  const [manageYear, setManageYear] = useState(false);
+  const paymentsPanelRef = useRef<HTMLDivElement | null>(null);
+  const savingsPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const investorFilter = investorId ? Number(investorId) : undefined;
 
   const { data: investors } = useAsync(
     () => (isManager ? api.investors() : Promise.resolve([])),
     [isManager],
   );
-  const { data, error, loading, reload } = useAsync(
+  const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
+  const { data, error, loading, refreshing, reload } = useAsync(
     () =>
       api.payments({
-        year,
+        year: allYears ? undefined : year,
         status: status || undefined,
-        investor_id: investorId ? Number(investorId) : undefined,
+        investor_id: investorFilter,
       }),
-    [year, status, investorId],
+    [year, status, investorFilter, allYears],
+  );
+  const {
+    data: report,
+    reload: reloadReport,
+  } = useAsync(
+    () => api.paymentReport(year, investorFilter),
+    [year, investorFilter],
+  );
+  const {
+    data: yearAll,
+    reload: reloadYearAll,
+  } = useAsync(
+    () => (isManager ? api.payments({ year }) : Promise.resolve([])),
+    [year, isManager],
   );
 
-  const totals = useMemo(() => {
-    const list = data ?? [];
-    const paid = list.filter((p) => p.status === "paid");
-    return {
-      investor: paid.reduce((s, p) => s + p.investor_amount, 0),
-      manager: paid.reduce((s, p) => s + p.manager_amount, 0),
-      scheduled: list.filter((p) => p.status === "scheduled").length,
-      paidCount: paid.length,
+  const payments = useMemo(() => {
+    const rows = data ?? [];
+    const priority: Record<string, number> = {
+      paid: 3,
+      awaiting_confirmation: 2,
+      scheduled: 1,
+      skipped: 0,
     };
+    // Dedupe only within the same plan + due date (never drop another plan's row).
+    const unique = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      const key = `${row.plan_id ?? "none"}|${row.investor_id}|${row.due_date}`;
+      const prev = unique.get(key);
+      if (!prev || (priority[row.status] ?? 0) > (priority[prev.status] ?? 0)) {
+        unique.set(key, row);
+      }
+    }
+    return [...unique.values()].sort((a, b) =>
+      a.due_date === b.due_date ? a.id - b.id : a.due_date < b.due_date ? -1 : 1,
+    );
   }, [data]);
+  const yearly = report?.yearly;
+  const lifetime = report?.lifetime;
+
+  const yearInvestors = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const p of yearAll ?? []) {
+      map.set(p.investor_id, p.investor_name);
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "he"));
+  }, [yearAll]);
+
+  const savingsPlansInView = useMemo(() => {
+    const all = (plans ?? []).filter(
+      (p) => p.plan_type !== "monthly" && Number(p.savings_rate_percent || 0) > 0,
+    );
+    let list = all;
+    if (investorFilter) {
+      list = all.filter((p) => p.investor_id === investorFilter);
+    } else if (!isManager && user?.investor_id) {
+      list = all.filter((p) => p.investor_id === user.investor_id);
+    } else {
+      const boardIds = new Set(yearInvestors.map((i) => i.id));
+      list = all.filter(
+        (p) =>
+          boardIds.has(p.investor_id) ||
+          (p.start_date != null && Number(p.start_date.slice(0, 4)) === year) ||
+          p.status === "active",
+      );
+    }
+    // One clearest track per investor (prefer year match, then active).
+    const byInvestor = new Map<number, Plan>();
+    const score = (p: Plan) => {
+      let s = 0;
+      if (p.start_date && Number(p.start_date.slice(0, 4)) === year) s += 4;
+      if (p.status === "active") s += 2;
+      return s;
+    };
+    for (const p of list) {
+      const cur = byInvestor.get(p.investor_id);
+      if (!cur || score(p) > score(cur)) byInvestor.set(p.investor_id, p);
+      else if (score(p) === score(cur) && p.start_date > cur.start_date) {
+        byInvestor.set(p.investor_id, p);
+      }
+    }
+    // When a specific investor is selected, keep all their savings tracks.
+    const result = investorFilter || (!isManager && user?.investor_id)
+      ? list
+      : [...byInvestor.values()];
+    return result.sort((a, b) =>
+      a.investor_name.localeCompare(b.investor_name, "he"),
+    );
+  }, [plans, yearInvestors, investorFilter, isManager, user?.investor_id, year]);
+
+  const activeSavingsPlans = useMemo(
+    () => savingsPlansInView.filter((p) => p.status !== "completed"),
+    [savingsPlansInView],
+  );
+  const closedSavingsPlans = useMemo(
+    () =>
+      savingsPlansInView
+        .filter((p) => p.status === "completed")
+        .sort((a, b) => (a.start_date < b.start_date ? 1 : -1)),
+    [savingsPlansInView],
+  );
+
+  const savingsTotals = useMemo(() => {
+    let cashToDate = 0;
+    let savingsToDate = 0;
+    let savingsAtEnd = 0;
+    let totalAtEnd = 0;
+    for (const p of activeSavingsPlans) {
+      cashToDate += planCashToDate(p);
+      savingsToDate += Number(p.current_savings_balance || 0);
+      savingsAtEnd += Number(p.projected_savings_balance || 0);
+      totalAtEnd += Number(p.total_investor_payout || 0);
+    }
+    return {
+      cashToDate: round2(cashToDate),
+      savingsToDate: round2(savingsToDate),
+      totalToDate: round2(cashToDate + savingsToDate),
+      savingsAtEnd: round2(savingsAtEnd),
+      totalAtEnd: round2(totalAtEnd),
+    };
+  }, [activeSavingsPlans]);
+
+  const savingsByInvestorCards = useMemo(() => {
+    const map = new Map<
+      number,
+      { id: number; name: string; plans: Plan[] }
+    >();
+    for (const p of activeSavingsPlans) {
+      const cur = map.get(p.investor_id);
+      if (cur) cur.plans.push(p);
+      else {
+        map.set(p.investor_id, {
+          id: p.investor_id,
+          name: p.investor_name,
+          plans: [p],
+        });
+      }
+    }
+    return [...map.values()]
+      .map((g) => ({
+        ...g,
+        plans: [...g.plans].sort((a, b) =>
+          a.start_date < b.start_date ? 1 : -1,
+        ),
+        cashToDate: round2(g.plans.reduce((s, p) => s + planCashToDate(p), 0)),
+        savingsToDate: round2(
+          g.plans.reduce((s, p) => s + Number(p.current_savings_balance || 0), 0),
+        ),
+        totalToDate: round2(
+          g.plans.reduce((s, p) => s + planTotalToDate(p), 0),
+        ),
+        totalAtEnd: round2(
+          g.plans.reduce((s, p) => s + Number(p.total_investor_payout || 0), 0),
+        ),
+        savingsAtEnd: round2(
+          g.plans.reduce(
+            (s, p) => s + Number(p.projected_savings_balance || 0),
+            0,
+          ),
+        ),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "he"));
+  }, [activeSavingsPlans]);
+
+  const savingsByInvestor = useMemo(() => {
+    const map = new Map<number, (typeof activeSavingsPlans)[number][]>();
+    for (const plan of activeSavingsPlans) {
+      const list = map.get(plan.investor_id) ?? [];
+      list.push(plan);
+      map.set(plan.investor_id, list);
+    }
+    return map;
+  }, [activeSavingsPlans]);
+
+  const statusReportPlans = useMemo(() => {
+    const all = plans ?? [];
+    let list = all;
+    if (investorFilter) {
+      list = list.filter((p) => p.investor_id === investorFilter);
+    } else if (!isManager && user?.investor_id) {
+      list = list.filter((p) => p.investor_id === user.investor_id);
+    } else {
+      const boardIds = new Set(yearInvestors.map((i) => i.id));
+      list = list.filter(
+        (p) =>
+          boardIds.has(p.investor_id) ||
+          (p.start_date != null && Number(p.start_date.slice(0, 4)) === year),
+      );
+    }
+    // Prefer one primary plan per investor — full track terms (not year-clipped).
+    const byInvestor = new Map<number, Plan>();
+    const score = (p: Plan) => {
+      let s = 0;
+      if (p.start_date && Number(p.start_date.slice(0, 4)) === year) s += 4;
+      if (p.status === "active") s += 2;
+      if (p.plan_type !== "monthly") s += 1;
+      return s;
+    };
+    for (const p of list) {
+      const current = byInvestor.get(p.investor_id);
+      if (!current || score(p) > score(current)) {
+        byInvestor.set(p.investor_id, p);
+        continue;
+      }
+      if (score(p) === score(current) && p.start_date > current.start_date) {
+        byInvestor.set(p.investor_id, p);
+      }
+    }
+    // Ensure every savings-table track has a status-report target (clickable rows).
+    const byId = new Map<number, Plan>();
+    for (const p of byInvestor.values()) byId.set(p.id, p);
+    for (const p of savingsPlansInView) byId.set(p.id, p);
+    return [...byId.values()].sort((a, b) =>
+      a.investor_name.localeCompare(b.investor_name, "he"),
+    );
+  }, [
+    plans,
+    investorFilter,
+    isManager,
+    user?.investor_id,
+    yearInvestors,
+    year,
+    savingsPlansInView,
+  ]);
+
+  const selectedTrackPlan = useMemo(() => {
+    if (!investorFilter) return null;
+    return primaryPlanForInvestor(plans, investorFilter, year);
+  }, [plans, investorFilter, year]);
+
+  function clearDetailFocus() {
+    setDetailFocus(null);
+    setAllYears(false);
+  }
+
+  function openDetail(focus: DetailFocus) {
+    setDetailFocus(focus);
+    const isLifetime = focus.startsWith("lifetime-");
+    const isSavings =
+      focus === "lifetime-savings-now" || focus === "lifetime-savings-end";
+
+    if (isSavings) {
+      setAllYears(false);
+      setStatus("");
+      window.setTimeout(() => {
+        savingsPanelRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 80);
+      return;
+    }
+
+    setAllYears(isLifetime);
+    if (
+      focus === "yearly-paid" ||
+      focus === "yearly-fees" ||
+      focus === "lifetime-paid" ||
+      focus === "lifetime-fees" ||
+      focus === "lifetime-paid-count"
+    ) {
+      setStatus("paid");
+    } else if (focus === "yearly-awaiting") {
+      setStatus("awaiting_confirmation");
+    } else if (focus === "yearly-scheduled") {
+      setStatus("scheduled");
+    } else {
+      // planned totals = all statuses in scope
+      setStatus("");
+    }
+  }
+
+  useEffect(() => {
+    if (!detailFocus) return;
+    if (
+      detailFocus === "lifetime-savings-now" ||
+      detailFocus === "lifetime-savings-end"
+    ) {
+      return;
+    }
+    const t = window.setTimeout(() => {
+      paymentsPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [detailFocus, allYears, status, data]);
+
+  function focusStatusReport(planId: number) {
+    setDetailFocus(null);
+    window.setTimeout(() => {
+      document
+        .getElementById(`status-report-plan-${planId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  }
+
+  async function syncYearAmounts() {
+    if (
+      !window.confirm(
+        `לסנכרן את סכומי התשלומים לשנת ${year} לפי המסלולים הנוכחיים?\nתאריכי התחלה ותאריכי תשלום לא ישתנו — רק הסכומים.`,
+      )
+    ) {
+      return;
+    }
+    setSyncBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.syncPaymentAmounts({
+        year,
+        investor_id: investorFilter,
+      });
+      setMessage(
+        result.count
+          ? `סונכרנו ${result.count} מסלולים לשנת ${year} — בלי לשנות תאריכים`
+          : `לא נמצאו מסלולים לסנכרון לשנת ${year}`,
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "סנכרון נכשל");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  const yearOptions = useMemo(() => {
+    const fromApi = report?.available_years ?? [];
+    const set = new Set<number>([...fromApi, yearNow, yearNow - 1, yearNow - 2, 2025]);
+    return [...set].sort((a, b) => b - a);
+  }, [report?.available_years, yearNow]);
+
+  const selectedInvestorName = useMemo(() => {
+    if (!investorId) return null;
+    return (investors ?? []).find((i) => String(i.id) === investorId)?.name ?? null;
+  }, [investorId, investors]);
+
+  function refreshAll() {
+    reload();
+    reloadReport();
+    reloadYearAll();
+    reloadPlans();
+  }
 
   async function markPaid(id: number) {
-    await api.updatePayment(id, { status: "paid" });
-    reload();
+    setMarkBusyId(id);
+    setMessage(null);
+    try {
+      const updated = await api.updatePayment(id, { status: "paid" });
+      setMessage(
+        updated.status === "awaiting_confirmation"
+          ? "נשלחה בקשת אישור למשקיע — הסטטוס ממתין עד שיאשר"
+          : updated.status === "paid"
+            ? "התשלום שלך עודכן ישירות לבוצע (בלי צורך באישור עצמי)"
+            : "הבקשה נשלחה",
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "שליחת בקשת אישור נכשלה");
+    } finally {
+      setMarkBusyId(null);
+    }
   }
 
   async function markScheduled(id: number) {
-    await api.updatePayment(id, { status: "scheduled" });
-    reload();
+    setMarkBusyId(id);
+    setMessage(null);
+    try {
+      await api.updatePayment(id, { status: "scheduled" });
+      setMessage("הבקשה בוטלה — חזר לסטטוס מתוכנן");
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "ביטול הבקשה נכשל");
+    } finally {
+      setMarkBusyId(null);
+    }
   }
 
-  if (loading) return <div className="state">טוען היסטוריית תשלומים...</div>;
-  if (error)
+  async function confirmPayment(id: number) {
+    const payment = payments.find((p) => p.id === id);
+    const ok = await confirm({
+      title: "אישור קבלת תשלום",
+      message: payment
+        ? `לאשר קבלה של ${formatMoney(payment.investor_amount, true)} עבור ${formatCalendarMonth(payment.due_date)}?`
+        : "לאשר את קבלת התשלום?",
+      confirmLabel: "אשר קבלה",
+    });
+    if (!ok) return;
+    setMarkBusyId(id);
+    setMessage(null);
+    try {
+      await api.confirmPayment(id);
+      setMessage("אישרת את התשלום — הסטטוס עודכן לבוצע");
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "אישור התשלום נכשל");
+    } finally {
+      setMarkBusyId(null);
+    }
+  }
+
+  async function rejectPayment(id: number) {
+    const payment = payments.find((p) => p.id === id);
+    const ok = await confirm({
+      title: "דחיית תשלום",
+      message: payment
+        ? `לדחות את הבקשה על ${formatMoney(payment.investor_amount, true)}? התשלום יחזור למתוכנן.`
+        : "לדחות את בקשת האישור?",
+      confirmLabel: "דחה",
+      danger: true,
+    });
+    if (!ok) return;
+    setMarkBusyId(id);
+    setMessage(null);
+    try {
+      await api.rejectPayment(id);
+      setMessage("התשלום נדחה — חזר לסטטוס מתוכנן");
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "דחיית התשלום נכשלה");
+    } finally {
+      setMarkBusyId(null);
+    }
+  }
+
+  async function exportYearPdf() {
+    setPdfBusy(true);
+    setMessage(null);
+    try {
+      // Export the full year (ignore status filter) so the annual report is complete.
+      const yearPayments = await api.payments({
+        year,
+        investor_id: investorFilter,
+      });
+      await downloadYearlyPaymentsPdf({
+        year,
+        payments: yearPayments,
+        isManager,
+        investorFilterName: selectedInvestorName,
+        lifetime,
+      });
+      setMessage(`דוח שנתי ${year} ירד בהצלחה`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "ייצוא PDF נכשל");
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
+  async function openReportingYear() {
+    if (
+      !window.confirm(
+        `לפתוח לוח תשלומים לשנת ${year}?\nלכל משקיע ייווצר לוח מתחילת המסלול שלו לפי תנאי המסלול (משך מלא) — בלי חודשים שלפני ההתחלה.`,
+      )
+    ) {
+      return;
+    }
+    setOpenBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.openCalendarYear(year);
+      setMessage(
+        result.created_count
+          ? `נפתח לוח לשנת ${year} עבור ${result.created_count} משקיעים — אפשר למלא את הדוח`
+          : `כבר קיים לוח לשנת ${year}`,
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "פתיחת שנת דיווח נכשלה");
+    } finally {
+      setOpenBusy(false);
+    }
+  }
+
+  async function markEntireYearPaid() {
+    if (
+      !window.confirm(
+        `לשלוח בקשת אישור לכל התשלומים המתוכננים בשנת ${year}?\nכל משקיע יצטרך לאשר לפני שהסטטוס יהפוך לבוצע.`,
+      )
+    ) {
+      return;
+    }
+    setMarkBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.markYearPaid(year, investorFilter);
+      setMessage(
+        result.awaiting_count
+          ? `נשלחו ${result.awaiting_count} בקשות אישור לשנת ${year}`
+          : result.marked_count
+            ? `עודכנו ${result.marked_count} תשלומים לשנת ${year}`
+            : `אין תשלומים ממתינים לשנת ${year}`,
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "שליחת בקשות אישור נכשלה");
+    } finally {
+      setMarkBusy(false);
+    }
+  }
+
+  async function removeInvestorFromYear(inv: { id: number; name: string }) {
+    if (
+      !window.confirm(
+        `להסיר את ${inv.name} מלוח שנת ${year}?\nהמסלול של ${year} והתשלומים שלו יימחקו, והוא לא יופיע בדוח השנתי.`,
+      )
+    ) {
+      return;
+    }
+    setRemoveBusyId(inv.id);
+    setMessage(null);
+    try {
+      const result = await api.removeFromCalendarYear(year, inv.id);
+      setMessage(
+        result.deleted_count
+          ? `${inv.name} הוסר/ה מלוח ${year} ולא יופיע/ו בדוח`
+          : `לא נמצא מסלול של ${inv.name} לשנת ${year}`,
+      );
+      if (investorId === String(inv.id)) setInvestorId("");
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "הסרה מהשנה נכשלה");
+    } finally {
+      setRemoveBusyId(null);
+    }
+  }
+
+  async function alignToCalendarYear() {
+    if (
+      !window.confirm(
+        `ליישר את לוחות התשלומים לשנה הקלנדרית ${year}?\nהמסלולים יתחילו ב-1 בינואר ${year} ויכסו את השנה מתחילתה ועד סופה.`,
+      )
+    ) {
+      return;
+    }
+    setAlignBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.alignCalendarYear(year);
+      setMessage(
+        result.count
+          ? `יושרו ${result.count} מסלולים לשנת ${year} (1 בינואר – 31 בדצמבר)`
+          : `כל המסלולים כבר מיושרים לשנה הקלנדרית ${year}`,
+      );
+      refreshAll();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "יישור שנתי נכשל");
+    } finally {
+      setAlignBusy(false);
+    }
+  }
+
+  if (loading && !data) return <div className="state state--loading">טוען היסטוריית תשלומים...</div>;
+  if (error && !data)
     return (
       <div className="state state--error">
         <p>{error}</p>
-        <button type="button" className="btn" onClick={reload}>
-          נסי שוב
+        <button type="button" className="btn" onClick={refreshAll}>
+          נסה שוב
         </button>
       </div>
     );
 
   return (
-    <div className="page">
-      <div className="page-head">
+    <div className={`page${refreshing ? " page--refreshing" : ""}`}>
+      {confirmDialog}
+      <Toast message={message} onClear={clearMessage} />
+      <header className="page-intro">
         <div>
-          <h1>{isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}</h1>
-          <p className="muted">
-            {isManager ? "מי קיבל כל חודש, כמה, ומתי" : "רק התשלומים שלך"}
+          <p className="page-intro__eyebrow">
+            {isManager ? "ניהול תשלומים" : "החשבון שלך"}
+          </p>
+          <h1 className="page-intro__title">
+            {isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}
+          </h1>
+          <p className="page-intro__lead">
+            {isManager
+              ? selectedTrackPlan && selectedInvestorName
+                ? `${selectedInvestorName} · ${formatCalendarMonth(selectedTrackPlan.start_date)} ${selectedTrackPlan.start_date.slice(0, 4)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))} ${planTrackEnd(selectedTrackPlan).slice(0, 4)}`
+                : `שנת ${year} · בחרו משקיע למעלה כדי לראות מסלול אחד בבירור.`
+              : selectedTrackPlan
+                ? `המסלול שלך · ${formatCalendarMonth(selectedTrackPlan.start_date)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))}`
+                : "כאן מאשרים קבלה ורואים מה שולם ומה מתוכנן."}
           </p>
         </div>
-      </div>
+        <div className="page-head__actions">
+          <button
+            type="button"
+            className={`btn ${isManager ? "btn--admin" : "btn--gold"}`}
+            disabled={pdfBusy}
+            onClick={exportYearPdf}
+          >
+            {pdfBusy ? "מכינים PDF..." : `הורדת דוח ${year}`}
+          </button>
+          {isManager ? (
+            <details className="tools-menu">
+              <summary className="btn btn--ghost btn--admin-outline">פעולות ניהול</summary>
+              <div className="tools-menu__list">
+                <button
+                  type="button"
+                  className="tools-menu__item"
+                  disabled={syncBusy}
+                  onClick={syncYearAmounts}
+                >
+                  {syncBusy ? "מסנכרנים..." : `סנכרון סכומי ${year}`}
+                </button>
+                <button
+                  type="button"
+                  className="tools-menu__item"
+                  disabled={openBusy}
+                  onClick={openReportingYear}
+                >
+                  {openBusy ? "פותחים..." : `פתח לוח ${year}`}
+                </button>
+                <button
+                  type="button"
+                  className="tools-menu__item"
+                  disabled={alignBusy}
+                  onClick={alignToCalendarYear}
+                >
+                  {alignBusy ? "מיישרים..." : "יישור לתחילת שנה"}
+                </button>
+              </div>
+            </details>
+          ) : null}
+        </div>
+      </header>
+
+      {!isManager &&
+      payments.some((p) => p.status === "awaiting_confirmation") ? (
+        <div className="step-window step-window--urgent" role="region" aria-label="ממתין לאישור">
+          <p className="step-window__eyebrow">דחוף · אישור קבלה</p>
+          <p className="step-window__title">המנהל שלח תשלום לאישור שלך</p>
+          <ul className="list">
+            {payments
+              .filter((p) => p.status === "awaiting_confirmation")
+              .map((p) => (
+                <li key={`await-${p.id}`} className="list__row">
+                  <div>
+                    <strong>{formatCalendarMonth(p.due_date)}</strong>
+                    <span className="muted">
+                      {formatDate(p.due_date)} · {formatMoney(p.investor_amount, true)}
+                    </span>
+                  </div>
+                  <div className="action-bar">
+                    <button
+                      type="button"
+                      className="btn btn--small btn--gold"
+                      disabled={markBusyId === p.id}
+                      onClick={() => confirmPayment(p.id)}
+                    >
+                      {markBusyId === p.id ? "מאשר..." : "אשר קבלה"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--small btn--ghost btn--danger"
+                      disabled={markBusyId === p.id}
+                      onClick={() => rejectPayment(p.id)}
+                    >
+                      דחה
+                    </button>
+                  </div>
+                </li>
+              ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="filters">
         <label>
           שנה
-          <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-            {[yearNow, yearNow - 1, yearNow - 2].map((y) => (
+          <select
+            value={allYears ? "all" : String(year)}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "all") {
+                setAllYears(true);
+                setDetailFocus((prev) => prev ?? "lifetime-planned");
+                return;
+              }
+              setAllYears(false);
+              setYear(Number(v));
+              setDetailFocus(null);
+            }}
+          >
+            <option value="all">כל השנים</option>
+            {yearOptions.map((y) => (
               <option key={y} value={y}>
                 {y}
               </option>
@@ -83,17 +827,30 @@ export function PaymentsPage() {
         </label>
         <label>
           סטטוס
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setDetailFocus(null);
+            }}
+          >
             <option value="">הכל</option>
             <option value="scheduled">מתוכנן</option>
-            <option value="paid">שולם</option>
+            <option value="awaiting_confirmation">ממתין לאישור</option>
+            <option value="paid">בוצע</option>
             <option value="skipped">דולג</option>
           </select>
         </label>
         {isManager ? (
           <label>
             משקיע
-            <select value={investorId} onChange={(e) => setInvestorId(e.target.value)}>
+            <select
+              value={investorId}
+              onChange={(e) => {
+                setInvestorId(e.target.value);
+                setDetailFocus(null);
+              }}
+            >
               <option value="">הכל</option>
               {(investors ?? []).map((i) => (
                 <option key={i.id} value={i.id}>
@@ -105,75 +862,634 @@ export function PaymentsPage() {
         ) : null}
       </div>
 
-      <div className="stats-grid stats-grid--compact">
-        <div className="stat">
-          <span className="stat__label">{isManager ? "שולם למשקיעים" : "שולם לי"}</span>
-          <strong className="stat__value">{formatMoney(totals.investor)}</strong>
-        </div>
-        {isManager ? (
-          <div className="stat tone-manager">
-            <span className="stat__label">עמלות שהתקבלו</span>
-            <strong className="stat__value">{formatMoney(totals.manager)}</strong>
+      <div className="grid-2">
+        <Panel
+          title="סיכום שנתי"
+          subtitle={`שנת ${year} · לחצו על משבצת לפירוט`}
+        >
+          <div className="stats-grid stats-grid--compact">
+            <Stat
+              label={isManager ? "שולם למשקיעים" : "שולם לי"}
+              value={formatMoney(yearly?.paid_investor ?? 0)}
+              active={detailFocus === "yearly-paid"}
+              onClick={() => openDetail("yearly-paid")}
+            />
+            <Stat
+              label="מתוכנן לשנה"
+              value={formatMoney(yearly?.planned_investor ?? 0)}
+              active={detailFocus === "yearly-planned"}
+              onClick={() => openDetail("yearly-planned")}
+            />
+            {isManager ? (
+              <Stat
+                label="עמלות ששולמו"
+                value={formatMoney(yearly?.paid_manager ?? 0)}
+                tone="manager"
+                active={detailFocus === "yearly-fees"}
+                onClick={() => openDetail("yearly-fees")}
+              />
+            ) : null}
+            <Stat
+              label="ממתינים לאישור"
+              value={String(yearly?.awaiting_count ?? 0)}
+              hint={`שולמו השנה: ${yearly?.paid_count ?? 0}`}
+              active={detailFocus === "yearly-awaiting"}
+              onClick={() => openDetail("yearly-awaiting")}
+            />
+            <Stat
+              label="מתוכננים"
+              value={String(yearly?.scheduled_count ?? 0)}
+              active={detailFocus === "yearly-scheduled"}
+              onClick={() => openDetail("yearly-scheduled")}
+            />
           </div>
-        ) : null}
-        <div className="stat">
-          <span className="stat__label">תשלומים ששולמו</span>
-          <strong className="stat__value">{totals.paidCount}</strong>
-        </div>
-        <div className="stat">
-          <span className="stat__label">ממתינים</span>
-          <strong className="stat__value">{totals.scheduled}</strong>
-        </div>
+        </Panel>
+
+        <Panel
+          title="סיכום סה״כ"
+          subtitle="כל השנים · לחצו על משבצת לפירוט"
+        >
+          <div className="stats-grid stats-grid--compact">
+            <Stat
+              label={isManager ? "סה״כ שולם למשקיעים" : "סה״כ שולם לי"}
+              value={formatMoney(lifetime?.paid_investor ?? 0)}
+              active={detailFocus === "lifetime-paid"}
+              onClick={() => openDetail("lifetime-paid")}
+            />
+            <Stat
+              label="סה״כ מתוכנן"
+              value={formatMoney(lifetime?.planned_investor ?? 0)}
+              active={detailFocus === "lifetime-planned"}
+              onClick={() => openDetail("lifetime-planned")}
+            />
+            {isManager ? (
+              <Stat
+                label="סה״כ עמלות"
+                value={formatMoney(lifetime?.paid_manager ?? 0)}
+                tone="manager"
+                active={detailFocus === "lifetime-fees"}
+                onClick={() => openDetail("lifetime-fees")}
+              />
+            ) : null}
+            <Stat
+              label="תשלומים ששולמו"
+              value={String(lifetime?.paid_count ?? 0)}
+              active={detailFocus === "lifetime-paid-count"}
+              onClick={() => openDetail("lifetime-paid-count")}
+            />
+            <Stat
+              label="חיסכון עד עכשיו"
+              value={formatMoney(lifetime?.savings_to_date ?? 0)}
+              active={detailFocus === "lifetime-savings-now"}
+              onClick={() => openDetail("lifetime-savings-now")}
+            />
+            <Stat
+              label="חיסכון עד סוף מסלול"
+              value={formatMoney(lifetime?.savings_to_track_end ?? 0)}
+              active={detailFocus === "lifetime-savings-end"}
+              onClick={() => openDetail("lifetime-savings-end")}
+            />
+          </div>
+        </Panel>
       </div>
 
-      <Panel
-        title={`רשימת ${year}`}
-        subtitle={isManager ? "סמני כששולם בפועל" : "תצוגה בלבד"}
+      {detailFocus ? (
+        <div className="detail-focus-banner" role="status">
+          <div>
+            <strong>פירוט: {DETAIL_LABELS[detailFocus]}</strong>
+            <span className="muted">
+              {" · "}
+              {detailFocus.startsWith("lifetime-")
+                ? "כל השנים"
+                : `שנת ${year}`}
+              {status ? ` · סטטוס: ${statusLabel(status)}` : " · כל הסטטוסים"}
+              {selectedInvestorName ? ` · ${selectedInvestorName}` : ""}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn--small btn--ghost"
+            onClick={clearDetailFocus}
+          >
+            נקה סינון
+          </button>
+        </div>
+      ) : null}
+
+      {isManager && yearInvestors.length > 0 ? (
+        <Panel
+          title={`מי בלוח ${year}`}
+          subtitle="לחצו על שם כדי לראות רק אותו. הסרה מהשנה נמצאת תחת עריכה."
+          action={
+            <button
+              type="button"
+              className={manageYear ? "btn btn--small btn--ghost btn--danger" : "btn btn--small btn--ghost"}
+              onClick={() => setManageYear((v) => !v)}
+            >
+              {manageYear ? "סיום עריכה" : "עריכת לוח"}
+            </button>
+          }
+        >
+          <ul className="list">
+            {yearInvestors.map((inv) => {
+              const savings = savingsByInvestor.get(inv.id) ?? [];
+              const track = primaryPlanForInvestor(plans, inv.id, year);
+              const end = track ? planTrackEnd(track) : null;
+              const selected = investorId === String(inv.id);
+              return (
+                <li key={inv.id} className={selected ? "list__row list__row--selected" : "list__row"}>
+                  <button
+                    type="button"
+                    className="list__pick"
+                    onClick={() => {
+                      setInvestorId((cur) => (cur === String(inv.id) ? "" : String(inv.id)));
+                      setDetailFocus(null);
+                    }}
+                  >
+                    <strong>
+                      {inv.name}
+                      {selected ? <span className="chip">נבחר</span> : null}
+                    </strong>
+                    {track ? (
+                      <span className="muted">
+                        {formatCalendarMonth(track.start_date)} {track.start_date.slice(0, 4)}
+                        {" → "}
+                        {formatCalendarMonth(end)} {end?.slice(0, 4)}
+                        {" · "}
+                        {track.duration_months} ח׳
+                      </span>
+                    ) : (
+                      <span className="muted">מופיע בדוח {year}</span>
+                    )}
+                    {savings.length > 0 ? (
+                      <span className="muted">
+                        חיסכון {formatMoney(savings[0].current_savings_balance ?? 0)}
+                      </span>
+                    ) : null}
+                  </button>
+                  {manageYear ? (
+                    <button
+                      type="button"
+                      className="btn btn--small btn--ghost btn--danger"
+                      disabled={removeBusyId === inv.id}
+                      onClick={() => removeInvestorFromYear(inv)}
+                    >
+                      {removeBusyId === inv.id ? "מסירים..." : "הסר מהשנה"}
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </Panel>
+      ) : null}
+
+      {activeSavingsPlans.length > 0 ? (
+        <div
+          ref={savingsPanelRef}
+          className={
+            detailFocus === "lifetime-savings-now" ||
+            detailFocus === "lifetime-savings-end"
+              ? "detail-target detail-target--active"
+              : undefined
+          }
+        >
+          <Panel
+            title={
+              detailFocus === "lifetime-savings-now"
+                ? "פירוט · חיסכון עד עכשיו"
+                : detailFocus === "lifetime-savings-end"
+                  ? "פירוט · חיסכון עד סוף מסלול"
+                  : "חיסכון פעיל · לפי תנאי מסלול"
+            }
+            subtitle="מסלולים פעילים בלבד · כמה קיבל במזומן, כמה נצבר בחיסכון, ומה הסה״כ עד עכשיו"
+          >
+            {savingsByInvestorCards.length > 1 ? (
+              <div className="savings-grand-total">
+                <span className="muted">סה״כ כל המשקיעים בלוח</span>
+                <div className="savings-grand-total__nums">
+                  <span>
+                    מזומן {formatMoney(savingsTotals.cashToDate)}
+                  </span>
+                  <span>+</span>
+                  <span>
+                    חיסכון {formatMoney(savingsTotals.savingsToDate)}
+                  </span>
+                  <span>=</span>
+                  <strong>סה״כ עד עכשיו {formatMoney(savingsTotals.totalToDate)}</strong>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="savings-investor-list">
+              {savingsByInvestorCards.map((inv) => (
+                <article key={inv.id} className="savings-investor-card">
+                  <header className="savings-investor-card__head">
+                    <div>
+                      <h3 className="savings-investor-card__name">{inv.name}</h3>
+                      <p className="muted" style={{ margin: 0 }}>
+                        {inv.plans.length === 1
+                          ? `${planTypeLabel(inv.plans[0].plan_type)} · קרן ${formatMoney(inv.plans[0].principal)}`
+                          : `${inv.plans.length} מסלולי חיסכון / משולב`}
+                      </p>
+                    </div>
+                    <div className="savings-investor-card__hero">
+                      <span className="stat__label">סה״כ עד עכשיו</span>
+                      <strong className="savings-investor-card__hero-value">
+                        {formatMoney(inv.totalToDate)}
+                      </strong>
+                      <span className="muted">
+                        מזומן {formatMoney(inv.cashToDate)} + חיסכון{" "}
+                        {formatMoney(inv.savingsToDate)}
+                      </span>
+                    </div>
+                  </header>
+
+                  <div className="savings-breakdown">
+                    <div className="savings-breakdown__item">
+                      <span className="stat__label">מזומן עד עכשיו</span>
+                      <strong>{formatMoney(inv.cashToDate)}</strong>
+                    </div>
+                    <div className="savings-breakdown__plus" aria-hidden>
+                      +
+                    </div>
+                    <div className="savings-breakdown__item">
+                      <span className="stat__label">חיסכון עד עכשיו</span>
+                      <strong>{formatMoney(inv.savingsToDate)}</strong>
+                    </div>
+                    <div className="savings-breakdown__plus" aria-hidden>
+                      =
+                    </div>
+                    <div className="savings-breakdown__item savings-breakdown__item--total">
+                      <span className="stat__label">סה״כ עד עכשיו</span>
+                      <strong>{formatMoney(inv.totalToDate)}</strong>
+                    </div>
+                    <div className="savings-breakdown__item savings-breakdown__item--end">
+                      <span className="stat__label">צפוי בסיום מסלול</span>
+                      <strong>{formatMoney(inv.totalAtEnd)}</strong>
+                      <span className="muted">
+                        מתוכו חיסכון {formatMoney(inv.savingsAtEnd)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {inv.plans.map((p) => {
+                    const cash = planCashToDate(p);
+                    const sav = Number(p.current_savings_balance || 0);
+                    const totalNow = planTotalToDate(p);
+                    const progress =
+                      p.duration_months > 0
+                        ? Math.min(
+                            100,
+                            Math.round(
+                              (Number(p.months_elapsed || 0) /
+                                p.duration_months) *
+                                100,
+                            ),
+                          )
+                        : 0;
+                    return (
+                      <div key={p.id} className="savings-track-block">
+                        <div className="savings-track-block__meta">
+                          <div>
+                            <strong>
+                              מסלול #{p.id} · {planTypeLabel(p.plan_type)}
+                              {p.status === "active" ? " · פעיל" : " · הסתיים"}
+                            </strong>
+                            <div className="muted">
+                              {formatCalendarMonth(p.start_date)}{" "}
+                              {p.start_date.slice(0, 4)}
+                              {" → "}
+                              {formatCalendarMonth(planTrackEnd(p))}{" "}
+                              {planTrackEnd(p).slice(0, 4)}
+                              {" · "}
+                              {p.months_elapsed}/{p.duration_months} חודשים
+                              {p.status !== "active"
+                                ? " · חיסכון חודשי בזמנו (לא נוסף על הפעיל)"
+                                : ""}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn--small btn--ghost"
+                            onClick={() => focusStatusReport(p.id)}
+                          >
+                            פירוט חודשי
+                          </button>
+                        </div>
+
+                        <div
+                          className="savings-progress"
+                          title={`${progress}% מהמסלול`}
+                        >
+                          <div
+                            className="savings-progress__bar"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+
+                        <div className="savings-track-nums">
+                          <div>
+                            <span className="stat__label">קרן</span>
+                            <strong>{formatMoney(p.principal)}</strong>
+                          </div>
+                          <div>
+                            <span className="stat__label">מזומן עד עכשיו</span>
+                            <strong>{formatMoney(cash)}</strong>
+                            {p.plan_type !== "savings" ? (
+                              <span className="muted">
+                                {formatMoney(p.monthly_investor_payout, true)} ×{" "}
+                                {p.months_elapsed || p.paid_count || 0} ח׳
+                              </span>
+                            ) : (
+                              <span className="muted">אין מזומן חודשי</span>
+                            )}
+                          </div>
+                          <div>
+                            <span className="stat__label">חיסכון עד עכשיו</span>
+                            <strong>{formatMoney(sav)}</strong>
+                            <span className="muted">
+                              {formatMoney(p.monthly_savings_accrual, true)}/ח׳ ·{" "}
+                              {formatPercent(p.savings_rate_percent)}
+                            </span>
+                          </div>
+                          <div className="savings-track-nums__total">
+                            <span className="stat__label">סה״כ עד עכשיו</span>
+                            <strong>{formatMoney(totalNow)}</strong>
+                            <span className="muted">מזומן + חיסכון</span>
+                          </div>
+                          <div>
+                            <span className="stat__label">צפוי בסיום</span>
+                            <strong>
+                              {formatMoney(Number(p.total_investor_payout || 0))}
+                            </strong>
+                            <span className="muted">
+                              חיסכון{" "}
+                              {formatMoney(p.projected_savings_balance)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <SavingsActions
+                          plan={p}
+                          canManage={isManager}
+                          onDone={() => {
+                            reloadPlans();
+                            reload();
+                            reloadReport();
+                            reloadYearAll();
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </article>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      ) : null}
+
+      {closedSavingsPlans.length > 0 ? (
+        <Panel
+          title="תיקי חיסכון סגורים"
+          subtitle="מופרדים מהפעילים · מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה"
+        >
+          <div className="closed-plans">
+            {closedSavingsPlans.map((p) => (
+              <div key={p.id} className="closed-plan-row">
+                <div>
+                  <strong>
+                    {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)} · סגור
+                  </strong>
+                  <span className="muted">
+                    קרן {formatMoney(p.principal)} · מזומן עד אז{" "}
+                    {formatMoney(planCashToDate(p))} · חיסכון שנותר{" "}
+                    {formatMoney(Number(p.current_savings_balance || 0))}
+                    {p.successor_plan_id
+                      ? ` · המשך במסלול #${p.successor_plan_id}`
+                      : ""}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--small btn--ghost"
+                  onClick={() => focusStatusReport(p.id)}
+                >
+                  פירוט חודשי
+                </button>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
+      {statusReportPlans.length > 0 ? (
+        <Panel
+          title="דוח מצב · מתחילת מסלול עד סוף מסלול"
+          subtitle="לפי תנאי המסלול של כל משקיע — בלי חודשים שלפני ההתחלה ובלי קיצוץ מלאכותי לסוף שנה"
+        >
+          {statusReportPlans.map((p) => (
+            <div
+              key={p.id}
+              id={`status-report-plan-${p.id}`}
+              style={{ marginBottom: 18 }}
+            >
+              <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem" }}>
+                {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)}
+                {" · "}
+                {formatCalendarMonth(p.start_date)} →{" "}
+                {formatCalendarMonth(planTrackEnd(p))} ({p.duration_months} ח׳)
+              </h3>
+              <PlanStatusReportPanel planId={p.id} />
+            </div>
+          ))}
+        </Panel>
+      ) : null}
+
+      <div
+        ref={paymentsPanelRef}
+        className={
+          detailFocus &&
+          detailFocus !== "lifetime-savings-now" &&
+          detailFocus !== "lifetime-savings-end"
+            ? "detail-target detail-target--active"
+            : undefined
+        }
       >
-        {(data ?? []).length === 0 ? (
-          <p className="empty">אין רשומות לשנה זו. צרי מסלול כדי לייצר לוח תשלומים.</p>
+      <Panel
+        title={
+          detailFocus &&
+          detailFocus !== "lifetime-savings-now" &&
+          detailFocus !== "lifetime-savings-end"
+            ? `פירוט · ${DETAIL_LABELS[detailFocus]}`
+            : allYears
+              ? "תשלומים · כל השנים"
+              : `תשלומי ${year}`
+        }
+        subtitle={
+          detailFocus === "yearly-fees" || detailFocus === "lifetime-fees"
+            ? "תשלומים שבוצעו · עמלה בעמודה ייעודית"
+            : allYears
+              ? "כל התשלומים בכל השנים · מסונן לפי המשבצת שנבחרה"
+              : "תשלומי מזומן שחלים בשנה זו · רק חודשים שהמשקיע במסלול בהם"
+        }
+        action={
+          isManager && !allYears && (yearly?.scheduled_count ?? 0) > 0 ? (
+            <button
+              type="button"
+              className="btn btn--small"
+              disabled={markBusy}
+              onClick={markEntireYearPaid}
+            >
+              {markBusy ? "שולחים..." : "שלח בקשת אישור לכל השנה"}
+            </button>
+          ) : null
+        }
+      >
+        {payments.length === 0 ? (
+          <div className="empty-block">
+            <p className="empty">
+              {detailFocus
+                ? `אין רשומות לפירוט «${DETAIL_LABELS[detailFocus]}».`
+                : allYears
+                  ? "אין רשומות לכל השנים עם הסינון הנוכחי."
+                  : `אין רשומות לשנת ${year}. `}
+              {!detailFocus && !allYears && isManager
+                ? `לחץ על «פתח לוח ${year}» כדי ליצור לוח דיווח מלא לפי תנאי המסלולים הקיימים.`
+                : !detailFocus && !allYears
+                  ? "פנו למנהל לפתיחת לוח הדיווח לשנה זו."
+                  : null}
+            </p>
+            {isManager && !allYears && !detailFocus ? (
+              <button
+                type="button"
+                className="btn btn--admin"
+                disabled={openBusy}
+                onClick={openReportingYear}
+              >
+                {openBusy ? "פותחים..." : `פתח לוח תשלומים ל-${year}`}
+              </button>
+            ) : null}
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
                   {isManager ? <th>משקיע</th> : null}
+                  {allYears ? <th>שנה</th> : null}
                   <th>חודש</th>
                   <th>תאריך</th>
-                  <th>סכום</th>
-                  {isManager ? <th>עמלה</th> : null}
+                  <th
+                    className={
+                      detailFocus === "yearly-paid" ||
+                      detailFocus === "lifetime-paid"
+                        ? "col-highlight"
+                        : undefined
+                    }
+                  >
+                    סכום
+                  </th>
+                  {isManager ? (
+                    <th
+                      className={
+                        detailFocus === "yearly-fees" ||
+                        detailFocus === "lifetime-fees"
+                          ? "col-highlight"
+                          : undefined
+                      }
+                    >
+                      עמלה
+                    </th>
+                  ) : null}
                   <th>סטטוס</th>
-                  {isManager ? <th></th> : null}
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {(data ?? []).map((p) => (
+                {payments.map((p) => (
                   <tr key={p.id}>
                     {isManager ? <td>{p.investor_name}</td> : null}
-                    <td>{p.month_number}</td>
+                    {allYears ? <td>{p.due_date.slice(0, 4)}</td> : null}
+                    <td>{formatCalendarMonth(p.due_date)}</td>
                     <td>{formatDate(p.due_date)}</td>
-                    <td>{formatMoney(p.investor_amount, true)}</td>
-                    {isManager ? <td>{formatMoney(p.manager_amount, true)}</td> : null}
+                    <td
+                      className={
+                        detailFocus === "yearly-paid" ||
+                        detailFocus === "lifetime-paid"
+                          ? "col-highlight"
+                          : undefined
+                      }
+                    >
+                      {formatMoney(p.investor_amount, true)}
+                    </td>
+                    {isManager ? (
+                      <td
+                        className={
+                          detailFocus === "yearly-fees" ||
+                          detailFocus === "lifetime-fees"
+                            ? "col-highlight"
+                            : undefined
+                        }
+                      >
+                        {formatMoney(p.manager_amount, true)}
+                      </td>
+                    ) : null}
                     <td>
                       <span className={`badge badge--${p.status}`}>{statusLabel(p.status)}</span>
                     </td>
-                    {isManager ? (
-                      <td className="table__actions">
-                        {p.status !== "paid" ? (
-                          <button type="button" className="btn btn--small" onClick={() => markPaid(p.id)}>
-                            סמני שולם
+                    <td className="table__actions">
+                      {isManager ? (
+                        p.status === "scheduled" ? (
+                          <button
+                            type="button"
+                            className="btn btn--small btn--admin"
+                            disabled={markBusyId === p.id}
+                            onClick={() => markPaid(p.id)}
+                          >
+                            {markBusyId === p.id ? "שולח..." : "שלח לאישור"}
                           </button>
-                        ) : (
+                        ) : p.status === "awaiting_confirmation" ? (
                           <button
                             type="button"
                             className="btn btn--small btn--ghost"
+                            disabled={markBusyId === p.id}
                             onClick={() => markScheduled(p.id)}
                           >
-                            בטלי
+                            {markBusyId === p.id ? "מבטל..." : "בטל בקשה"}
                           </button>
-                        )}
-                      </td>
-                    ) : null}
+                        ) : p.status === "paid" ? (
+                          <button
+                            type="button"
+                            className="btn btn--small btn--ghost"
+                            disabled={markBusyId === p.id}
+                            onClick={() => markScheduled(p.id)}
+                          >
+                            {markBusyId === p.id ? "מעדכן..." : "החזר למתוכנן"}
+                          </button>
+                        ) : null
+                      ) : p.status === "awaiting_confirmation" ? (
+                        <>
+                          <button
+                            type="button"
+                            className={`btn btn--small ${isManager ? "btn--admin" : "btn--gold"}`}
+                            disabled={markBusyId === p.id}
+                            onClick={() => confirmPayment(p.id)}
+                          >
+                            {markBusyId === p.id ? "מאשר..." : "אשר קבלה"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--small btn--ghost btn--danger"
+                            disabled={markBusyId === p.id}
+                            onClick={() => rejectPayment(p.id)}
+                          >
+                            דחה
+                          </button>
+                        </>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -181,6 +1497,7 @@ export function PaymentsPage() {
           </div>
         )}
       </Panel>
+      </div>
     </div>
   );
 }

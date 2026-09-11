@@ -1,19 +1,28 @@
 import type {
   AuthUser,
+  ActivityEvent,
+  ActivitySummary,
   EmailOutboxItem,
   LoginAlert,
+  PasswordResetRequestItem,
 } from "../types/auth";
 import type {
   Dashboard,
   Investor,
+  ManagerIncomeBoard,
   Payment,
+  PaymentReport,
   Plan,
+  PlanStatusReport,
   Quote,
   Settings,
+  SiteStatus,
+  TopupRequest,
 } from "../types/investments";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const TOKEN_KEY = "tazrim_token";
+export const AUTH_EXPIRED_EVENT = "tazrim:auth-expired";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -22,6 +31,11 @@ export function getToken(): string | null {
 export function setToken(token: string | null) {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+}
+
+function notifyAuthExpired() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
 }
 
 async function request<T>(path: string, init?: RequestInit, auth = true): Promise<T> {
@@ -34,13 +48,19 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+    });
+  } catch {
+    throw new Error("אין חיבור לשרת — בדקו את הרשת או נסו שוב בעוד רגע");
+  }
 
   if (response.status === 401) {
     setToken(null);
+    notifyAuthExpired();
   }
 
   if (!response.ok) {
@@ -51,12 +71,15 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
     } catch {
       /* ignore */
     }
-    const message =
-      typeof detail === "string"
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((d) => d.msg || JSON.stringify(d)).join(", ")
-          : "בקשה נכשלה";
+    let message = "בקשה נכשלה";
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (detail && typeof detail === "object") {
+      // Preserve structured errors (e.g. first-login reset_link)
+      message = JSON.stringify(detail);
+    } else if (Array.isArray(detail)) {
+      message = detail.map((d) => d.msg || JSON.stringify(d)).join(", ");
+    }
     throw new Error(message);
   }
 
@@ -65,39 +88,48 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
 }
 
 export const api = {
-  login: (email: string, password: string) =>
+  login: (username: string, password: string) =>
     request<{ access_token: string; user: AuthUser }>(
       "/api/v1/auth/login",
-      { method: "POST", body: JSON.stringify({ email, password }) },
+      { method: "POST", body: JSON.stringify({ username, password }) },
       false,
     ),
-  forgotPassword: (email: string) =>
+  requestPasswordReset: (username: string, note?: string) =>
     request<{ message: string }>(
-      "/api/v1/auth/forgot-password",
-      { method: "POST", body: JSON.stringify({ email }) },
+      "/api/v1/auth/request-password-reset",
+      { method: "POST", body: JSON.stringify({ username, note }) },
       false,
     ),
-  resetPassword: (token: string, new_password: string) =>
-    request<{ message: string }>(
-      "/api/v1/auth/reset-password",
-      { method: "POST", body: JSON.stringify({ token, new_password }) },
-      false,
+  passwordResetRequests: (pendingOnly = true) =>
+    request<PasswordResetRequestItem[]>(
+      `/api/v1/auth/password-reset-requests${pendingOnly ? "?pending_only=true" : ""}`,
     ),
+  fulfillPasswordReset: (id: number, new_password: string) =>
+    request<PasswordResetRequestItem>(
+      `/api/v1/auth/password-reset-requests/${id}/fulfill`,
+      { method: "POST", body: JSON.stringify({ new_password }) },
+    ),
+  rejectPasswordReset: (id: number) =>
+    request<PasswordResetRequestItem>(
+      `/api/v1/auth/password-reset-requests/${id}/reject`,
+      { method: "POST" },
+    ),
+  setUserPassword: (id: number, new_password: string) =>
+    request<AuthUser>(`/api/v1/auth/users/${id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ new_password }),
+    }),
   me: () => request<AuthUser>("/api/v1/auth/me"),
   users: () => request<AuthUser[]>("/api/v1/auth/users"),
-  updateUserEmail: (id: number, email: string) =>
-    request<AuthUser>(`/api/v1/auth/users/${id}/email`, {
-      method: "PATCH",
-      body: JSON.stringify({ email }),
-    }),
   updateUser: (
     id: number,
     body: Partial<{
-      email: string;
+      username: string;
+      email: string | null;
+      phone: string | null;
       role: string;
       is_active: boolean;
       investor_name: string;
-      send_invite: boolean;
     }>,
   ) =>
     request<AuthUser>(`/api/v1/auth/users/${id}`, {
@@ -106,20 +138,19 @@ export const api = {
     }),
   createAccessUser: (body: {
     name: string;
-    email: string;
+    username: string;
+    password: string;
+    email?: string;
     role: string;
     phone?: string;
     notes?: string;
-    send_invite?: boolean;
   }) =>
     request<AuthUser>("/api/v1/auth/users", {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  resendInvite: (id: number) =>
-    request<{ message: string }>(`/api/v1/auth/users/${id}/resend-invite`, {
-      method: "POST",
-    }),
+  deleteUser: (id: number) =>
+    request<void>(`/api/v1/auth/users/${id}`, { method: "DELETE" }),
   loginAlerts: (unreadOnly = false) =>
     request<LoginAlert[]>(
       `/api/v1/auth/login-alerts${unreadOnly ? "?unread_only=true" : ""}`,
@@ -130,11 +161,55 @@ export const api = {
     request<{ message: string }>("/api/v1/auth/login-alerts/read-all", {
       method: "POST",
     }),
+  activity: (params?: {
+    unreadOnly?: boolean;
+    kind?: string;
+    group?: string;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.unreadOnly) qs.set("unread_only", "true");
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.group) qs.set("group", params.group);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return request<ActivityEvent[]>(`/api/v1/auth/activity${suffix}`);
+  },
+  activitySummary: () => request<ActivitySummary>("/api/v1/auth/activity/summary"),
+  markActivityRead: (id: number) =>
+    request<ActivityEvent>(`/api/v1/auth/activity/${id}/read`, { method: "POST" }),
+  markAllActivityRead: (params?: { kind?: string; group?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.group) qs.set("group", params.group);
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return request<{ message: string }>(`/api/v1/auth/activity/read-all${suffix}`, {
+      method: "POST",
+    });
+  },
   emailOutbox: () => request<EmailOutboxItem[]>("/api/v1/auth/email-outbox"),
 
-  dashboard: () => request<Dashboard>("/api/v1/investments/dashboard"),
+  dashboard: (params?: { investor_id?: number | null }) => {
+    const qs = new URLSearchParams();
+    if (params?.investor_id != null) qs.set("investor_id", String(params.investor_id));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return request<Dashboard>(`/api/v1/investments/dashboard${suffix}`);
+  },
+  managerIncome: () =>
+    request<ManagerIncomeBoard>("/api/v1/investments/manager-income"),
   settings: () => request<Settings>("/api/v1/investments/settings"),
-  updateSettings: (body: Partial<Settings>) =>
+  siteStatus: () => request<SiteStatus>("/api/v1/investments/site-status"),
+  announcePublicUrl: () =>
+    request<{ sent: boolean; detail: string; public_url?: string | null }>(
+      "/api/v1/investments/announce-public-url",
+      { method: "POST" },
+    ),
+  updateSettings: (
+    body: Partial<Settings> & {
+      assistant_api_key?: string | null;
+      assistant_provider?: string;
+    },
+  ) =>
     request<Settings>("/api/v1/investments/settings", {
       method: "PATCH",
       body: JSON.stringify(body),
@@ -145,8 +220,9 @@ export const api = {
     phone?: string;
     notes?: string;
     is_manager?: boolean;
+    username?: string;
+    password?: string;
     email?: string;
-    send_invite?: boolean;
   }) =>
     request<Investor>("/api/v1/investments/investors", {
       method: "POST",
@@ -170,7 +246,9 @@ export const api = {
   createPlan: (body: {
     investor_id: number;
     principal: number;
+    plan_type?: string;
     monthly_rate_percent: number;
+    savings_rate_percent?: number;
     manager_fee_percent: number;
     start_date: string;
     duration_months: number;
@@ -185,7 +263,9 @@ export const api = {
     id: number,
     body: Partial<{
       principal: number;
+      plan_type: string;
       monthly_rate_percent: number;
+      savings_rate_percent: number;
       manager_fee_percent: number;
       start_date: string;
       duration_months: number;
@@ -198,6 +278,167 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  planStatusReport: (id: number, params?: { year?: number }) => {
+    const q =
+      params?.year != null ? `?year=${encodeURIComponent(String(params.year))}` : "";
+    return request<PlanStatusReport>(
+      `/api/v1/investments/plans/${id}/status-report${q}`,
+    );
+  },
+  syncPaymentAmounts: (params?: { year?: number; investor_id?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.year != null) q.set("year", String(params.year));
+    if (params?.investor_id != null) q.set("investor_id", String(params.investor_id));
+    const suffix = q.toString() ? `?${q}` : "";
+    return request<{ year: number | null; synced: unknown[]; count: number }>(
+      `/api/v1/investments/sync-payment-amounts${suffix}`,
+      { method: "POST" },
+    );
+  },
+  deletePlan: (id: number) =>
+    request<void>(`/api/v1/investments/plans/${id}`, {
+      method: "DELETE",
+    }),
+  topupRequests: (params?: { status?: string; investor_id?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.investor_id != null) qs.set("investor_id", String(params.investor_id));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return request<TopupRequest[]>(`/api/v1/investments/investment-requests${suffix}`);
+  },
+  topupRequest: (id: number) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}`),
+  createTopupRequest: (body: { amount: number; notes?: string; investor_id?: number }) =>
+    request<TopupRequest>("/api/v1/investments/investment-requests", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  cancelTopupRequest: (id: number, notes?: string) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ notes: notes || null }),
+    }),
+  rejectTopupRequest: (id: number, notes?: string) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ notes: notes || null }),
+    }),
+  approveTopupRequest: (
+    id: number,
+    body: {
+      principal?: number;
+      plan_type?: string;
+      monthly_rate_percent: number;
+      savings_rate_percent?: number;
+      manager_fee_percent: number;
+      start_date: string;
+      duration_months: number;
+      notes?: string;
+      generate_schedule?: boolean;
+    },
+  ) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  signTopupRequest: (
+    id: number,
+    body: { typed_name: string; signature_png: string; accepted_terms: boolean },
+  ) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/sign`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  reverseTopupRequest: (id: number, notes?: string) =>
+    request<TopupRequest>(`/api/v1/investments/investment-requests/${id}/reverse`, {
+      method: "POST",
+      body: JSON.stringify({ notes: notes || null }),
+    }),
+  withdrawSavings: (planId: number, body: { amount: number; notes?: string }) =>
+    request<{
+      action: {
+        id: number;
+        action_type: string;
+        amount: number;
+        principal_after?: number | null;
+        available_after?: number | null;
+        created_at: string;
+        notes?: string | null;
+      };
+      plan: Plan;
+    }>(`/api/v1/investments/plans/${planId}/savings/withdraw`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  transferSavingsToPrincipal: (
+    planId: number,
+    body: { amount: number; notes?: string },
+  ) =>
+    request<{
+      action: {
+        id: number;
+        action_type: string;
+        amount: number;
+        principal_after?: number | null;
+        available_after?: number | null;
+        created_at: string;
+        notes?: string | null;
+      };
+      plan: Plan;
+    }>(`/api/v1/investments/plans/${planId}/savings/transfer-to-principal`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  settleSavings: (
+    planId: number,
+    body: {
+      action_type: "withdraw" | "transfer_to_principal";
+      amount: number;
+      outcome: "close_plan" | "continue_new_track";
+      notes?: string;
+      withdraw_remaining?: boolean;
+      compound_savings?: boolean;
+      include_monthly_cash?: boolean;
+      monthly_rate_percent?: number;
+      savings_rate_percent?: number;
+      manager_fee_percent?: number;
+      new_principal?: number;
+      new_duration_months?: number;
+      new_start_date?: string;
+    },
+  ) =>
+    request<{
+      outcome: string;
+      action: {
+        id: number;
+        action_type: string;
+        amount: number;
+        principal_after?: number | null;
+        available_after?: number | null;
+        created_at: string;
+        notes?: string | null;
+      };
+      residual_action?: {
+        id: number;
+        action_type: string;
+        amount: number;
+      } | null;
+      closed_plan: Plan;
+      new_plan?: Plan | null;
+    }>(`/api/v1/investments/plans/${planId}/savings/settle`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeFromCalendarYear: (year: number, investor_id: number) =>
+    request<{
+      year: number;
+      investor_id: number;
+      deleted_plan_ids: number[];
+      deleted_count: number;
+    }>(
+      `/api/v1/investments/remove-from-calendar-year?year=${year}&investor_id=${investor_id}`,
+      { method: "POST" },
+    ),
   payments: (params?: {
     investor_id?: number;
     plan_id?: number;
@@ -211,6 +452,36 @@ export const api = {
     if (params?.year != null) qs.set("year", String(params.year));
     const suffix = qs.toString() ? `?${qs}` : "";
     return request<Payment[]>(`/api/v1/investments/payments${suffix}`);
+  },
+  paymentReport: (year: number, investor_id?: number) => {
+    const qs = new URLSearchParams({ year: String(year) });
+    if (investor_id != null) qs.set("investor_id", String(investor_id));
+    return request<PaymentReport>(`/api/v1/investments/payment-report?${qs}`);
+  },
+  openCalendarYear: (year: number) =>
+    request<{
+      year: number;
+      created_count: number;
+      skipped_count: number;
+      created: Array<Record<string, unknown>>;
+      skipped: Array<Record<string, unknown>>;
+    }>(`/api/v1/investments/open-calendar-year?year=${year}`, { method: "POST" }),
+  markYearPaid: (year: number, investor_id?: number) => {
+    const qs = new URLSearchParams({ year: String(year) });
+    if (investor_id != null) qs.set("investor_id", String(investor_id));
+    return request<{
+      year: number;
+      marked_count: number;
+      awaiting_count: number;
+      auto_paid_count: number;
+    }>(`/api/v1/investments/payments/mark-year-paid?${qs}`, { method: "POST" });
+  },
+  alignCalendarYear: (year?: number) => {
+    const qs = year != null ? `?year=${year}` : "";
+    return request<{ aligned: Array<Record<string, unknown>>; count: number }>(
+      `/api/v1/investments/align-calendar-year${qs}`,
+      { method: "POST" },
+    );
   },
   updatePayment: (
     id: number,
@@ -226,11 +497,25 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  confirmPayment: (id: number) =>
+    request<Payment>(`/api/v1/investments/payments/${id}/confirm`, {
+      method: "POST",
+    }),
+  rejectPayment: (id: number) =>
+    request<Payment>(`/api/v1/investments/payments/${id}/reject`, {
+      method: "POST",
+    }),
   quotes: () => request<Quote[]>("/api/v1/investments/quotes"),
   createQuote: (body: {
     prospect_name: string;
+    phone?: string;
+    access_username?: string;
+    access_password?: string;
+    start_date?: string;
     principal: number;
+    plan_type?: string;
     monthly_rate_percent: number;
+    savings_rate_percent?: number;
     manager_fee_percent: number;
     duration_months: number;
     notes?: string;
@@ -243,8 +528,14 @@ export const api = {
     id: number,
     body: Partial<{
       prospect_name: string;
+      phone: string | null;
+      access_username: string | null;
+      access_password: string | null;
+      start_date: string | null;
       principal: number;
+      plan_type: string;
       monthly_rate_percent: number;
+      savings_rate_percent: number;
       manager_fee_percent: number;
       duration_months: number;
       notes: string;
@@ -255,12 +546,80 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  deleteQuote: (id: number) =>
+    request<void>(`/api/v1/investments/quotes/${id}`, {
+      method: "DELETE",
+    }),
   convertQuote: (
     id: number,
-    body: { start_date: string; phone?: string; notes?: string; email?: string; send_invite?: boolean },
+    body: {
+      start_date?: string;
+      phone?: string;
+      notes?: string;
+      username?: string;
+      password?: string;
+      email?: string;
+    },
   ) =>
     request<Plan>(`/api/v1/investments/quotes/${id}/convert`, {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+
+  assistantStatus: () =>
+    request<{
+      configured: boolean;
+      provider: string;
+      api_key_set: boolean;
+      api_key_hint?: string | null;
+    }>("/api/v1/assistant/status"),
+  assistantChat: (body: {
+    message: string;
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+  }) =>
+    request<{
+      reply: string;
+      pdf_suggested: boolean;
+      what_if?: Record<string, unknown> | null;
+      configured: boolean;
+    }>("/api/v1/assistant/chat", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  assistantEndSession: (body: {
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+  }) =>
+    request<{ summary: string; notified: boolean; detail: string }>(
+      "/api/v1/assistant/end-session",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  assistantPortfolioBrief: () =>
+    request<{
+      investor_name: string;
+      active_principal: number;
+      monthly_cash: number;
+      monthly_savings: number;
+      current_savings_balance: number;
+      lifetime_cash_paid: number;
+      cash_rate_percent: number;
+      savings_rate_percent: number;
+      plans: Array<{
+        plan_id: number;
+        status: string;
+        plan_type: string;
+        principal: number;
+        cash_rate_percent: number;
+        savings_rate_percent: number;
+        monthly_cash: number;
+        monthly_savings: number;
+        current_savings: number;
+        months_elapsed: number;
+        duration_months: number;
+      }>;
+    }>("/api/v1/assistant/portfolio-brief"),
+  assistantWhatIf: (extra_principal: number) =>
+    request<Record<string, unknown>>("/api/v1/assistant/what-if", {
+      method: "POST",
+      body: JSON.stringify({ extra_principal }),
     }),
 };

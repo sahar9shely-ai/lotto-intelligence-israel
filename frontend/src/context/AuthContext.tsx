@@ -7,13 +7,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, getToken, setToken } from "../services/api";
+import { AUTH_EXPIRED_EVENT, api, getToken, setToken } from "../services/api";
 import type { AuthUser } from "../types/auth";
 
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
 };
@@ -45,8 +45,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const result = await api.login(email, password);
+  useEffect(() => {
+    const onExpired = () => {
+      setToken(null);
+      setUser(null);
+      setLoading(false);
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  const login = useCallback(async (username: string, password: string) => {
+    const result = await api.login(username, password);
     setToken(result.access_token);
     setUser(result.user);
   }, []);
