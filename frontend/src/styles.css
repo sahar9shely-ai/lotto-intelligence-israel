@@ -5118,6 +5118,27 @@ input[type="date"] {
     font-size: 0.95rem;
   }
 
+  .page-intro--admin {
+    padding: 12px 14px 10px;
+    gap: 10px;
+  }
+
+  .page-intro--admin .page-intro__lead {
+    font-size: 0.86rem;
+  }
+
+  .page-intro--admin .page-head__actions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .page-intro--admin .page-head__actions .btn {
+    flex: 1 1 0;
+    min-height: 44px;
+    font-size: 0.9rem;
+  }
+
   .panel {
     padding: 16px 14px 14px;
     border-radius: 18px;
