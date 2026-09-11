@@ -784,6 +784,22 @@ def fulfill_password_reset(
     req.status = "fulfilled"
     req.resolved_at = utcnow()
     req.resolved_by_user_id = actor.id
+    from app.services import activity_service as activity_svc
+
+    display = user.investor.name if user.investor else user.username
+    activity_svc.log_activity(
+        db,
+        kind="password_reset_fulfilled",
+        title=f"סיסמה אופסה · {display}",
+        body=f"שם משתמש: {user.username}",
+        severity="warning",
+        actor=actor,
+        investor_id=user.investor_id,
+        investor_name=display,
+        entity_type="password_reset",
+        entity_id=req.id,
+        href="/users",
+    )
     db.commit()
     db.refresh(req)
     return req
@@ -800,6 +816,31 @@ def reject_password_reset(
     req.status = "rejected"
     req.resolved_at = utcnow()
     req.resolved_by_user_id = actor.id
+    from app.services import activity_service as activity_svc
+
+    user = (
+        db.query(User)
+        .options(joinedload(User.investor))
+        .filter(User.id == req.user_id)
+        .first()
+    )
+    display = (
+        (user.investor.name if user and user.investor else None)
+        or (user.username if user else f"#{req.user_id}")
+    )
+    activity_svc.log_activity(
+        db,
+        kind="password_reset_rejected",
+        title=f"בקשת איפוס נדחתה · {display}",
+        body="המנהל דחה את בקשת איפוס הסיסמה",
+        severity="info",
+        actor=actor,
+        investor_id=user.investor_id if user else None,
+        investor_name=display,
+        entity_type="password_reset",
+        entity_id=req.id,
+        href="/users",
+    )
     db.commit()
     db.refresh(req)
     return req

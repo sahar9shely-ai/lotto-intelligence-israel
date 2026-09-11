@@ -65,6 +65,28 @@ def ensure_schema(engine: Engine) -> None:
 
     InvestmentBase.metadata.create_all(bind=engine)
 
+    # Activity / notification stream indexes (create_all covers the table).
+    if _table_exists(engine, "activity_events"):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_activity_events_kind "
+                    "ON activity_events(kind)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_activity_events_created "
+                    "ON activity_events(created_at)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_activity_events_unread "
+                    "ON activity_events(read_at, kind)"
+                )
+            )
+
     if _table_exists(engine, "payments"):
         with engine.begin() as conn:
             # Deduplicate before unique indexes (keep lowest id per key).

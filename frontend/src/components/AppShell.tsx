@@ -7,7 +7,7 @@ import { isAdminAccount } from "../utils/roles";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 
-const PRIMARY_PATHS = new Set(["/", "/investors", "/payments"]);
+const PRIMARY_PATHS = new Set(["/", "/investors", "/payments", "/activity"]);
 
 export function AppShell() {
   const { user, logout } = useAuth();
@@ -35,6 +35,7 @@ export function AppShell() {
     { to: "/", label: "לוח בקרה", end: true, managerOnly: false },
     { to: "/investors", label: isManager ? "משקיעים" : "המסלול שלי", managerOnly: false },
     { to: "/payments", label: isManager ? "תשלומים" : "התשלומים שלי", managerOnly: false },
+    { to: "/activity", label: "מעקב", managerOnly: true },
     { to: "/quotes", label: "הצעות", managerOnly: true },
     { to: "/users", label: "משתמשים", managerOnly: true },
     { to: "/settings", label: "הגדרות", managerOnly: true },

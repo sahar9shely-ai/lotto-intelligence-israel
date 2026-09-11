@@ -255,17 +255,22 @@ export function DashboardPage() {
           title="יומן מעקב"
           subtitle="כניסות, תשלומים, הצעות ובקשות — הכול במקום אחד"
           action={
-            <button
-              type="button"
-              className="btn btn--small btn--ghost"
-              onClick={async () => {
-                await api.markAllActivityRead();
-                reloadActivity();
-                reloadAlerts();
-              }}
-            >
-              סמן הכל כנקרא
-            </button>
+            <div className="inline-form">
+              <Link className="btn btn--small btn--ghost" to="/activity">
+                מעקב מלא
+              </Link>
+              <button
+                type="button"
+                className="btn btn--small btn--ghost"
+                onClick={async () => {
+                  await api.markAllActivityRead();
+                  reloadActivity();
+                  reloadAlerts();
+                }}
+              >
+                סמן הכל כנקרא
+              </button>
+            </div>
           }
         >
           {(activity?.length ?? 0) === 0 ? (

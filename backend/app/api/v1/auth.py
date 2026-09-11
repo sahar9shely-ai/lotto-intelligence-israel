@@ -369,6 +369,7 @@ def mark_all_alerts_read(
 def list_activity_events(
     unread_only: bool = False,
     kind: str | None = None,
+    group: str | None = None,
     limit: int = 80,
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
@@ -376,7 +377,7 @@ def list_activity_events(
     from app.services import activity_service as activity_svc
 
     events = activity_svc.list_activity(
-        db, unread_only=unread_only, kind=kind, limit=limit
+        db, unread_only=unread_only, kind=kind, group=group, limit=limit
     )
     return [activity_svc.serialize_activity(e) for e in events]
 
@@ -409,12 +410,13 @@ def mark_activity_read(
 @router.post("/activity/read-all", response_model=MessageOut)
 def mark_all_activity_read(
     kind: str | None = None,
+    group: str | None = None,
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     from app.services import activity_service as activity_svc
 
-    count = activity_svc.mark_all_activity_read(db, kind=kind)
+    count = activity_svc.mark_all_activity_read(db, kind=kind, group=group)
     return {"message": f"סומנו {count} התראות כנקראו"}
 
 

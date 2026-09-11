@@ -3116,6 +3116,38 @@ input[type="date"] {
   justify-content: center;
 }
 
+.notif__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.notif__filter {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.notif__filter.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  color: var(--accent-strong);
+}
+
+.notif__footer {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+
 .notif__panel {
   position: fixed;
   top: calc(64px + env(safe-area-inset-top, 0px));
@@ -3240,6 +3272,33 @@ input[type="date"] {
   animation: rise 0.25s ease both;
 }
 
+.notif-toast--login {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--danger) 8%, #fff),
+    #fff 55%
+  );
+  animation: notif-toast-pop 0.35s ease both;
+}
+
+@keyframes notif-toast-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.notif-toast__actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .notif-toast strong {
   display: block;
   color: var(--danger);
@@ -3249,6 +3308,139 @@ input[type="date"] {
 .notif-toast p {
   margin: 0;
   font-weight: 700;
+}
+
+.activity-page__hero .eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent-strong);
+  text-transform: uppercase;
+}
+
+.activity-page__hero {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  padding: 8px 2px 4px;
+}
+
+.activity-page__hero h1 {
+  margin: 4px 0 8px;
+  font-size: clamp(1.45rem, 2.4vw, 1.9rem);
+}
+
+.activity-page__hero .lede {
+  margin: 0;
+  max-width: 42rem;
+  color: var(--ink-soft);
+}
+
+.activity-page__stats {
+  display: flex;
+  gap: 12px;
+}
+
+.activity-page__stats > div {
+  min-width: 96px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent-soft) 50%, #fff);
+  border: 1px solid var(--line);
+  text-align: center;
+}
+
+.activity-page__stats > div.is-hot {
+  background: color-mix(in srgb, var(--danger) 10%, #fff);
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--line));
+}
+
+.activity-page__stats strong {
+  display: block;
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.activity-page__stats span {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.activity-page__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.activity-page__filter {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.activity-page__filter.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  color: var(--accent-strong);
+}
+
+.activity-page__list {
+  gap: 10px;
+}
+
+.activity-page__row {
+  align-items: flex-start;
+}
+
+.activity-page__row.is-unread strong {
+  color: var(--accent-strong);
+}
+
+.activity-page__row--login {
+  border-inline-start: 3px solid var(--danger);
+  padding-inline-start: 10px;
+}
+
+.activity-page__row--urgent {
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+
+.activity-page__row--warning {
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+}
+
+.activity-page__row--success {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.activity-page__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin-bottom: 2px;
+}
+
+.activity-page__kind {
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.activity-page__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .activity-feed__row.is-unread strong {

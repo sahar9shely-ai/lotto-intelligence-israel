@@ -123,6 +123,50 @@ def test_username_login_and_investor_scope_alerts_manager():
     assert body["unread_login_count"] >= 1
     assert body["latest_login_id"] > 0
     assert body["latest_login"]["kind"] == "login"
+    assert "login" in (body.get("unread_by_group") or {})
+
+    login_only = client.get(
+        "/api/v1/auth/activity?group=login",
+        headers={"Authorization": f"Bearer {m_token}"},
+    )
+    assert login_only.status_code == 200
+    assert login_only.json()
+    assert all(e["kind"] == "login" for e in login_only.json())
+
+
+def test_plan_create_writes_activity_event():
+    headers = _auth_headers("admin", "ManagerPass1!")
+    investors = client.get("/api/v1/investments/investors", headers=headers)
+    assert investors.status_code == 200
+    target = next((i for i in investors.json() if not i.get("is_manager")), None)
+    assert target is not None
+
+    created = client.post(
+        "/api/v1/investments/plans",
+        headers=headers,
+        json={
+            "investor_id": target["id"],
+            "principal": 12000,
+            "plan_type": "monthly",
+            "monthly_rate_percent": 1.5,
+            "savings_rate_percent": 0,
+            "manager_fee_percent": 20,
+            "start_date": "2026-01-01",
+            "duration_months": 6,
+            "generate_schedule": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    activity = client.get(
+        "/api/v1/auth/activity?group=plan",
+        headers=headers,
+    )
+    assert activity.status_code == 200
+    assert any(
+        e["kind"] == "plan_created" and e["investor_id"] == target["id"]
+        for e in activity.json()
+    )
 
 
 def test_password_reset_requires_manager_approval():

@@ -3,10 +3,35 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.auth import ActivityEvent, User
 from app.models.investments import utcnow
+
+# Filter groups for the tracking hub (prefix match on kind).
+ACTIVITY_GROUPS: dict[str, tuple[str, ...]] = {
+    "login": ("login",),
+    "payment": ("payment",),
+    "quote": ("quote",),
+    "topup": ("topup",),
+    "user": ("user", "password"),
+    "plan": ("plan",),
+    "savings": ("savings",),
+    "settings": ("settings",),
+    "investor": ("investor",),
+}
+
+
+def _group_clause(group: Optional[str]):
+    if not group:
+        return None
+    prefixes = ACTIVITY_GROUPS.get(group)
+    if not prefixes:
+        return ActivityEvent.kind == group
+    if len(prefixes) == 1:
+        return ActivityEvent.kind.like(f"{prefixes[0]}%")
+    return or_(*[ActivityEvent.kind.like(f"{p}%") for p in prefixes])
 
 
 def log_activity(
@@ -90,6 +115,7 @@ def list_activity(
     *,
     unread_only: bool = False,
     kind: Optional[str] = None,
+    group: Optional[str] = None,
     limit: int = 80,
 ) -> list[ActivityEvent]:
     query = db.query(ActivityEvent).order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
@@ -97,7 +123,11 @@ def list_activity(
         query = query.filter(ActivityEvent.read_at.is_(None))
     if kind:
         query = query.filter(ActivityEvent.kind == kind)
-    return query.limit(max(1, min(limit, 200))).all()
+    else:
+        clause = _group_clause(group)
+        if clause is not None:
+            query = query.filter(clause)
+    return query.limit(max(1, min(limit, 300))).all()
 
 
 def activity_summary(db: Session) -> dict:
@@ -118,9 +148,21 @@ def activity_summary(db: Session) -> dict:
         .order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
         .first()
     )
+    unread_by_group: dict[str, int] = {}
+    for name, prefixes in ACTIVITY_GROUPS.items():
+        q = db.query(ActivityEvent).filter(ActivityEvent.read_at.is_(None))
+        if len(prefixes) == 1:
+            q = q.filter(ActivityEvent.kind.like(f"{prefixes[0]}%"))
+        else:
+            q = q.filter(or_(*[ActivityEvent.kind.like(f"{p}%") for p in prefixes]))
+        count = q.count()
+        if count:
+            unread_by_group[name] = count
+
     return {
         "unread_count": unread,
         "unread_login_count": unread_logins,
+        "unread_by_group": unread_by_group,
         "latest_id": latest.id if latest else 0,
         "latest_login_id": latest_login.id if latest_login else 0,
         "latest": serialize_activity(latest) if latest else None,
@@ -139,10 +181,19 @@ def mark_activity_read(db: Session, event_id: int) -> ActivityEvent:
     return event
 
 
-def mark_all_activity_read(db: Session, *, kind: Optional[str] = None) -> int:
+def mark_all_activity_read(
+    db: Session,
+    *,
+    kind: Optional[str] = None,
+    group: Optional[str] = None,
+) -> int:
     query = db.query(ActivityEvent).filter(ActivityEvent.read_at.is_(None))
     if kind:
         query = query.filter(ActivityEvent.kind == kind)
+    else:
+        clause = _group_clause(group)
+        if clause is not None:
+            query = query.filter(clause)
     count = query.update({"read_at": utcnow()}, synchronize_session=False)
     db.commit()
     return int(count)

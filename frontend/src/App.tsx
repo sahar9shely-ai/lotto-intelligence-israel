@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { RequireAuth, RequireManager } from "./components/RequireAuth";
 import { AuthProvider } from "./context/AuthContext";
+import { ActivityPage } from "./pages/ActivityPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { InvestorsPage } from "./pages/InvestorsPage";
@@ -24,6 +25,7 @@ export function App() {
             <Route path="investors" element={<InvestorsPage />} />
             <Route path="payments" element={<PaymentsPage />} />
             <Route element={<RequireManager />}>
+              <Route path="activity" element={<ActivityPage />} />
               <Route path="quotes" element={<QuotesPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="settings" element={<SettingsPage />} />

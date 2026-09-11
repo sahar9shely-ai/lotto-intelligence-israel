@@ -127,7 +127,7 @@ def get_site_status(
 @router.patch("/settings", response_model=SettingsOut)
 def update_settings(
     payload: SettingsUpdate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     settings = svc.ensure_settings(db)
@@ -141,12 +141,25 @@ def update_settings(
         if prov not in {"gemini", "openai"}:
             raise HTTPException(status_code=400, detail="ספק לא נתמך")
         data["assistant_provider"] = prov
+    changed = sorted(data.keys())
     for key, value in data.items():
         setattr(settings, key, value)
     if "manager_display_name" in data:
         manager = db.query(Investor).filter(Investor.is_manager.is_(True)).first()
         if manager:
             manager.name = data["manager_display_name"]
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="settings_updated",
+        title="הגדרות המערכת עודכנו",
+        body="שדות: " + (", ".join(changed) if changed else "ללא שינוי"),
+        severity="info",
+        actor=user,
+        entity_type="settings",
+        href="/settings",
+    )
     db.commit()
     db.refresh(settings)
     return _serialize_settings(settings)
@@ -293,7 +306,7 @@ def list_investors(
 @router.post("/investors", response_model=InvestorOut, status_code=201)
 def create_investor(
     payload: InvestorCreate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     data = payload.model_dump(exclude={"email", "username", "password"})
@@ -312,6 +325,21 @@ def create_investor(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="investor_created",
+        title=f"משקיע חדש · {investor.name}",
+        body=(f"משתמש: {payload.username}" if payload.username else "ללא משתמש גישה"),
+        severity="success",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="investor",
+        entity_id=investor.id,
+        href="/investors",
+    )
     db.commit()
     investor = (
         db.query(Investor)
@@ -345,8 +373,24 @@ def update_investor(
     )
     if not investor:
         raise HTTPException(status_code=404, detail="Investor not found")
+    changed = sorted(payload.model_dump(exclude_unset=True).keys())
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(investor, key, value)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="investor_updated",
+        title=f"פרטי משקיע עודכנו · {investor.name}",
+        body="שדות: " + (", ".join(changed) if changed else "ללא שינוי"),
+        severity="info",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="investor",
+        entity_id=investor.id,
+        href="/investors",
+    )
     db.commit()
     db.refresh(investor)
     return svc.serialize_investor(investor, db=db)
@@ -382,7 +426,7 @@ def list_plans(
 @router.post("/plans", response_model=PlanOut, status_code=201)
 def create_plan(
     payload: PlanCreate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     investor = db.query(Investor).filter(Investor.id == payload.investor_id).first()
@@ -402,6 +446,22 @@ def create_plan(
     data["savings_redeemed_total"] = 0.0
     plan = InvestmentPlan(**data)
     db.add(plan)
+    db.flush()
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="plan_created",
+        title=f"מסלול חדש · {investor.name}",
+        body=f"קרן {float(plan.principal or 0):,.0f} ₪ · {plan.duration_months} חודשים",
+        severity="success",
+        actor=user,
+        investor_id=investor.id,
+        investor_name=investor.name,
+        entity_type="plan",
+        entity_id=plan.id,
+        href="/investors",
+    )
     db.commit()
     db.refresh(plan)
 
@@ -421,7 +481,7 @@ def create_plan(
 def update_plan(
     plan_id: int,
     payload: PlanUpdate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     plan = (
@@ -449,6 +509,22 @@ def update_plan(
     # Manager principal edit rebases accrual base (full terms change).
     if "principal" in data:
         plan.accrual_principal = float(plan.principal or 0)
+    inv_name = plan.investor.name if plan.investor else ""
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="plan_updated",
+        title=f"מסלול עודכן · {inv_name}",
+        body="שדות: " + (", ".join(sorted(data.keys())) if data else "ללא שינוי"),
+        severity="info",
+        actor=user,
+        investor_id=plan.investor_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan.id,
+        href="/investors",
+    )
     db.commit()
 
     start_changed = plan.start_date != old_start
@@ -486,12 +562,20 @@ def update_plan(
 @router.delete("/plans/{plan_id}", status_code=204)
 def delete_plan(
     plan_id: int,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == plan_id).first()
+    plan = (
+        db.query(InvestmentPlan)
+        .options(joinedload(InvestmentPlan.investor))
+        .filter(InvestmentPlan.id == plan_id)
+        .first()
+    )
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+    inv_name = plan.investor.name if plan.investor else ""
+    inv_id = plan.investor_id
+    principal = float(plan.principal or 0)
     # Clear successor links pointing at this plan so SQLite FK allows delete.
     db.query(InvestmentPlan).filter(
         InvestmentPlan.successor_plan_id == plan_id
@@ -500,6 +584,21 @@ def delete_plan(
         InvestmentTopupRequest.created_plan_id == plan_id
     ).update({"created_plan_id": None}, synchronize_session=False)
     db.delete(plan)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="plan_deleted",
+        title=f"מסלול נמחק · {inv_name}",
+        body=f"קרן הייתה {principal:,.0f} ₪",
+        severity="warning",
+        actor=user,
+        investor_id=inv_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan_id,
+        href="/investors",
+    )
     db.commit()
     return None
 
@@ -616,6 +715,23 @@ def cancel_investment_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="topup_cancelled",
+        title=f"בקשת מסלול בוטלה · {inv_name}",
+        body=payload.notes or "הבקשה בוטלה",
+        severity="info",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
     return _serialize_topup(updated, user)
 
 
@@ -732,6 +848,24 @@ def sign_investment_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    party_label = "מנהל" if party == "manager" else "משקיע"
+    activity_svc.log_activity(
+        db,
+        kind="topup_signed",
+        title=f"חתימה על בקשת מסלול · {inv_name}",
+        body=f"נחתם על ידי {party_label}",
+        severity="warning",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
     return _serialize_topup(updated, user, include_signatures=True)
 
 
@@ -755,6 +889,23 @@ def reverse_investment_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    inv_name = updated.investor.name if updated.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="topup_reversed",
+        title=f"ביטול מסלול מבקשה · {inv_name}",
+        body=payload.notes or "המסלול בוטל והבקשה הוחזרה",
+        severity="urgent",
+        actor=user,
+        investor_id=updated.investor_id,
+        investor_name=inv_name or None,
+        entity_type="topup",
+        entity_id=updated.id,
+        href="/investors",
+        commit=True,
+    )
     return _serialize_topup(updated, user)
 
 
@@ -793,8 +944,11 @@ def withdraw_savings(
 ):
     """Pull available savings out of the pot (does not change קרן). Manager only."""
     plan = _load_plan_for_savings(db, plan_id)
+    inv_name = plan.investor.name if plan.investor else ""
+    inv_id = plan.investor_id
+    plan_pk = plan.id
     try:
-        return svc.redeem_savings(
+        result = svc.redeem_savings(
             db,
             plan=plan,
             action_type="withdraw",
@@ -804,6 +958,23 @@ def withdraw_savings(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="savings_withdraw",
+        title=f"משיכת חיסכון · {inv_name}",
+        body=f"סכום: {float(payload.amount or 0):,.0f} ₪",
+        severity="warning",
+        actor=user,
+        investor_id=inv_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan_pk,
+        href="/investors",
+        commit=True,
+    )
+    return result
 
 
 @router.post(
@@ -818,8 +989,11 @@ def transfer_savings_to_principal(
 ):
     """Move available savings into קרן. Manager only."""
     plan = _load_plan_for_savings(db, plan_id)
+    inv_name = plan.investor.name if plan.investor else ""
+    inv_id = plan.investor_id
+    plan_pk = plan.id
     try:
-        return svc.redeem_savings(
+        result = svc.redeem_savings(
             db,
             plan=plan,
             action_type="transfer_to_principal",
@@ -829,6 +1003,23 @@ def transfer_savings_to_principal(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="savings_transfer",
+        title=f"העברת חיסכון לקרן · {inv_name}",
+        body=f"סכום: {float(payload.amount or 0):,.0f} ₪",
+        severity="info",
+        actor=user,
+        investor_id=inv_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan_pk,
+        href="/investors",
+        commit=True,
+    )
+    return result
 
 
 @router.post(
@@ -845,8 +1036,10 @@ def settle_savings_action(
     plan = _load_plan_for_savings(db, plan_id)
     if plan.status == "completed":
         raise HTTPException(status_code=400, detail="המסלול כבר סגור")
+    inv_name = plan.investor.name if plan.investor else ""
+    inv_id = plan.investor_id
     try:
-        return svc.settle_savings_action(
+        result = svc.settle_savings_action(
             db,
             plan=plan,
             action_type=payload.action_type,
@@ -866,6 +1059,23 @@ def settle_savings_action(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="savings_settle",
+        title=f"סגירת/גלגול מסלול · {inv_name}",
+        body=f"פעולה: {payload.action_type} · תוצאה: {payload.outcome}",
+        severity="warning",
+        actor=user,
+        investor_id=inv_id,
+        investor_name=inv_name or None,
+        entity_type="plan",
+        entity_id=plan_id,
+        href="/investors",
+        commit=True,
+    )
+    return result
 
 
 @router.post("/remove-from-calendar-year")
@@ -1224,7 +1434,7 @@ def _quote_access_username(value: Optional[str]) -> Optional[str]:
 @router.post("/quotes", response_model=QuoteOut, status_code=201)
 def create_quote(
     payload: QuoteCreate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     data = payload.model_dump()
@@ -1252,6 +1462,7 @@ def create_quote(
         title=f"הצעה חדשה · {quote.prospect_name}",
         body=f"קרן {quote.principal:,.0f} ₪ · {quote.duration_months} חודשים",
         severity="info",
+        actor=user,
         investor_name=quote.prospect_name,
         entity_type="quote",
         entity_id=quote.id,
@@ -1265,7 +1476,7 @@ def create_quote(
 def update_quote(
     quote_id: int,
     payload: QuoteUpdate,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
@@ -1308,6 +1519,7 @@ def update_quote(
             title=f"הצעה · {quote.prospect_name} · {st}",
             body=f"סטטוס הצעה עודכן ל־{st}",
             severity="success" if st == "approved" else "warning" if st == "rejected" else "info",
+            actor=user,
             investor_name=quote.prospect_name,
             entity_type="quote",
             entity_id=quote.id,
@@ -1320,7 +1532,7 @@ def update_quote(
 @router.delete("/quotes/{quote_id}", status_code=204)
 def delete_quote(
     quote_id: int,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
@@ -1331,7 +1543,22 @@ def delete_quote(
             status_code=400,
             detail="לא ניתן למחוק הצעה שהושלמה ונפתח מסלול",
         )
+    name = quote.prospect_name
     db.delete(quote)
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind="quote_deleted",
+        title=f"הצעה נמחקה · {name}",
+        body="ההצעה הוסרה מהמערכת",
+        severity="warning",
+        actor=user,
+        investor_name=name,
+        entity_type="quote",
+        entity_id=quote_id,
+        href="/quotes",
+    )
     db.commit()
     return None
 
@@ -1340,7 +1567,7 @@ def delete_quote(
 def convert_quote(
     quote_id: int,
     payload: QuoteConvert,
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
@@ -1433,6 +1660,7 @@ def convert_quote(
         title=f"משקיע חדש מקליטת הצעה · {investor.name}",
         body=f"נפתח מסלול · משתמש {username}",
         severity="success",
+        actor=user,
         investor_id=investor.id,
         investor_name=investor.name,
         entity_type="quote",

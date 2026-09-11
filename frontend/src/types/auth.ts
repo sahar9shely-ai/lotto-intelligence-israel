@@ -47,6 +47,7 @@ export type ActivityEvent = {
 export type ActivitySummary = {
   unread_count: number;
   unread_login_count: number;
+  unread_by_group?: Record<string, number>;
   latest_id: number;
   latest_login_id: number;
   latest?: ActivityEvent | null;

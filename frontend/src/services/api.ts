@@ -161,10 +161,16 @@ export const api = {
     request<{ message: string }>("/api/v1/auth/login-alerts/read-all", {
       method: "POST",
     }),
-  activity: (params?: { unreadOnly?: boolean; kind?: string; limit?: number }) => {
+  activity: (params?: {
+    unreadOnly?: boolean;
+    kind?: string;
+    group?: string;
+    limit?: number;
+  }) => {
     const qs = new URLSearchParams();
     if (params?.unreadOnly) qs.set("unread_only", "true");
     if (params?.kind) qs.set("kind", params.kind);
+    if (params?.group) qs.set("group", params.group);
     if (params?.limit != null) qs.set("limit", String(params.limit));
     const suffix = qs.toString() ? `?${qs}` : "";
     return request<ActivityEvent[]>(`/api/v1/auth/activity${suffix}`);
@@ -172,9 +178,12 @@ export const api = {
   activitySummary: () => request<ActivitySummary>("/api/v1/auth/activity/summary"),
   markActivityRead: (id: number) =>
     request<ActivityEvent>(`/api/v1/auth/activity/${id}/read`, { method: "POST" }),
-  markAllActivityRead: (kind?: string) => {
-    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
-    return request<{ message: string }>(`/api/v1/auth/activity/read-all${qs}`, {
+  markAllActivityRead: (params?: { kind?: string; group?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.group) qs.set("group", params.group);
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return request<{ message: string }>(`/api/v1/auth/activity/read-all${suffix}`, {
       method: "POST",
     });
   },
