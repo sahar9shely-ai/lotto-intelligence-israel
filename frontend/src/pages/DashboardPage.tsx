@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { DashboardUrgentOps } from "../components/DashboardUrgentOps";
 import { ManagerIncomePanel } from "../components/ManagerIncomePanel";
 import { Panel } from "../components/Panel";
-import { RoleJourneyHub } from "../components/RoleJourneyHub";
 import { Stat } from "../components/Stat";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -26,25 +26,22 @@ export function DashboardPage() {
     [isManager, filterId],
   );
 
+  const showOpsFeed = isManager && !isAdmin;
+
   const {
     data: alerts,
     reload: reloadAlerts,
-  } = useAsync(() => (isManager ? api.loginAlerts(true) : Promise.resolve([])), [isManager]);
+  } = useAsync(() => (showOpsFeed ? api.loginAlerts(true) : Promise.resolve([])), [showOpsFeed]);
 
   const {
     data: activity,
     reload: reloadActivity,
   } = useAsync(
-    () => (isManager ? api.activity({ limit: 25 }) : Promise.resolve([])),
-    [isManager],
+    () => (showOpsFeed ? api.activity({ limit: 25 }) : Promise.resolve([])),
+    [showOpsFeed],
   );
 
   const { data: topupRequests } = useAsync(() => api.topupRequests(), []);
-
-  const { data: quotes } = useAsync(
-    () => (isManager ? api.quotes() : Promise.resolve([])),
-    [isManager],
-  );
 
   if (loading) return <div className="state state--loading">טוען את לוח הבקרה...</div>;
   if (error || !data)
@@ -85,7 +82,7 @@ export function DashboardPage() {
             {isAdmin
               ? scopeName
                 ? `רווח חודשי · ${scopeName}`
-                : "רווח חודשי ממשקיעים"
+                : "לוח בקרה"
               : `שלום ${user?.investor_name || user?.username || ""}`}
           </h1>
           {isManager ? (
@@ -93,7 +90,7 @@ export function DashboardPage() {
               {isAdmin
                 ? scopeName
                   ? `עמלת ניהול חודשית מ${scopeName} — לפי מסלולים פעילים.`
-                  : "סיכום עמלות ניהול מכל המשקיעים — רווח חודשי ברור לפי שותף."
+                  : "מה דחוף עכשיו: משקיעים שחסר להם תשלום, והעברה חודשית כשעובר חודש."
                 : scopeName
                   ? `סיכום של ${scopeName} — מזומן וחיסכון בנפרד.`
                   : "סיכום כולם — מזומן וחיסכון בנפרד. לחצו על משקיע ברשימה כדי לצמצם."}
@@ -132,15 +129,7 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      {isManager ? (
-        <RoleJourneyHub
-          isAdmin={isAdmin}
-          isManager={isManager}
-          dashboard={data}
-          topupRequests={topupRequests}
-          quotes={quotes}
-        />
-      ) : null}
+      {isManager ? <DashboardUrgentOps investorId={filterId} /> : null}
 
       {(topupRequests ?? []).some(
         (r) => r.status === "pending" || r.status === "contract" || r.can_reverse_investment,
@@ -271,7 +260,7 @@ export function DashboardPage() {
         </>
       )}
 
-      {isManager ? (
+      {showOpsFeed ? (
         <Panel
           title="יומן מעקב"
           subtitle="כניסות, תשלומים, הצעות ובקשות — הכול במקום אחד"
@@ -333,7 +322,7 @@ export function DashboardPage() {
         </Panel>
       ) : null}
 
-      {isManager && (alerts?.length ?? 0) > 0 ? (
+      {showOpsFeed && (alerts?.length ?? 0) > 0 ? (
         <Panel
           title="התראות כניסה"
           subtitle="מישהו התחבר למערכת"
@@ -375,8 +364,9 @@ export function DashboardPage() {
         </Panel>
       ) : null}
 
-      <div className={isAdmin ? "stack" : "grid-2"}>
-        {isManager && !isAdmin ? (
+      {!isAdmin ? (
+      <div className="grid-2">
+        {isManager ? (
           <Panel
             title={scopeName ? `פירוט · ${scopeName}` : "משקיעים"}
             subtitle={`${data.active_plans} מסלולים פעילים`}
@@ -427,7 +417,7 @@ export function DashboardPage() {
               </ul>
             )}
           </Panel>
-        ) : !isManager ? (
+        ) : (
           <Panel title="הסיכום שלי" subtitle="רק הנתונים שלך" delay={80}>
             <ul className="list">
               {data.investors_summary.map((inv) => (
@@ -449,15 +439,11 @@ export function DashboardPage() {
               ))}
             </ul>
           </Panel>
-        ) : null}
+        )}
 
         <Panel
-          title={isAdmin ? "תשלומים קרובים · העמלות שלך" : "תשלומים קרובים"}
-          subtitle={
-            isAdmin
-              ? "עמלת ניהול לפי תשלום מתוכנן"
-              : "מזומן בלבד — לפי לוח הזמנים"
-          }
+          title="תשלומים קרובים"
+          subtitle="מזומן בלבד — לפי לוח הזמנים"
           action={
             <Link className="text-link" to="/payments">
               היסטוריה
@@ -478,19 +464,10 @@ export function DashboardPage() {
                     <span className="muted">{formatDate(p.due_date)}</span>
                   </div>
                   <div className="list__meta">
-                    {isAdmin ? (
-                      <>
-                        <span>{formatMoney(p.manager_amount)}</span>
-                        <span className="muted">עמלה · תשלום {formatMoney(p.investor_amount)}</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>{formatMoney(p.investor_amount)}</span>
-                        {isManager ? (
-                          <span className="muted">עמלה {formatMoney(p.manager_amount)}</span>
-                        ) : null}
-                      </>
-                    )}
+                    <span>{formatMoney(p.investor_amount)}</span>
+                    {isManager ? (
+                      <span className="muted">עמלה {formatMoney(p.manager_amount)}</span>
+                    ) : null}
                   </div>
                 </li>
               ))}
@@ -498,30 +475,15 @@ export function DashboardPage() {
           )}
         </Panel>
       </div>
+      ) : null}
 
+      {!isAdmin ? (
       <Panel
-        title={isAdmin ? "סיכום עמלות" : "סיכום שנתי וסה״כ"}
-        subtitle={
-          isAdmin
-            ? "עמלות ניהול ששולמו בפועל"
-            : "שולם בפועל במזומן · חיסכון לא נספר כאן כתשלום"
-        }
+        title="סיכום שנתי וסה״כ"
+        subtitle="שולם בפועל במזומן · חיסכון לא נספר כאן כתשלום"
         delay={200}
       >
         <div className="stats-grid stats-grid--compact">
-          {isAdmin ? (
-            <>
-              <Stat label="עמלות השנה" value={formatMoney(data.ytd_manager_earned)} tone="manager" />
-              <Stat
-                label="סה״כ עמלות"
-                value={formatMoney(data.lifetime_manager_earned ?? 0)}
-                tone="manager"
-              />
-              <Stat label="משקיעים פעילים" value={String(data.active_investors)} />
-              <Stat label="מסלולים פעילים" value={String(data.active_plans)} />
-            </>
-          ) : (
-            <>
           <Stat
             label={isManager ? "שולם למשקיעים השנה" : "שולם לי השנה"}
             value={formatMoney(data.ytd_investor_paid)}
@@ -546,10 +508,8 @@ export function DashboardPage() {
           ) : (
             <Stat label="מסלולים פעילים" value={String(data.active_plans)} />
           )}
-            </>
-          )}
         </div>
-        {!isAdmin && data.recent_payments.length > 0 ? (
+        {data.recent_payments.length > 0 ? (
           <ul className="list list--tight">
             {data.recent_payments.map((p) => (
               <li key={p.id} className="list__row">
@@ -564,10 +524,11 @@ export function DashboardPage() {
               </li>
             ))}
           </ul>
-        ) : !isAdmin ? (
+        ) : (
           <p className="empty">אין תשלומים אחרונים להצגה.</p>
-        ) : null}
+        )}
       </Panel>
+      ) : null}
     </div>
   );
 }
