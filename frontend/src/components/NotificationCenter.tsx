@@ -114,10 +114,14 @@ export function NotificationCenter() {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
+    // Use click (not mousedown) so the opening click cannot immediately close.
+    const id = window.setTimeout(() => {
+      document.addEventListener("click", onDoc);
+      document.addEventListener("keydown", onKey);
+    }, 0);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      window.clearTimeout(id);
+      document.removeEventListener("click", onDoc);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);

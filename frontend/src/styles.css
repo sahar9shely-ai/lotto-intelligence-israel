@@ -3042,7 +3042,7 @@ input[type="date"] {
 
 .notif {
   position: relative;
-  z-index: 40;
+  z-index: 55;
 }
 
 .notif__bell {
@@ -3062,6 +3062,7 @@ input[type="date"] {
   cursor: pointer;
   box-shadow: var(--shadow-soft);
   transition: border-color 0.15s ease, transform 0.15s ease;
+  z-index: 56;
 }
 
 .notif__bell:hover {
@@ -3116,19 +3117,20 @@ input[type="date"] {
 }
 
 .notif__panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  inset-inline-end: 0;
+  position: fixed;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  inset-inline-end: max(12px, calc((100vw - min(1120px, 100vw)) / 2 + 12px));
   width: min(380px, calc(100vw - 24px));
   max-height: min(70vh, 520px);
   overflow: auto;
   padding: 12px;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.97);
+  background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(14px);
   box-shadow: 0 16px 40px rgba(20, 41, 33, 0.16);
   animation: rise 0.2s ease both;
+  z-index: 80;
 }
 
 .notif__head {
