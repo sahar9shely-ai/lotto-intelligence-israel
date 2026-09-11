@@ -46,11 +46,6 @@ export function DashboardPage() {
     [isManager],
   );
 
-  const { data: investorPayments } = useAsync(
-    () => (!isManager ? api.payments() : Promise.resolve([])),
-    [isManager],
-  );
-
   if (loading) return <div className="state state--loading">טוען את לוח הבקרה...</div>;
   if (error || !data)
     return (
@@ -75,9 +70,11 @@ export function DashboardPage() {
     <div className="page">
       <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
         <div>
-          <p className="page-intro__eyebrow">
-            {isAdmin ? "ADMIN · ניהול" : isManager ? "ניהול שותפים" : "המסלול שלך"}
-          </p>
+          {isManager ? (
+            <p className="page-intro__eyebrow">
+              {isAdmin ? "ADMIN · ניהול" : "ניהול שותפים"}
+            </p>
+          ) : null}
           <h1 className="page-intro__title">
             {isAdmin
               ? scopeName
@@ -110,16 +107,15 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <RoleJourneyHub
-        isAdmin={isAdmin}
-        isManager={isManager}
-        dashboard={data}
-        topupRequests={topupRequests}
-        quotes={quotes}
-        awaitingConfirmCount={
-          (investorPayments ?? []).filter((p) => p.status === "awaiting_confirmation").length
-        }
-      />
+      {isManager ? (
+        <RoleJourneyHub
+          isAdmin={isAdmin}
+          isManager={isManager}
+          dashboard={data}
+          topupRequests={topupRequests}
+          quotes={quotes}
+        />
+      ) : null}
 
       {(topupRequests ?? []).some(
         (r) => r.status === "pending" || r.status === "contract" || r.can_reverse_investment,
