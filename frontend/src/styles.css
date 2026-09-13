@@ -74,6 +74,7 @@ a {
 .shell {
   position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .chrome {
@@ -85,6 +86,10 @@ a {
   -webkit-backdrop-filter: blur(16px) saturate(1.15);
   border-bottom: 1px solid var(--line);
   box-shadow: none;
+  /* Keep the frosted bar under the notch/status bar; push title/tools below it. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 .chrome__inner {
@@ -2706,6 +2711,7 @@ input[type="date"] {
   align-items: baseline;
   justify-content: center;
   padding: 10px 16px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
   background: #1f4b3a;
   color: #f3faf6;
   font-size: 0.95rem;
@@ -2714,6 +2720,10 @@ input[type="date"] {
   top: 0;
   z-index: 40;
   width: 100%;
+}
+
+.shell:has(.site-update-banner) .chrome {
+  padding-top: 0;
 }
 
 .site-update-banner strong {
@@ -3053,9 +3063,12 @@ input[type="date"] {
 
 .auth-screen {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 24px 16px;
+  padding-top: max(24px, calc(12px + env(safe-area-inset-top, 0px)));
+  padding-bottom: max(24px, calc(12px + env(safe-area-inset-bottom, 0px)));
   position: relative;
 }
 
@@ -4952,9 +4965,12 @@ input[type="date"] {
 
 .auth-screen {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 28px 16px;
+  padding-top: max(28px, calc(16px + env(safe-area-inset-top, 0px)));
+  padding-bottom: max(28px, calc(16px + env(safe-area-inset-bottom, 0px)));
 }
 
 .auth-card {
@@ -5235,7 +5251,7 @@ input[type="date"] {
 
   .notif__panel {
     inset-inline: 10px;
-    top: calc(58px + env(safe-area-inset-top, 0px));
+    top: calc(72px + env(safe-area-inset-top, 0px));
     width: auto;
     max-height: min(72vh, 560px);
     border-radius: 20px;
@@ -5744,7 +5760,7 @@ input[type="date"] {
   .auth-screen {
     padding: 20px 14px calc(24px + env(safe-area-inset-bottom, 0px));
     align-items: start;
-    padding-top: max(28px, env(safe-area-inset-top, 0px));
+    padding-top: max(28px, calc(12px + env(safe-area-inset-top, 0px)));
   }
 
   .auth-card {
