@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 export type ConfirmOptions = {
@@ -12,6 +12,23 @@ export type ConfirmOptions = {
 type Pending = ConfirmOptions & {
   resolve: (value: boolean) => void;
 };
+
+function lockPageScroll() {
+  const body = document.body;
+  const previousOverflow = body.style.overflow;
+  const previousPadding = body.style.paddingRight;
+  const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+  body.classList.add("modal-open");
+  body.style.overflow = "hidden";
+  if (scrollbar > 0) {
+    body.style.paddingRight = `${scrollbar}px`;
+  }
+  return () => {
+    body.classList.remove("modal-open");
+    body.style.overflow = previousOverflow;
+    body.style.paddingRight = previousPadding;
+  };
+}
 
 export function useConfirm() {
   const [pending, setPending] = useState<Pending | null>(null);
@@ -57,21 +74,47 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const titleId = useId();
+  const messageId = useId();
+
+  useEffect(() => lockPageScroll(), []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
   return createPortal(
-    <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+    <div
+      className="modal modal--confirm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={messageId}
+    >
       <button type="button" className="modal__backdrop" aria-label="סגירה" onClick={onCancel} />
       <div className="modal__sheet confirm-sheet">
         <header className="modal__head">
           <div>
             <p className="contract-kicker">{danger ? "פעולה רגישה" : "אישור פעולה"}</p>
-            <h2 id="confirm-dialog-title">{title}</h2>
+            <h2 id={titleId}>{title}</h2>
           </div>
           <button type="button" className="modal__close" aria-label="סגירה" onClick={onCancel}>
             ×
           </button>
         </header>
-        <p className="confirm-sheet__message">{message}</p>
-        <div className="action-bar">
+        <div className="modal__body">
+          <p id={messageId} className="confirm-sheet__message">
+            {message}
+          </p>
+        </div>
+        <div className="modal__actions action-bar">
           <button type="button" className="btn btn--ghost" onClick={onCancel}>
             {cancelLabel}
           </button>

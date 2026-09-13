@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
@@ -9,6 +9,21 @@ import { api } from "../services/api";
 import type { AuthUser, PasswordResetRequestItem } from "../types/auth";
 import { formatDate } from "../utils/format";
 import { formatPhoneDisplay, toWhatsAppNumber, whatsAppAccessUrl } from "../utils/whatsapp";
+
+function lockPageScroll() {
+  const body = document.body;
+  const previousOverflow = body.style.overflow;
+  body.classList.add("modal-open");
+  body.style.overflow = "hidden";
+  return () => {
+    body.classList.remove("modal-open");
+    body.style.overflow = previousOverflow;
+  };
+}
+
+function readPassword(fd: FormData, name: string) {
+  return String(fd.get(name) || "");
+}
 
 function accessShareTarget(
   user: AuthUser,
@@ -46,8 +61,14 @@ export function UsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [fulfillTarget, setFulfillTarget] = useState<PasswordResetRequestItem | null>(null);
   const [fulfillPassword, setFulfillPassword] = useState("");
+  const [savingId, setSavingId] = useState<number | "create" | "fulfill" | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
   const publicUrl = siteStatus?.public_url || window.location.origin;
+
+  useEffect(() => {
+    if (!showCreate && !fulfillTarget) return;
+    return lockPageScroll();
+  }, [showCreate, fulfillTarget]);
 
   function openAccessWhatsApp(
     user: AuthUser,
@@ -69,10 +90,18 @@ export function UsersPage() {
 
   async function saveUser(user: AuthUser, e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (savingId) return;
     setErrorMsg(null);
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const sendWhatsApp = fd.get("send_whatsapp") === "on";
     const phone = String(fd.get("phone") || "").trim() || null;
+    const newPassword = readPassword(fd, "new_password").trim();
+    if (newPassword && newPassword.length < 8) {
+      setErrorMsg("הסיסמה חייבת להכיל לפחות 8 תווים");
+      return;
+    }
+    setSavingId(user.id);
     try {
       await api.updateUser(user.id, {
         investor_name: String(fd.get("investor_name") || "").trim(),
@@ -82,9 +111,10 @@ export function UsersPage() {
         role: String(fd.get("role") || "investor"),
         is_active: String(fd.get("is_active") || "true") === "true",
       });
-      const newPassword = String(fd.get("new_password") || "");
       if (newPassword) {
         await api.setUserPassword(user.id, newPassword);
+        const passwordInput = form.elements.namedItem("new_password");
+        if (passwordInput instanceof HTMLInputElement) passwordInput.value = "";
       }
       const updatedUser: AuthUser = {
         ...user,
@@ -110,16 +140,24 @@ export function UsersPage() {
       reloadRequests();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "עדכון נכשל");
+    } finally {
+      setSavingId(null);
     }
   }
 
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (savingId) return;
     setErrorMsg(null);
     const fd = new FormData(e.currentTarget);
     const sendWhatsApp = fd.get("send_whatsapp") === "on";
     const phone = String(fd.get("phone") || "").trim() || undefined;
-    const password = String(fd.get("password") || "");
+    const password = readPassword(fd, "password");
+    if (password.length < 8) {
+      setErrorMsg("הסיסמה חייבת להכיל לפחות 8 תווים");
+      return;
+    }
+    setSavingId("create");
     try {
       const created = await api.createAccessUser({
         name: String(fd.get("name") || "").trim(),
@@ -149,16 +187,19 @@ export function UsersPage() {
       reload();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "יצירה נכשלה");
+    } finally {
+      setSavingId(null);
     }
   }
 
   async function confirmFulfill(e: FormEvent) {
     e.preventDefault();
-    if (!fulfillTarget) return;
+    if (!fulfillTarget || savingId) return;
     if (fulfillPassword.length < 8) {
       setErrorMsg("הסיסמה חייבת להכיל לפחות 8 תווים");
       return;
     }
+    setSavingId("fulfill");
     try {
       await api.fulfillPasswordReset(fulfillTarget.id, fulfillPassword);
       setMessage(`הסיסמה של ${fulfillTarget.display_name} עודכנה.`);
@@ -168,11 +209,19 @@ export function UsersPage() {
       reloadRequests();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "עדכון סיסמה נכשל");
+    } finally {
+      setSavingId(null);
     }
   }
 
   async function rejectRequest(req: PasswordResetRequestItem) {
-    if (!window.confirm(`לדחות את בקשת האיפוס של ${req.display_name}?`)) return;
+    const ok = await confirm({
+      title: `דחיית בקשה של ${req.display_name}`,
+      message: `לדחות את בקשת האיפוס של ${req.display_name}? הבקשה תיסגר והמשתמש יוכל לפתוח בקשה חדשה.`,
+      confirmLabel: "דחיית הבקשה",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.rejectPasswordReset(req.id);
       setMessage(`הבקשה של ${req.display_name} נדחתה.`);
@@ -316,6 +365,7 @@ export function UsersPage() {
       {(users ?? []).map((u) => (
         <Panel
           key={u.id}
+          className="user-card"
           title={u.investor_name}
           subtitle={
             u.has_password
@@ -323,95 +373,110 @@ export function UsersPage() {
               : `שם משתמש: ${u.username}${u.phone ? ` · ${formatPhoneDisplay(u.phone)}` : ""} · ממתין לסיסמה מהמנהל`
           }
         >
-          <form className="form" onSubmit={(e) => saveUser(u, e)}>
-            <div className="form__grid">
-              <label>
-                שם
-                <input name="investor_name" defaultValue={u.investor_name} required />
-              </label>
-              <label>
-                שם משתמש
-                <input name="username" defaultValue={u.username} required />
-              </label>
-              <label>
-                מייל (אופציונלי ליצירת קשר)
-                <input
-                  name="email"
-                  type="email"
-                  defaultValue={u.email && !u.email.endsWith("@local.tazrim") ? u.email : ""}
-                  placeholder="אופציונלי"
-                />
-              </label>
-              <label>
-                טלפון (לשליחת וואטסאפ)
-                <input
-                  name="phone"
-                  type="tel"
-                  inputMode="tel"
-                  defaultValue={u.phone ?? ""}
-                  placeholder="05X-XXX-XXXX"
-                />
-              </label>
-              <label>
-                הרשאה
-                <select name="role" defaultValue={u.role}>
-                  <option value="investor">משקיע — רואה רק את שלו</option>
-                  <option value="manager">מנהל — גישה מלאה + התראות</option>
-                </select>
-              </label>
-              <label>
-                סטטוס חשבון
-                <select name="is_active" defaultValue={u.is_active === false ? "false" : "true"}>
-                  <option value="true">פעיל</option>
-                  <option value="false">מושבת</option>
-                </select>
-              </label>
-              <PasswordField
-                label="סיסמה חדשה (רק אתה מגדיר)"
-                name="new_password"
-                minLength={8}
-                autoComplete="new-password"
-                placeholder={u.has_password ? "השאר ריק כדי לא לשנות" : "חובה להגדיר"}
-              />
-              {u.role !== "manager" && u.has_password ? (
-                <label className="checkbox-row">
-                  <input name="send_whatsapp" type="checkbox" />
-                  <span>פתח וואטסאפ עם שם משתמש וסיסמה אחרי שמירה</span>
+          <details className="user-editor" {...(!u.has_password ? { open: true } : {})}>
+            <summary className="user-editor__summary">
+              <span>{u.has_password ? "עריכת פרטים וסיסמה" : "הגדרת סיסמה ופרטים"}</span>
+            </summary>
+            <form className="form user-form" autoComplete="off" onSubmit={(e) => void saveUser(u, e)}>
+              <div className="form__grid">
+                <label>
+                  שם
+                  <input name="investor_name" defaultValue={u.investor_name} required autoComplete="off" />
                 </label>
-              ) : null}
-            </div>
-            <div className="action-bar">
-              <button type="submit" className="btn btn--admin">
-                שמור
-              </button>
-              {u.role !== "manager" && u.has_password ? (
-                <button
-                  type="button"
-                  className="btn btn--whatsapp"
-                  onClick={() => openAccessWhatsApp(u)}
-                >
-                  שליחת כניסה בוואטסאפ
+                <label>
+                  שם משתמש
+                  <input
+                    name="username"
+                    defaultValue={u.username}
+                    required
+                    dir="ltr"
+                    autoComplete="off"
+                  />
+                </label>
+                <label>
+                  מייל (אופציונלי ליצירת קשר)
+                  <input
+                    name="email"
+                    type="email"
+                    defaultValue={u.email && !u.email.endsWith("@local.tazrim") ? u.email : ""}
+                    placeholder="אופציונלי"
+                    autoComplete="off"
+                  />
+                </label>
+                <label>
+                  טלפון (לשליחת וואטסאפ)
+                  <input
+                    name="phone"
+                    type="tel"
+                    inputMode="tel"
+                    defaultValue={u.phone ?? ""}
+                    placeholder="05X-XXX-XXXX"
+                    autoComplete="tel"
+                  />
+                </label>
+                <label>
+                  הרשאה
+                  <select name="role" defaultValue={u.role}>
+                    <option value="investor">משקיע — רואה רק את שלו</option>
+                    <option value="manager">מנהל — גישה מלאה + התראות</option>
+                  </select>
+                </label>
+                <label>
+                  סטטוס חשבון
+                  <select name="is_active" defaultValue={u.is_active === false ? "false" : "true"}>
+                    <option value="true">פעיל</option>
+                    <option value="false">מושבת</option>
+                  </select>
+                </label>
+                <PasswordField
+                  className="user-form__password"
+                  label="סיסמה חדשה (רק אתה מגדיר)"
+                  name="new_password"
+                  id={`new-password-${u.id}`}
+                  autoComplete="new-password"
+                  enterKeyHint="done"
+                  placeholder={u.has_password ? "השאר ריק כדי לא לשנות" : "לפחות 8 תווים"}
+                />
+                {u.role !== "manager" && u.has_password ? (
+                  <label className="checkbox-row">
+                    <input name="send_whatsapp" type="checkbox" />
+                    <span>פתח וואטסאפ עם שם משתמש וסיסמה אחרי שמירה</span>
+                  </label>
+                ) : null}
+              </div>
+              <div className="action-bar user-form__actions">
+                <button type="submit" className="btn btn--admin" disabled={savingId === u.id}>
+                  {savingId === u.id ? "שומר..." : "שמור"}
                 </button>
-              ) : null}
-              {canDeleteUser(u) ? (
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--danger"
-                  onClick={() => void deleteUserAccount(u)}
-                >
-                  מחיקת משקיע והיסטוריה
-                </button>
-              ) : null}
-            </div>
-            <p className="hint">
-              כניסה אחרונה: {u.last_login_at ? formatDate(u.last_login_at) : "עדיין לא התחבר"}
-            </p>
-          </form>
+                {u.role !== "manager" && u.has_password ? (
+                  <button
+                    type="button"
+                    className="btn btn--whatsapp"
+                    onClick={() => openAccessWhatsApp(u)}
+                  >
+                    שליחת כניסה בוואטסאפ
+                  </button>
+                ) : null}
+                {canDeleteUser(u) ? (
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--danger"
+                    onClick={() => void deleteUserAccount(u)}
+                  >
+                    מחיקת משקיע והיסטוריה
+                  </button>
+                ) : null}
+              </div>
+              <p className="hint">
+                כניסה אחרונה: {u.last_login_at ? formatDate(u.last_login_at) : "עדיין לא התחבר"}
+              </p>
+            </form>
+          </details>
         </Panel>
       ))}
 
       {showCreate ? (
-        <div className="modal" role="dialog" aria-modal="true">
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="create-user-title">
           <button
             type="button"
             className="modal__backdrop"
@@ -420,56 +485,65 @@ export function UsersPage() {
           />
           <div className="modal__sheet">
             <header className="modal__head">
-              <h2>משתמש חדש</h2>
-              <button type="button" className="btn btn--ghost" onClick={() => setShowCreate(false)}>
-                סגור
+              <h2 id="create-user-title">משתמש חדש</h2>
+              <button type="button" className="modal__close" aria-label="סגירה" onClick={() => setShowCreate(false)}>
+                ×
               </button>
             </header>
-            <form className="form" onSubmit={onCreate}>
-              <label>
-                שם
-                <input name="name" required placeholder="שם המשקיע" />
-              </label>
-              <label>
-                שם משתמש
-                <input name="username" required placeholder="revital" autoComplete="off" />
-              </label>
-              <PasswordField
-                label="סיסמה התחלתית"
-                name="password"
-                required
-                minLength={8}
-                autoComplete="new-password"
-              />
-              <label>
-                מייל (אופציונלי)
-                <input name="email" type="email" placeholder="אופציונלי" />
-              </label>
-              <label>
-                הרשאה
-                <select name="role" defaultValue="investor">
-                  <option value="investor">משקיע — רואה רק את שלו</option>
-                  <option value="manager">מנהל — גישה מלאה</option>
-                </select>
-              </label>
-              <label>
-                טלפון
-                <input name="phone" type="tel" inputMode="tel" placeholder="05X-XXX-XXXX" />
-              </label>
-              <label className="checkbox-row">
-                <input name="send_whatsapp" type="checkbox" defaultChecked />
-                <span>פתח וואטסאפ עם שם משתמש וסיסמה אחרי יצירה</span>
-              </label>
-              <button type="submit" className="btn btn--admin">
-                צור משתמש
-              </button>
+            <form className="form modal__form" autoComplete="off" onSubmit={(e) => void onCreate(e)}>
+              <div className="modal__body">
+                {errorMsg ? <p className="form-error">{errorMsg}</p> : null}
+                <label>
+                  שם
+                  <input name="name" required placeholder="שם המשקיע" autoComplete="off" />
+                </label>
+                <label>
+                  שם משתמש
+                  <input name="username" required placeholder="revital" dir="ltr" autoComplete="off" />
+                </label>
+                <PasswordField
+                  label="סיסמה התחלתית"
+                  name="password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  enterKeyHint="done"
+                />
+                <label>
+                  מייל (אופציונלי)
+                  <input name="email" type="email" placeholder="אופציונלי" autoComplete="off" />
+                </label>
+                <label>
+                  הרשאה
+                  <select name="role" defaultValue="investor">
+                    <option value="investor">משקיע — רואה רק את שלו</option>
+                    <option value="manager">מנהל — גישה מלאה</option>
+                  </select>
+                </label>
+                <label>
+                  טלפון
+                  <input name="phone" type="tel" inputMode="tel" placeholder="05X-XXX-XXXX" autoComplete="tel" />
+                </label>
+                <label className="checkbox-row">
+                  <input name="send_whatsapp" type="checkbox" defaultChecked />
+                  <span>פתח וואטסאפ עם שם משתמש וסיסמה אחרי יצירה</span>
+                </label>
+              </div>
+              <div className="modal__actions">
+                <button type="button" className="btn btn--ghost" onClick={() => setShowCreate(false)}>
+                  ביטול
+                </button>
+                <button type="submit" className="btn btn--admin" disabled={savingId === "create"}>
+                  {savingId === "create" ? "יוצר..." : "צור משתמש"}
+                </button>
+              </div>
             </form>
           </div>
         </div>
       ) : null}
 
       {fulfillTarget ? (
-        <div className="modal" role="dialog" aria-modal="true">
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="fulfill-password-title">
           <button
             type="button"
             className="modal__backdrop"
@@ -481,32 +555,49 @@ export function UsersPage() {
           />
           <div className="modal__sheet">
             <header className="modal__head">
-              <h2>סיסמה חדשה ל-{fulfillTarget.display_name}</h2>
+              <h2 id="fulfill-password-title">סיסמה חדשה ל-{fulfillTarget.display_name}</h2>
               <button
                 type="button"
-                className="btn btn--ghost"
+                className="modal__close"
+                aria-label="סגירה"
                 onClick={() => {
                   setFulfillTarget(null);
                   setFulfillPassword("");
                 }}
               >
-                סגור
+                ×
               </button>
             </header>
-            <form className="form" onSubmit={confirmFulfill}>
-              <p className="muted">שם משתמש: {fulfillTarget.username}</p>
-              <PasswordField
-                label="סיסמה חדשה"
-                name="fulfill_password"
-                required
-                minLength={8}
-                autoComplete="new-password"
-                value={fulfillPassword}
-                onChange={(e) => setFulfillPassword(e.target.value)}
-              />
-              <button type="submit" className="btn btn--admin">
-                אשר ושמור סיסמה
-              </button>
+            <form className="form modal__form" autoComplete="off" onSubmit={(e) => void confirmFulfill(e)}>
+              <div className="modal__body">
+                {errorMsg ? <p className="form-error">{errorMsg}</p> : null}
+                <p className="muted">שם משתמש: {fulfillTarget.username}</p>
+                <PasswordField
+                  label="סיסמה חדשה"
+                  name="fulfill_password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  enterKeyHint="done"
+                  value={fulfillPassword}
+                  onChange={(e) => setFulfillPassword(e.target.value)}
+                />
+              </div>
+              <div className="modal__actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    setFulfillTarget(null);
+                    setFulfillPassword("");
+                  }}
+                >
+                  ביטול
+                </button>
+                <button type="submit" className="btn btn--admin" disabled={savingId === "fulfill"}>
+                  {savingId === "fulfill" ? "שומר..." : "אשר ושמור סיסמה"}
+                </button>
+              </div>
             </form>
           </div>
         </div>
