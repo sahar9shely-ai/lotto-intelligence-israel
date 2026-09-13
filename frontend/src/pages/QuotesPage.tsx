@@ -958,49 +958,52 @@ export function QuotesPage() {
                 ×
               </button>
             </header>
-            <form className="request-form" onSubmit={convertQuote}>
-              <p className="request-form__lead">
-                {planTypeLabel(converting.plan_type)} · קרן {formatMoney(converting.principal)} ·{" "}
-                {converting.duration_months} חודשים. ייפתח משקיע חדש עם מסלול פעיל לפי ההצעה.
-              </p>
-              {convertError ? <p className="form-error">{convertError}</p> : null}
-              <label>
-                תחילת המסלול
-                <input
-                  name="start_date"
-                  type="date"
-                  dir="ltr"
+            <form className="request-form modal__form" onSubmit={convertQuote}>
+              <div className="modal__body">
+                <p className="request-form__lead">
+                  {planTypeLabel(converting.plan_type)} · קרן {formatMoney(converting.principal)} ·{" "}
+                  {converting.duration_months} חודשים. ייפתח משקיע חדש עם מסלול פעיל לפי ההצעה.
+                </p>
+                {convertError ? <p className="form-error">{convertError}</p> : null}
+                <label>
+                  תחילת המסלול
+                  <input
+                    name="start_date"
+                    type="date"
+                    dir="ltr"
+                    required
+                    defaultValue={converting.start_date ?? todayISO()}
+                  />
+                </label>
+                <label>
+                  שם משתמש לכניסה (אנגלית)
+                  <input
+                    name="username"
+                    required
+                    minLength={2}
+                    maxLength={64}
+                    dir="ltr"
+                    autoComplete="off"
+                    pattern="[A-Za-z0-9._\\-]{2,64}"
+                    title="אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון"
+                    defaultValue={
+                      converting.access_username ||
+                      suggestUsername(converting.prospect_name, converting.phone)
+                    }
+                  />
+                </label>
+                <PasswordField
+                  name="password"
+                  label="סיסמה"
                   required
-                  defaultValue={converting.start_date ?? todayISO()}
-                />
-              </label>
-              <label>
-                שם משתמש לכניסה (אנגלית)
-                <input
-                  name="username"
-                  required
-                  minLength={2}
-                  maxLength={64}
+                  minLength={8}
                   dir="ltr"
-                  autoComplete="off"
-                  pattern="[A-Za-z0-9._\\-]{2,64}"
-                  title="אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון"
-                  defaultValue={
-                    converting.access_username ||
-                    suggestUsername(converting.prospect_name, converting.phone)
-                  }
+                  autoComplete="new-password"
+                  enterKeyHint="done"
+                  defaultValue={converting.access_password || draftPassword}
                 />
-              </label>
-              <PasswordField
-                name="password"
-                label="סיסמה"
-                required
-                minLength={8}
-                dir="ltr"
-                autoComplete="new-password"
-                defaultValue={converting.access_password || draftPassword}
-              />
-              <div className="request-form__actions">
+              </div>
+              <div className="request-form__actions modal__actions">
                 <button type="button" className="btn btn--ghost" onClick={() => setConverting(null)} disabled={busy}>
                   ביטול
                 </button>
@@ -1036,7 +1039,8 @@ export function QuotesPage() {
                 ×
               </button>
             </header>
-            <div className="request-form">
+            <div className="request-form modal__form">
+              <div className="modal__body">
               <p className="request-form__lead">
                 הקובץ ירד למחשב. וואטסאפ בדפדפן לא מצרף קבצים אוטומטית — צריך לצרף את ה-PDF
                 ידנית לפני השליחה.
@@ -1063,7 +1067,8 @@ export function QuotesPage() {
               <p className="whatsapp-send__preview">
                 {buildQuoteWhatsAppShareMessage(whatsappSend.quote, publicUrl)}
               </p>
-              <div className="whatsapp-send__actions">
+              </div>
+              <div className="whatsapp-send__actions modal__actions">
                 <button type="button" className="btn btn--ghost" onClick={() => setWhatsappSend(null)}>
                   סגור
                 </button>

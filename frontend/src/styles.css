@@ -1764,18 +1764,25 @@ textarea:focus {
   box-shadow: 0 0 0 4px var(--accent-glow);
 }
 
+.password-field-label {
+  min-width: 0;
+}
+
 .password-field {
   position: relative;
   display: block;
+  min-width: 0;
 }
 
 .password-field__input {
-  padding-inline-start: 4.75rem;
+  width: 100%;
+  padding-inline-end: 4.85rem;
 }
 
 .password-field__toggle {
   position: absolute;
-  inset-inline-start: 6px;
+  inset-inline-end: 6px;
+  inset-inline-start: auto;
   top: 50%;
   transform: translateY(-50%);
   border: 0;
@@ -1784,7 +1791,9 @@ textarea:focus {
   font: inherit;
   font-size: 0.85rem;
   font-weight: 600;
-  padding: 6px 10px;
+  padding: 8px 10px;
+  min-height: 36px;
+  min-width: 3.5rem;
   cursor: pointer;
   border-radius: 8px;
   line-height: 1;
@@ -2110,13 +2119,18 @@ input[type="date"] {
   color-scheme: light;
 }
 
+.modal-open {
+  overflow: hidden;
+}
+
 .modal {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 90;
   display: grid;
   place-items: end center;
   padding: 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
 }
 
 .modal__backdrop {
@@ -2128,9 +2142,14 @@ input[type="date"] {
 
 .modal__sheet {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: min(560px, 100%);
+  max-width: 100%;
+  min-width: 0;
   max-height: min(88vh, 820px);
-  overflow: auto;
+  max-height: min(88dvh, 820px);
+  overflow: hidden;
   background: #fbfffd;
   border-radius: 24px 24px 18px 18px;
   padding: 18px;
@@ -2144,6 +2163,66 @@ input[type="date"] {
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.modal__head h2 {
+  overflow-wrap: anywhere;
+}
+
+.modal__form,
+.modal__sheet > .form,
+.modal__sheet > .request-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  gap: 14px;
+}
+
+.modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: grid;
+  gap: 14px;
+}
+
+.modal__actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: stretch;
+  justify-content: flex-end;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: auto;
+  padding-top: 12px;
+  background: linear-gradient(180deg, rgba(251, 255, 253, 0) 0%, #fbfffd 10px);
+}
+
+.modal__sheet > .form:not(.modal__form),
+.modal__sheet > .request-form:not(.modal__form) {
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.modal__sheet .request-form__actions,
+.modal__sheet .whatsapp-send__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(251, 255, 253, 0) 0%, #fbfffd 10px);
 }
 
 .toast {
@@ -2925,6 +3004,10 @@ input[type="date"] {
     width: 100%;
     border-radius: 22px 22px 0 0;
   }
+}
+
+.user-form__actions {
+  min-width: 0;
 }
 
 .auth-screen {
@@ -4461,10 +4544,30 @@ input[type="date"] {
 }
 
 .confirm-sheet__message {
-  margin: 0 0 18px;
+  margin: 0;
   color: var(--ink-soft);
   line-height: 1.55;
   white-space: pre-line;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.user-editor__summary {
+  display: none;
+}
+
+.user-form__password {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 821px) {
+  .user-editor__summary {
+    display: none;
+  }
+
+  .user-editor > .user-form {
+    display: grid !important;
+  }
 }
 
 @media (max-width: 680px) {
@@ -5202,6 +5305,75 @@ input[type="date"] {
     padding: 12px 14px;
   }
 
+  .form .password-field__input,
+  .password-field__input {
+    padding: 12px 14px;
+    padding-inline-end: 4.85rem;
+  }
+
+  .password-field__toggle {
+    min-height: 40px;
+    min-width: 3.75rem;
+    font-size: 0.9rem;
+  }
+
+  .user-card {
+    overflow: visible;
+  }
+
+  .user-editor__summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: var(--touch-min);
+    padding: 2px 0 10px;
+    font-weight: 700;
+    color: var(--admin);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .user-editor__summary::-webkit-details-marker,
+  .user-editor__summary::marker {
+    display: none;
+    content: "";
+  }
+
+  .user-editor__summary::after {
+    content: "▼";
+    font-size: 0.7rem;
+    opacity: 0.65;
+  }
+
+  .user-editor[open] .user-editor__summary::after {
+    content: "▲";
+  }
+
+  .user-form__actions,
+  .confirm-sheet .modal__actions,
+  .modal__actions {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .user-form__actions .btn,
+  .confirm-sheet .modal__actions .btn,
+  .modal__actions .btn {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .user-form__actions .btn--admin {
+    order: -1;
+  }
+
   .filters {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -5597,6 +5769,7 @@ input[type="date"] {
   .modal {
     padding: 0;
     place-items: end stretch;
+    z-index: 90;
   }
 
   .modal__sheet,
@@ -5605,9 +5778,13 @@ input[type="date"] {
   .contract-sheet,
   .modal__sheet--wide {
     width: 100%;
-    max-height: min(92vh, 920px);
+    max-width: 100%;
+    min-width: 0;
+    max-height: min(88vh, calc(100vh - 12px));
+    max-height: min(85dvh, calc(100dvh - env(safe-area-inset-top, 0px) - 8px));
     border-radius: 22px 22px 0 0;
-    padding: 18px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    padding: 16px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    overflow-x: hidden;
   }
 
   .request-form__actions,

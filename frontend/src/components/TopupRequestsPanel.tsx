@@ -92,13 +92,14 @@ function CreateTrackForm({
 
   return (
     <form
-      className="request-form"
+      className="request-form modal__form"
       onSubmit={(e) => {
         e.preventDefault();
         if (!valid) return;
         onSubmit(parsed, notes.trim());
       }}
     >
+      <div className="modal__body">
       {error ? <p className="form-error">{error}</p> : null}
       <p className="request-form__lead">
         הבקשה תעבור למנהל. לאחר אישור התנאים יופק חוזה לחתימה דיגיטלית של שני הצדדים.
@@ -140,7 +141,8 @@ function CreateTrackForm({
           אני מבין שאין משיכת קרן עד סוף המסלול, וביטול אפשרי רק בתוך 3 ימי עסקים מיום ביצוע ההשקעה.
         </span>
       </label>
-      <div className="request-form__actions">
+      </div>
+      <div className="request-form__actions modal__actions">
         <button type="button" className="btn btn--ghost" onClick={onCancel} disabled={busy}>
           ביטול
         </button>
@@ -772,7 +774,7 @@ export function TopupRequestsPanel({
                 onSign={signContract}
               />
             </div>
-            <div className="request-form__actions">
+            <div className="request-form__actions modal__actions">
               <button type="button" className="btn btn--ghost" onClick={() => setContract(null)}>
                 סגירה
               </button>

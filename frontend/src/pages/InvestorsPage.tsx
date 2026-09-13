@@ -719,44 +719,52 @@ export function InvestorsPage() {
 
       {showNewInvestor ? (
         <Modal title="משקיע חדש" onClose={() => setShowNewInvestor(false)}>
-          <form className="form" onSubmit={onCreateInvestor}>
-            <label>
-              שם
-              <input name="name" required placeholder="שם המשקיע" />
-            </label>
-            <label>
-              שם משתמש לגישה
-              <input name="username" required placeholder="revital" autoComplete="off" />
-            </label>
-            <PasswordField
-              label="סיסמה התחלתית"
-              name="password"
-              required
-              minLength={8}
-              autoComplete="new-password"
-            />
-            <label>
-              הרשאה
-              <select name="role" defaultValue="investor">
-                <option value="investor">משקיע — רואה רק את שלו</option>
-                <option value="manager">מנהל — גישה מלאה</option>
-              </select>
-            </label>
-            <label>
-              טלפון
-              <input name="phone" placeholder="אופציונלי" />
-            </label>
-            <label>
-              מייל (אופציונלי)
-              <input name="email" type="email" placeholder="אופציונלי" />
-            </label>
-            <label>
-              הערות
-              <textarea name="notes" rows={3} />
-            </label>
-            <button type="submit" className="btn btn--primary">
-              הוסף
-            </button>
+          <form className="form modal__form" autoComplete="off" onSubmit={onCreateInvestor}>
+            <div className="modal__body">
+              <label>
+                שם
+                <input name="name" required placeholder="שם המשקיע" autoComplete="off" />
+              </label>
+              <label>
+                שם משתמש לגישה
+                <input name="username" required placeholder="revital" dir="ltr" autoComplete="off" />
+              </label>
+              <PasswordField
+                label="סיסמה התחלתית"
+                name="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                enterKeyHint="done"
+              />
+              <label>
+                הרשאה
+                <select name="role" defaultValue="investor">
+                  <option value="investor">משקיע — רואה רק את שלו</option>
+                  <option value="manager">מנהל — גישה מלאה</option>
+                </select>
+              </label>
+              <label>
+                טלפון
+                <input name="phone" type="tel" inputMode="tel" placeholder="אופציונלי" autoComplete="tel" />
+              </label>
+              <label>
+                מייל (אופציונלי)
+                <input name="email" type="email" placeholder="אופציונלי" autoComplete="off" />
+              </label>
+              <label>
+                הערות
+                <textarea name="notes" rows={3} />
+              </label>
+            </div>
+            <div className="modal__actions">
+              <button type="button" className="btn btn--ghost" onClick={() => setShowNewInvestor(false)}>
+                ביטול
+              </button>
+              <button type="submit" className="btn btn--primary">
+                הוסף
+              </button>
+            </div>
           </form>
         </Modal>
       ) : null}
@@ -963,58 +971,62 @@ function PlanForm({
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <form className="form" onSubmit={onSubmit}>
-      <div className="form__grid">
-        <label>
-          קרן (₪)
-          <input name="principal" type="number" min="0" step="0.01" defaultValue={0} required />
-        </label>
-        <PlanTrackFields
-          defaultPlanType="monthly"
-          defaultMonthlyRate={settings?.default_monthly_rate_percent ?? 0}
-          defaultSavingsRate={0}
-          defaultPrincipal={0}
-        />
-        <label>
-          אחוז עמלת ניהול (נוסף)
-          <input
-            name="manager_fee_percent"
-            type="number"
-            min="0"
-            step="0.01"
-            defaultValue={settings?.default_manager_fee_percent ?? 0}
-            required
+    <form className="form modal__form" onSubmit={onSubmit}>
+      <div className="modal__body">
+        <div className="form__grid">
+          <label>
+            קרן (₪)
+            <input name="principal" type="number" min="0" step="0.01" defaultValue={0} required />
+          </label>
+          <PlanTrackFields
+            defaultPlanType="monthly"
+            defaultMonthlyRate={settings?.default_monthly_rate_percent ?? 0}
+            defaultSavingsRate={0}
+            defaultPrincipal={0}
           />
-        </label>
-        <label>
-          תאריך התחלה
-          <input name="start_date" type="date" defaultValue={yearStartISO()} required />
-        </label>
-        <label>
-          משך (חודשים)
-          <select name="duration_months" defaultValue={settings?.default_duration_months ?? 12}>
-            {[12, 14, 18, 24, 36].map((m) => (
-              <option key={m} value={m}>
-                {m} חודשים
-              </option>
-            ))}
-            <option value="6">6 חודשים</option>
-            <option value="10">10 חודשים</option>
-            <option value="15">15 חודשים</option>
-            <option value="16">16 חודשים</option>
-          </select>
-        </label>
-        <label>
-          הערות
-          <input name="notes" placeholder="אופציונלי" />
-        </label>
+          <label>
+            אחוז עמלת ניהול (נוסף)
+            <input
+              name="manager_fee_percent"
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={settings?.default_manager_fee_percent ?? 0}
+              required
+            />
+          </label>
+          <label>
+            תאריך התחלה
+            <input name="start_date" type="date" defaultValue={yearStartISO()} required />
+          </label>
+          <label>
+            משך (חודשים)
+            <select name="duration_months" defaultValue={settings?.default_duration_months ?? 12}>
+              {[12, 14, 18, 24, 36].map((m) => (
+                <option key={m} value={m}>
+                  {m} חודשים
+                </option>
+              ))}
+              <option value="6">6 חודשים</option>
+              <option value="10">10 חודשים</option>
+              <option value="15">15 חודשים</option>
+              <option value="16">16 חודשים</option>
+            </select>
+          </label>
+          <label>
+            הערות
+            <input name="notes" placeholder="אופציונלי" />
+          </label>
+        </div>
+        <p className="hint">
+          מזומן וחיסכון נשמרים כשדות נפרדים. עמלת ניהול מתווספת מעבר לתשלום למשקיע.
+        </p>
       </div>
-      <p className="hint">
-        מזומן וחיסכון נשמרים כשדות נפרדים. עמלת ניהול מתווספת מעבר לתשלום למשקיע.
-      </p>
-      <button type="submit" className="btn btn--primary">
-        צור מסלול + לוח תשלומים
-      </button>
+      <div className="modal__actions">
+        <button type="submit" className="btn btn--primary">
+          צור מסלול + לוח תשלומים
+        </button>
+      </div>
     </form>
   );
 }
@@ -1034,8 +1046,8 @@ function Modal({
       <div className="modal__sheet">
         <header className="modal__head">
           <h2>{title}</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            סגור
+          <button type="button" className="modal__close" aria-label="סגירה" onClick={onClose}>
+            ×
           </button>
         </header>
         {children}
