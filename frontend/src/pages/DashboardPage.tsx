@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { DashboardUrgentOps } from "../components/DashboardUrgentOps";
+import { InvestorHeroCard } from "../components/InvestorHeroCard";
 import { ManagerIncomePanel } from "../components/ManagerIncomePanel";
 import { Panel } from "../components/Panel";
+import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
 import { Stat } from "../components/Stat";
+import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import { formatDate, formatMoney, formatPercent, statusLabel } from "../utils/format";
+import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
 import { isAdminAccount } from "../utils/roles";
 
 export function DashboardPage() {
@@ -42,6 +46,13 @@ export function DashboardPage() {
   );
 
   const { data: topupRequests } = useAsync(() => api.topupRequests(), []);
+  const { data: investorPayments, reload: reloadInvestorPayments } = useAsync(
+    () => (isManager ? Promise.resolve([]) : api.payments({ year: new Date().getFullYear() })),
+    [isManager],
+  );
+  const [monthlyBusy, setMonthlyBusy] = useState(false);
+  const [dashMessage, setDashMessage] = useState<string | null>(null);
+  const [ceremonyBusyId, setCeremonyBusyId] = useState<number | null>(null);
 
   if (loading) return <div className="state state--loading">טוען את לוח הבקרה...</div>;
   if (error || !data)
@@ -54,17 +65,76 @@ export function DashboardPage() {
       </div>
     );
 
-  const cash = data.monthly_cash_payouts ?? data.monthly_investor_payouts;
-  const savings = data.monthly_savings_accruals ?? 0;
-  const savingsBalance = data.current_savings_total ?? 0;
+  const dashboard = data;
+  const cash = dashboard.monthly_cash_payouts ?? dashboard.monthly_investor_payouts;
+  const savings = dashboard.monthly_savings_accruals ?? 0;
+  const savingsBalance = dashboard.current_savings_total ?? 0;
   const scopeName =
     filterId != null
       ? investors?.find((i) => i.id === filterId)?.name ?? "משקיע"
       : null;
   const investorScopeOptions = (investors ?? []).filter((inv) => !inv.is_manager);
+  const awaitingPayments = (investorPayments ?? []).filter(
+    (p) => p.status === "awaiting_confirmation",
+  );
+  const nextPayment =
+    awaitingPayments[0] ??
+    dashboard.upcoming_payments.find((p) => p.status === "awaiting_confirmation") ??
+    dashboard.upcoming_payments[0] ??
+    null;
+
+  async function downloadMonthly() {
+    setMonthlyBusy(true);
+    setDashMessage(null);
+    try {
+      const yearPays =
+        investorPayments ?? (await api.payments({ year: new Date().getFullYear() }));
+      await downloadMonthlyReportPdf({
+        dashboard,
+        payments: yearPays,
+        investorName: user?.investor_name || user?.username || "תיק פרטי",
+      });
+      setDashMessage("הדוח החודשי ירד בהצלחה");
+    } catch (err) {
+      setDashMessage(err instanceof Error ? err.message : "הורדת הדוח נכשלה");
+    } finally {
+      setMonthlyBusy(false);
+    }
+  }
+
+  async function confirmReceived(id: number) {
+    setCeremonyBusyId(id);
+    setDashMessage(null);
+    try {
+      await api.confirmPayment(id);
+      setDashMessage("רשמנו שקיבלת את ההעברה");
+      reload();
+      reloadInvestorPayments();
+    } catch (err) {
+      setDashMessage(err instanceof Error ? err.message : "אישור ההעברה נכשל");
+    } finally {
+      setCeremonyBusyId(null);
+    }
+  }
+
+  async function markNotYet(id: number) {
+    setCeremonyBusyId(id);
+    setDashMessage(null);
+    try {
+      await api.rejectPayment(id);
+      setDashMessage("ציינו שעדיין לא הגיע — נבדוק ונחזור אליך");
+      reload();
+      reloadInvestorPayments();
+    } catch (err) {
+      setDashMessage(err instanceof Error ? err.message : "עדכון הסטטוס נכשל");
+    } finally {
+      setCeremonyBusyId(null);
+    }
+  }
 
   return (
     <div className="page">
+      <Toast message={dashMessage} onClear={() => setDashMessage(null)} />
       <header
         className={`page-intro${isAdmin ? " page-intro--admin" : ""}${
           !isManager ? " page-intro--investor" : ""
@@ -73,15 +143,15 @@ export function DashboardPage() {
         <div>
           {isManager ? (
             <p className="page-intro__eyebrow">
-              {isAdmin ? "ADMIN · ניהול" : "ניהול שותפים"}
+              {isAdmin ? "מנהל מערכת" : "ניהול שותפים"}
             </p>
           ) : (
-            <p className="page-intro__eyebrow">החשבון שלי</p>
+            <p className="page-intro__eyebrow">התיק הפרטי</p>
           )}
           <h1 className="page-intro__title">
             {isAdmin
               ? scopeName
-                ? `רווח חודשי · ${scopeName}`
+                ? `החזר חודשי · ${scopeName}`
                 : "לוח בקרה"
               : `שלום ${user?.investor_name || user?.username || ""}`}
           </h1>
@@ -97,7 +167,7 @@ export function DashboardPage() {
             </p>
           ) : (
             <p className="page-intro__lead">
-              יתרות, תשלומים לאישור והיסטוריה — הכל במבט אחד.
+              הקרן שלך, התשלום הבא, ומה ששולם השנה — במבט אחד.
             </p>
           )}
         </div>
@@ -110,23 +180,26 @@ export function DashboardPage() {
               תשלומים
             </Link>
           </div>
-        ) : (
-          <div className="page-head__actions">
-            <Link className="btn btn--primary" to="/payments">
-              לתשלומים
-            </Link>
-          </div>
-        )}
+        ) : null}
       </header>
 
       {!isManager ? (
-        <div className="investor-quick-balance" aria-label="סיכום חודשי">
-          <span>סה״כ חודשי (מזומן + חיסכון)</span>
-          <strong>{formatMoney(data.monthly_investor_total ?? cash + savings)}</strong>
-          <em>
-            מזומן {formatMoney(cash)} · חיסכון {formatMoney(savings)}
-          </em>
-        </div>
+        <InvestorHeroCard
+          principal={data.total_principal}
+          nextPayment={nextPayment}
+          paidThisYear={data.ytd_investor_paid}
+          onDownloadMonthly={() => void downloadMonthly()}
+          monthlyBusy={monthlyBusy}
+        />
+      ) : null}
+
+      {!isManager ? (
+        <PaymentCeremonyCard
+          payments={awaitingPayments}
+          busyId={ceremonyBusyId}
+          onReceived={(id) => void confirmReceived(id)}
+          onNotYet={(id) => void markNotYet(id)}
+        />
       ) : null}
 
       {isManager ? <DashboardUrgentOps investorId={filterId} /> : null}
@@ -207,7 +280,10 @@ export function DashboardPage() {
         <ManagerIncomePanel variant="admin" investorId={filterId} />
       ) : (
         <>
-      <div className={`money-ledger${!isManager ? " money-ledger--with-hero" : ""}`}>
+      {!isManager ? (
+        <p className="ledger-kicker">פירוט המסלול — מזומן וחיסכון בנפרד</p>
+      ) : null}
+      <div className={`money-ledger${!isManager ? " money-ledger--with-hero money-ledger--secondary" : ""}`}>
         <div className="money-ledger__item money-ledger__item--accent">
           <span>{isManager && !scopeName ? "סך קרן פעילה" : "קרן"}</span>
           <strong>{formatMoney(data.total_principal)}</strong>
@@ -418,7 +494,7 @@ export function DashboardPage() {
             )}
           </Panel>
         ) : (
-          <Panel title="הסיכום שלי" subtitle="רק הנתונים שלך" delay={80}>
+          <Panel title="הסיכום שלך" subtitle="המסלולים הפעילים בתיק" delay={80}>
             <ul className="list">
               {data.investors_summary.map((inv) => (
                 <li key={inv.id} className="list__row">

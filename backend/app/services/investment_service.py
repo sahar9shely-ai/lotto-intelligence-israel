@@ -2406,11 +2406,15 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     upcoming_query = (
         db.query(Payment)
         .options(joinedload(Payment.investor))
-        .filter(Payment.status == "scheduled")
+        .filter(Payment.status.in_(("scheduled", "awaiting_confirmation")))
     )
     if investor_id is not None:
         upcoming_query = upcoming_query.filter(Payment.investor_id == investor_id)
-    upcoming = upcoming_query.order_by(Payment.due_date.asc()).limit(8).all()
+    upcoming = upcoming_query.order_by(Payment.due_date.asc()).limit(16).all()
+    upcoming.sort(
+        key=lambda p: (0 if p.status == "awaiting_confirmation" else 1, p.due_date, p.id)
+    )
+    upcoming = upcoming[:8]
 
     recent_query = (
         db.query(Payment)

@@ -20,6 +20,11 @@ class SetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class ChangeOwnPasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class FulfillPasswordResetRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 

@@ -119,6 +119,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ new_password }),
     }),
+  changeOwnPassword: (current_password: string, new_password: string) =>
+    request<AuthUser>("/api/v1/auth/me/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password, new_password }),
+    }),
   me: () => request<AuthUser>("/api/v1/auth/me"),
   users: () => request<AuthUser[]>("/api/v1/auth/users"),
   updateUser: (

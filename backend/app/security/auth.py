@@ -73,10 +73,10 @@ def get_current_user(
     )
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="משתמש לא נמצא")
-    if user.must_reset_password or not user.password_hash:
+    if not user.password_hash:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="יש להגדיר סיסמה חדשה מהמייל לפני הכניסה למערכת",
+            detail="אין סיסמה לחשבון זה עדיין. פנו למנהל להגדרת סיסמה.",
         )
     return user
 

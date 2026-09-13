@@ -3,6 +3,7 @@ import { AppShell } from "./components/AppShell";
 import { RequireAuth, RequireManager } from "./components/RequireAuth";
 import { AuthProvider } from "./context/AuthContext";
 import { ActivityPage } from "./pages/ActivityPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { InvestorsPage } from "./pages/InvestorsPage";
@@ -20,6 +21,7 @@ export function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
         <Route element={<RequireAuth />}>
+          <Route path="change-password" element={<ChangePasswordPage />} />
           <Route element={<AppShell />}>
             <Route index element={<DashboardPage />} />
             <Route path="investors" element={<InvestorsPage />} />

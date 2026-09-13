@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
+import { RevealSecret } from "../components/RevealSecret";
 import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { PlanTrackFields } from "../components/PlanTrackFields";
@@ -544,7 +545,7 @@ export function InvestorsPage() {
                 <div className="money-ledger__item investor-login-card">
                   <span>כניסה לאתר תזרים</span>
                   <strong className="ltr">{selected.access_username || "—"}</strong>
-                  <em className="ltr">{selected.access_password || "אין סיסמה שמורה"}</em>
+                  <RevealSecret value={selected.access_password} />
                   <small>
                     {selected.phone ? `וואטסאפ: ${formatPhoneDisplay(selected.phone)}` : "חסר מספר טלפון"}
                   </small>

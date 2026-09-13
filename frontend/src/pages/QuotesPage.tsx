@@ -4,6 +4,7 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { FlowFunnel } from "../components/FlowFunnel";
 import { QuotePipelineStepper, quoteNextStepHint } from "../components/QuotePipelineStepper";
 import { Panel } from "../components/Panel";
+import { RevealSecret } from "../components/RevealSecret";
 import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
 import { PlanTrackFields } from "../components/PlanTrackFields";
 import { Toast } from "../components/Toast";
@@ -712,7 +713,7 @@ export function QuotesPage() {
                 <dl className="quote-dl">
                   {q.plan_type !== "savings" ? (
                     <div>
-                      <dt>רווח חודשי (מזומן)</dt>
+                      <dt>החזר חודשי (מזומן)</dt>
                       <dd>{formatMoney(q.monthly_investor_payout, true)}</dd>
                     </div>
                   ) : null}
@@ -756,7 +757,9 @@ export function QuotesPage() {
                       {q.access_password ? (
                         <div>
                           <dt>סיסמה</dt>
-                          <dd className="ltr">{q.access_password}</dd>
+                          <dd>
+                            <RevealSecret value={q.access_password} />
+                          </dd>
                         </div>
                       ) : null}
                     </dl>

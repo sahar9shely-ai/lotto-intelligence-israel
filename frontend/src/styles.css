@@ -3120,6 +3120,7 @@ input[type="date"] {
   font-weight: 600;
 }
 
+.topbar__account,
 .topbar__logout {
   border: 1px solid transparent;
   background: transparent;
@@ -3133,6 +3134,15 @@ input[type="date"] {
   border-radius: 999px;
   flex: 0 0 auto;
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.topbar__account:hover {
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .topbar__logout:hover {
@@ -5206,6 +5216,7 @@ input[type="date"] {
     display: none;
   }
 
+  .topbar__account,
   .topbar__logout {
     padding: 8px 12px;
     font-size: 0.84rem;
@@ -5999,5 +6010,200 @@ input[type="date"] {
   .panel .stat__value,
   .stats-grid--compact .stat__value {
     font-size: 1.35rem;
+  }
+}
+
+.investor-hero {
+  display: grid;
+  gap: 18px;
+  padding: 22px 22px 20px;
+  border-radius: 22px;
+  background:
+    linear-gradient(160deg, #0b2e2a 0%, #0f4a43 58%, #1a5c46 100%);
+  color: #f6faf8;
+  box-shadow: var(--shadow);
+  margin-bottom: 8px;
+}
+
+.investor-hero__fund span,
+.investor-hero__cell span {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.78;
+}
+
+.investor-hero__fund strong,
+.investor-hero__cell strong {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.investor-hero__fund strong {
+  margin-top: 6px;
+  font-size: clamp(2rem, 7vw, 2.7rem);
+}
+
+.investor-hero__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.investor-hero__cell strong {
+  margin-top: 6px;
+  font-size: clamp(1.15rem, 3.4vw, 1.45rem);
+}
+
+.investor-hero__quiet {
+  font-size: 1.05rem !important;
+  font-weight: 600 !important;
+  opacity: 0.88;
+}
+
+.investor-hero__cell em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  font-size: 0.8rem;
+  opacity: 0.72;
+}
+
+.investor-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.investor-hero__actions .btn--ghost {
+  color: #f6faf8;
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.investor-hero__actions .btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ledger-kicker {
+  margin: 8px 2px 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.money-ledger--secondary {
+  opacity: 0.96;
+}
+
+.money-ledger--secondary .money-ledger__item {
+  background: color-mix(in srgb, var(--foam) 55%, #fff);
+  box-shadow: none;
+}
+
+.payment-ceremony {
+  display: grid;
+  gap: 12px;
+  padding: 18px 18px 16px;
+  border-radius: 20px;
+  background: linear-gradient(165deg, #fff 0%, color-mix(in srgb, var(--gold-soft) 55%, #fff) 100%);
+  border: 1px solid color-mix(in srgb, var(--gold) 22%, var(--line));
+  box-shadow: var(--shadow-soft);
+}
+
+.payment-ceremony__eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--gold-strong);
+}
+
+.payment-ceremony__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.payment-ceremony__item {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.payment-ceremony__month {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.payment-ceremony__amount {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 6vw, 2.4rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  line-height: 1.05;
+}
+
+.payment-ceremony__date {
+  margin: 0 0 6px;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+
+.payment-ceremony__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reveal-secret {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.reveal-secret em {
+  font-style: normal;
+}
+
+.reveal-secret--empty {
+  color: var(--ink-soft);
+}
+
+.reveal-secret__btn {
+  min-height: 36px;
+}
+
+@media (max-width: 720px) {
+  .investor-hero {
+    padding: 20px 16px 16px;
+    border-radius: 20px;
+  }
+
+  .investor-hero__grid {
+    gap: 12px;
+  }
+
+  .payment-ceremony {
+    padding: 16px 14px 14px;
+  }
+
+  .payment-ceremony__actions .btn {
+    flex: 1 1 140px;
+    justify-content: center;
   }
 }

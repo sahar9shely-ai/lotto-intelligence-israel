@@ -42,12 +42,12 @@ export function LoginPage() {
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <p className="auth-card__eyebrow">כניסה מאובטחת</p>
+        <p className="auth-card__eyebrow">התיק הפרטי שלך</p>
         <h1 className="auth-card__brand">תזרים</h1>
         <p className="auth-card__welcome">
-          מעקב יתרות, תשלומים והשקעות — ברור במבט ראשון.
+          שלום. כאן תראה את הקרן, התשלום הבא ומה ששולם — בשקט ובבהירות.
         </p>
-        <p className="muted">שם משתמש וסיסמה שקיבלתם מהמנהל.</p>
+        <p className="muted">הזן את שם המשתמש והסיסמה שקיבלת.</p>
 
         <form className="form auth-card__form" onSubmit={onSubmit} autoComplete="on">
           <label>
@@ -75,7 +75,7 @@ export function LoginPage() {
           />
           {error ? <p className="form-error">{error}</p> : null}
           <button type="submit" className="btn btn--primary btn--wide" disabled={busy}>
-            {busy ? "מתחבר..." : "כניסה למערכת"}
+            {busy ? "נכנס..." : "כניסה לתיק הפרטי"}
           </button>
         </form>
 

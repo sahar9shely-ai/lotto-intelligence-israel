@@ -53,7 +53,7 @@ export function statusLabel(status: string): string {
     skipped: "דולג",
     draft: "טיוטה",
     sent: "נשלח",
-    converted: "הומר ללקוח",
+    converted: "מסלול פעיל",
     archived: "בארכיון",
     pending: "ממתינה",
     contract: "ממתין לחתימות",

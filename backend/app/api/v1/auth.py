@@ -7,6 +7,7 @@ from app.db.investment_session import get_investment_db
 from app.models.auth import EmailOutbox, LoginAlert, User
 from app.models.investments import Investor, utcnow
 from app.schemas.auth import (
+    ChangeOwnPasswordRequest,
     CreateAccessUserRequest,
     EmailOutboxOut,
     FulfillPasswordResetRequest,
@@ -112,7 +113,33 @@ def set_user_password(
 
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
-    return auth_svc.serialize_user(user)
+    return auth_svc.serialize_user(user, include_access_password=False)
+
+
+@router.post("/me/password", response_model=UserOut)
+def change_own_password(
+    payload: ChangeOwnPasswordRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    fresh = (
+        db.query(User)
+        .options(joinedload(User.investor))
+        .filter(User.id == user.id)
+        .first()
+    )
+    if not fresh:
+        raise HTTPException(status_code=404, detail="משתמש לא נמצא")
+    try:
+        fresh = auth_svc.change_own_password(
+            db,
+            fresh,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return auth_svc.serialize_user(fresh, include_access_password=False)
 
 
 @router.get("/users", response_model=list[UserOut])

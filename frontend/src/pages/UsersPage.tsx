@@ -369,7 +369,9 @@ export function UsersPage() {
           title={u.investor_name}
           subtitle={
             u.has_password
-              ? `שם משתמש: ${u.username}${u.phone ? ` · ${formatPhoneDisplay(u.phone)}` : ""} · יש גישה פעילה`
+              ? `שם משתמש: ${u.username}${u.phone ? ` · ${formatPhoneDisplay(u.phone)}` : ""}${
+                  u.must_reset_password ? " · יחליף סיסמה בכניסה" : " · יש גישה פעילה"
+                }`
               : `שם משתמש: ${u.username}${u.phone ? ` · ${formatPhoneDisplay(u.phone)}` : ""} · ממתין לסיסמה מהמנהל`
           }
         >

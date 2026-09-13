@@ -1,7 +1,7 @@
 import { PersonalAssistant } from "./PersonalAssistant";
 import { NotificationCenter } from "./NotificationCenter";
 import { useEffect, useState, type SVGProps } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isAdminAccount } from "../utils/roles";
 import { useAsync } from "../hooks/useAsync";
@@ -130,7 +130,7 @@ export function AppShell() {
   const moreLinks = links.filter((l) => !PRIMARY_PATHS.has(l.to));
   const displayName = user?.investor_name || user?.username || "";
   const isAdminAccountUser = isAdminAccount(user);
-  const roleLabel = isAdminAccountUser ? "ADMIN" : isManager ? "מנהל" : "משקיע";
+  const roleLabel = isAdminAccountUser ? "מנהל מערכת" : isManager ? "מנהל" : "תיק פרטי";
   const roleChipClass = isAdminAccountUser
     ? "role-chip role-chip--admin"
     : isManager
@@ -259,6 +259,9 @@ export function AppShell() {
             </nav>
             <div className="topbar__tools">
               {isManager ? <NotificationCenter /> : null}
+              <Link className="topbar__account" to="/change-password">
+                סיסמה
+              </Link>
               <button type="button" className="topbar__logout" onClick={signOut}>
                 יציאה
               </button>
@@ -320,6 +323,13 @@ export function AppShell() {
                 <span>{link.label}</span>
               </NavLink>
             ))}
+            <NavLink
+              to="/change-password"
+              className="more-sheet__link"
+              onClick={() => setMoreOpen(false)}
+            >
+              <span>החלפת סיסמה</span>
+            </NavLink>
             <button type="button" className="more-sheet__link more-sheet__link--danger" onClick={signOut}>
               <span>יציאה מהחשבון</span>
             </button>
