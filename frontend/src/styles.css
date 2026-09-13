@@ -2123,6 +2123,10 @@ input[type="date"] {
   overflow: hidden;
 }
 
+.modal[hidden] {
+  display: none !important;
+}
+
 .modal {
   position: fixed;
   inset: 0;
@@ -2205,8 +2209,9 @@ input[type="date"] {
   bottom: 0;
   z-index: 2;
   margin-top: auto;
-  padding-top: 12px;
-  background: linear-gradient(180deg, rgba(251, 255, 253, 0) 0%, #fbfffd 10px);
+  padding: 12px 0 2px;
+  background: #fbfffd;
+  border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
 }
 
 .modal__sheet > .form:not(.modal__form),
@@ -2998,11 +3003,13 @@ input[type="date"] {
   .modal {
     place-items: end stretch;
     padding: 0;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 
   .modal__sheet {
     width: 100%;
     border-radius: 22px 22px 0 0;
+    overflow: hidden;
   }
 }
 
@@ -5768,6 +5775,7 @@ input[type="date"] {
 
   .modal {
     padding: 0;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
     place-items: end stretch;
     z-index: 90;
   }
@@ -5780,11 +5788,17 @@ input[type="date"] {
     width: 100%;
     max-width: 100%;
     min-width: 0;
-    max-height: min(88vh, calc(100vh - 12px));
-    max-height: min(85dvh, calc(100dvh - env(safe-area-inset-top, 0px) - 8px));
+    max-height: min(78vh, calc(100vh - 80px));
+    max-height: min(78dvh, calc(100dvh - 72px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
     border-radius: 22px 22px 0 0;
-    padding: 16px 16px calc(12px + env(safe-area-inset-bottom, 0px));
-    overflow-x: hidden;
+    padding: 16px 16px 12px;
+    overflow: hidden;
+  }
+
+  .modal__actions,
+  .confirm-sheet .modal__actions {
+    padding-bottom: 4px;
+    background: #fbfffd;
   }
 
   .request-form__actions,
