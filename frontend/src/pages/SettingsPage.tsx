@@ -86,6 +86,17 @@ export function SettingsPage() {
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
+      <Panel title="הסיסמה שלי" subtitle="החלפה אישית — לא מוצגת בכותרת העליונה">
+        <p className="hint">
+          אפשר להחליף את הסיסמה בכל רגע. הסיסמה החדשה נשארת אצלך בלבד.
+        </p>
+        <div className="action-bar">
+          <Link className="btn btn--ghost" to="/change-password">
+            החלפת סיסמה
+          </Link>
+        </div>
+      </Panel>
+
       <Panel
         title="האתר בעדכון"
         subtitle="כשמופעל — כל משתמש מחובר רואה באנר בראש האתר"

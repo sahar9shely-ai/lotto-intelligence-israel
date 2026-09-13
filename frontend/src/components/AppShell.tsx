@@ -1,7 +1,7 @@
 import { PersonalAssistant } from "./PersonalAssistant";
 import { NotificationCenter } from "./NotificationCenter";
 import { useEffect, useState, type SVGProps } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isAdminAccount } from "../utils/roles";
 import { useAsync } from "../hooks/useAsync";
@@ -77,6 +77,14 @@ function DockGlyph({ path }: { path: string }) {
       <svg {...common}>
         <circle cx="12" cy="12" r="3.2" />
         <path d="M12 4.2v1.8M12 18v1.8M4.2 12h1.8M18 12h1.8M6.4 6.4l1.3 1.3M16.3 16.3l1.3 1.3M17.6 6.4l-1.3 1.3M7.7 16.3l-1.3 1.3" />
+      </svg>
+    );
+  }
+  if (path === "/change-password") {
+    return (
+      <svg {...common}>
+        <rect x="5" y="11" width="14" height="9" rx="2" />
+        <path d="M8 11V8.2a4 4 0 0 1 8 0V11" />
       </svg>
     );
   }
@@ -259,9 +267,6 @@ export function AppShell() {
             </nav>
             <div className="topbar__tools">
               {isManager ? <NotificationCenter /> : null}
-              <Link className="topbar__account" to="/change-password">
-                סיסמה
-              </Link>
               <button type="button" className="topbar__logout" onClick={signOut}>
                 יציאה
               </button>
@@ -289,17 +294,15 @@ export function AppShell() {
             <span>{link.dockLabel}</span>
           </NavLink>
         ))}
-        {moreLinks.length > 0 ? (
-          <button
-            type="button"
-            className={moreOpen ? "dock__link is-active" : "dock__link"}
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((v) => !v)}
-          >
-            <DockGlyph path="more" />
-            <span>עוד</span>
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className={moreOpen ? "dock__link is-active" : "dock__link"}
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen((v) => !v)}
+        >
+          <DockGlyph path="more" />
+          <span>עוד</span>
+        </button>
       </nav>
 
       {moreOpen ? (
@@ -328,6 +331,7 @@ export function AppShell() {
               className="more-sheet__link"
               onClick={() => setMoreOpen(false)}
             >
+              <DockGlyph path="/change-password" />
               <span>החלפת סיסמה</span>
             </NavLink>
             <button type="button" className="more-sheet__link more-sheet__link--danger" onClick={signOut}>
