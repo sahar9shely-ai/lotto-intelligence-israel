@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
@@ -64,17 +65,14 @@ export function LoginPage() {
               onChange={(e) => setUsername(e.target.value)}
             />
           </label>
-          <label>
-            סיסמה
-            <input
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
+          <PasswordField
+            label="סיסמה"
+            name="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
           {error ? <p className="form-error">{error}</p> : null}
           <button type="submit" className="btn btn--primary btn--wide" disabled={busy}>
             {busy ? "מתחבר..." : "כניסה למערכת"}
