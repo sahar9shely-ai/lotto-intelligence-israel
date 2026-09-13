@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
+import { PasswordField } from "../components/PasswordField";
 import { Toast } from "../components/Toast";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
@@ -193,16 +194,13 @@ export function SettingsPage() {
               <option value="openai">OpenAI</option>
             </select>
           </label>
-          <label>
-            מפתח API {data.assistant_api_key_set ? "(השאר ריק כדי לא לשנות)" : ""}
-            <input
-              name="assistant_api_key"
-              type="password"
-              autoComplete="off"
-              placeholder={data.assistant_api_key_set ? "••••••••" : "הדבק מפתח כאן"}
-              dir="ltr"
-            />
-          </label>
+          <PasswordField
+            label={`מפתח API ${data.assistant_api_key_set ? "(השאר ריק כדי לא לשנות)" : ""}`}
+            name="assistant_api_key"
+            autoComplete="off"
+            placeholder={data.assistant_api_key_set ? "••••••••" : "הדבק מפתח כאן"}
+            dir="ltr"
+          />
           <button type="submit" className="btn btn--admin">
             שמור מפתח עוזר אישי
           </button>

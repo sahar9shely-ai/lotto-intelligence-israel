@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
-import { PasswordField } from "../components/PasswordField";
+import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -390,7 +390,10 @@ export function UsersPage() {
                     defaultValue={u.username}
                     required
                     dir="ltr"
-                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    {...disableIdentityAutofill}
                   />
                 </label>
                 <label>
@@ -499,7 +502,16 @@ export function UsersPage() {
                 </label>
                 <label>
                   שם משתמש
-                  <input name="username" required placeholder="revital" dir="ltr" autoComplete="off" />
+                  <input
+                    name="username"
+                    required
+                    placeholder="revital"
+                    dir="ltr"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    {...disableIdentityAutofill}
+                  />
                 </label>
                 <PasswordField
                   label="סיסמה התחלתית"

@@ -4,7 +4,7 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { FlowFunnel } from "../components/FlowFunnel";
 import { QuotePipelineStepper, quoteNextStepHint } from "../components/QuotePipelineStepper";
 import { Panel } from "../components/Panel";
-import { PasswordField } from "../components/PasswordField";
+import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
 import { PlanTrackFields } from "../components/PlanTrackFields";
 import { Toast } from "../components/Toast";
 import { useAsync } from "../hooks/useAsync";
@@ -480,7 +480,10 @@ export function QuotesPage() {
                   minLength={2}
                   maxLength={64}
                   dir="ltr"
-                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  {...disableIdentityAutofill}
                   pattern="[A-Za-z0-9._\\-]{2,64}"
                   title="אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון"
                   placeholder="ייווצר אוטומטית מהשם, באנגלית"
@@ -983,7 +986,10 @@ export function QuotesPage() {
                     minLength={2}
                     maxLength={64}
                     dir="ltr"
-                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    {...disableIdentityAutofill}
                     pattern="[A-Za-z0-9._\\-]{2,64}"
                     title="אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון"
                     defaultValue={

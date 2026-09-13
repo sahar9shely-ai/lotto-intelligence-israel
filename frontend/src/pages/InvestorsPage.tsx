@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../components/Panel";
-import { PasswordField } from "../components/PasswordField";
+import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { PlanTrackFields } from "../components/PlanTrackFields";
 import { SavingsActions } from "../components/SavingsActions";
@@ -727,7 +727,16 @@ export function InvestorsPage() {
               </label>
               <label>
                 שם משתמש לגישה
-                <input name="username" required placeholder="revital" dir="ltr" autoComplete="off" />
+                <input
+                  name="username"
+                  required
+                  placeholder="revital"
+                  dir="ltr"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  {...disableIdentityAutofill}
+                />
               </label>
               <PasswordField
                 label="סיסמה התחלתית"
