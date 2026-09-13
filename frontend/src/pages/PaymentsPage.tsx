@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
+import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { SavingsActions } from "../components/SavingsActions";
 import { Stat } from "../components/Stat";
@@ -16,6 +17,7 @@ import {
   statusLabel,
   trackEndISO,
 } from "../utils/format";
+import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
 import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
 import { planTypeLabel } from "../utils/planTypes";
 import type { Plan } from "../types/investments";
@@ -513,21 +515,21 @@ export function PaymentsPage() {
   async function confirmPayment(id: number) {
     const payment = payments.find((p) => p.id === id);
     const ok = await confirm({
-      title: "אישור קבלת תשלום",
+      title: "קיבלתי את ההעברה",
       message: payment
-        ? `לאשר קבלה של ${formatMoney(payment.investor_amount, true)} עבור ${formatCalendarMonth(payment.due_date)}?`
-        : "לאשר את קבלת התשלום?",
-      confirmLabel: "אשר קבלה",
+        ? `לאשר שקיבלת ${formatMoney(payment.investor_amount, true)} עבור ${formatCalendarMonth(payment.due_date)}?`
+        : "לאשר שקיבלת את ההעברה?",
+      confirmLabel: "קיבלתי את ההעברה",
     });
     if (!ok) return;
     setMarkBusyId(id);
     setMessage(null);
     try {
       await api.confirmPayment(id);
-      setMessage("אישרת את התשלום — הסטטוס עודכן לבוצע");
+      setMessage("רשמנו שקיבלת את ההעברה");
       refreshAll();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "אישור התשלום נכשל");
+      setMessage(err instanceof Error ? err.message : "אישור ההעברה נכשל");
     } finally {
       setMarkBusyId(null);
     }
@@ -536,22 +538,21 @@ export function PaymentsPage() {
   async function rejectPayment(id: number) {
     const payment = payments.find((p) => p.id === id);
     const ok = await confirm({
-      title: "דחיית תשלום",
+      title: "עדיין לא הגיע",
       message: payment
-        ? `לדחות את הבקשה על ${formatMoney(payment.investor_amount, true)}? התשלום יחזור למתוכנן.`
-        : "לדחות את בקשת האישור?",
-      confirmLabel: "דחה",
-      danger: true,
+        ? `לציין שסכום ${formatMoney(payment.investor_amount, true)} עדיין לא הגיע? נחזור לבדוק.`
+        : "לציין שההעברה עדיין לא הגיעה?",
+      confirmLabel: "עדיין לא הגיע",
     });
     if (!ok) return;
     setMarkBusyId(id);
     setMessage(null);
     try {
       await api.rejectPayment(id);
-      setMessage("התשלום נדחה — חזר לסטטוס מתוכנן");
+      setMessage("ציינו שעדיין לא הגיע — נבדוק ונחזור אליך");
       refreshAll();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "דחיית התשלום נכשלה");
+      setMessage(err instanceof Error ? err.message : "עדכון הסטטוס נכשל");
     } finally {
       setMarkBusyId(null);
     }
@@ -576,6 +577,34 @@ export function PaymentsPage() {
       setMessage(`דוח שנתי ${year} ירד בהצלחה`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "ייצוא PDF נכשל");
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
+  async function exportMonthlyPdf() {
+    setPdfBusy(true);
+    setMessage(null);
+    try {
+      const board = await api.dashboard(
+        isManager && investorFilter ? { investor_id: investorFilter } : undefined,
+      );
+      const yearPayments = await api.payments({
+        year: new Date().getFullYear(),
+        investor_id: investorFilter,
+      });
+      await downloadMonthlyReportPdf({
+        dashboard: board,
+        payments: yearPayments,
+        investorName:
+          selectedInvestorName ||
+          user?.investor_name ||
+          user?.username ||
+          "תיק פרטי",
+      });
+      setMessage("הדוח החודשי ירד בהצלחה");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "ייצוא הדוח החודשי נכשל");
     } finally {
       setPdfBusy(false);
     }
@@ -733,15 +762,15 @@ export function PaymentsPage() {
             disabled={markBusyId === p.id}
             onClick={() => confirmPayment(p.id)}
           >
-            {markBusyId === p.id ? "מאשר..." : "אשר קבלה"}
+            {markBusyId === p.id ? "רושם..." : "קיבלתי את ההעברה"}
           </button>
           <button
             type="button"
-            className="btn btn--small btn--ghost btn--danger"
+            className="btn btn--small btn--ghost"
             disabled={markBusyId === p.id}
             onClick={() => rejectPayment(p.id)}
           >
-            דחה
+            עדיין לא הגיע
           </button>
         </>
       );
@@ -767,10 +796,10 @@ export function PaymentsPage() {
       <header className="page-intro">
         <div>
           <p className="page-intro__eyebrow">
-            {isManager ? "ניהול תשלומים" : "החשבון שלך"}
+            {isManager ? "ניהול תשלומים" : "התיק הפרטי"}
           </p>
           <h1 className="page-intro__title">
-            {isManager ? "תשלומים והיסטוריה" : "התשלומים שלי"}
+            {isManager ? "תשלומים והיסטוריה" : "התשלומים שלך"}
           </h1>
           <p className="page-intro__lead">
             {isManager
@@ -787,9 +816,17 @@ export function PaymentsPage() {
             type="button"
             className={`btn ${isManager ? "btn--admin" : "btn--gold"}`}
             disabled={pdfBusy}
+            onClick={() => void exportMonthlyPdf()}
+          >
+            {pdfBusy ? "מכינים PDF..." : "הורדת דוח חודשי"}
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            disabled={pdfBusy}
             onClick={exportYearPdf}
           >
-            {pdfBusy ? "מכינים PDF..." : `הורדת דוח ${year}`}
+            {pdfBusy ? "מכינים PDF..." : `דוח שנתי ${year}`}
           </button>
           {isManager ? (
             <details className="tools-menu">
@@ -825,44 +862,13 @@ export function PaymentsPage() {
         </div>
       </header>
 
-      {!isManager &&
-      payments.some((p) => p.status === "awaiting_confirmation") ? (
-        <div className="step-window step-window--urgent" role="region" aria-label="ממתין לאישור">
-          <p className="step-window__eyebrow">דחוף · אישור קבלה</p>
-          <p className="step-window__title">המנהל שלח תשלום לאישור שלך</p>
-          <ul className="list">
-            {payments
-              .filter((p) => p.status === "awaiting_confirmation")
-              .map((p) => (
-                <li key={`await-${p.id}`} className="list__row">
-                  <div>
-                    <strong>{formatCalendarMonth(p.due_date)}</strong>
-                    <span className="muted">
-                      {formatDate(p.due_date)} · {formatMoney(p.investor_amount, true)}
-                    </span>
-                  </div>
-                  <div className="action-bar">
-                    <button
-                      type="button"
-                      className="btn btn--small btn--gold"
-                      disabled={markBusyId === p.id}
-                      onClick={() => confirmPayment(p.id)}
-                    >
-                      {markBusyId === p.id ? "מאשר..." : "אשר קבלה"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--small btn--ghost btn--danger"
-                      disabled={markBusyId === p.id}
-                      onClick={() => rejectPayment(p.id)}
-                    >
-                      דחה
-                    </button>
-                  </div>
-                </li>
-              ))}
-          </ul>
-        </div>
+      {!isManager ? (
+        <PaymentCeremonyCard
+          payments={payments.filter((p) => p.status === "awaiting_confirmation")}
+          busyId={markBusyId}
+          onReceived={(id) => void confirmPayment(id)}
+          onNotYet={(id) => void rejectPayment(id)}
+        />
       ) : null}
 
       <div className="filters">

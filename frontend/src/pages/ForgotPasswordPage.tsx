@@ -54,10 +54,10 @@ export function ForgotPasswordPage() {
     <div className="auth-screen">
       <div className="atmosphere" aria-hidden="true" />
       <div className="auth-card">
-        <p className="hero__eyebrow">איפוס סיסמה</p>
+        <p className="auth-card__eyebrow">שחזור גישה</p>
         <h1 className="auth-card__brand">תזרים</h1>
-        <p className="muted">
-          הלקוח לא מאפס סיסמה לבד. שולחים בקשה למנהל — רק הוא מגדיר סיסמה חדשה.
+        <p className="auth-card__welcome">
+          לא מצליח להיכנס? שלח בקשה — נטפל בזה באופן אישי ונעדכן אותך.
         </p>
 
         <form className="form" onSubmit={onSubmit} autoComplete="off">
@@ -84,7 +84,7 @@ export function ForgotPasswordPage() {
             />
           </label>
           <label>
-            הערה למנהל (אופציונלי)
+            הערה (אופציונלי)
             <input
               type="text"
               name="tazrim_reset_note"
@@ -97,12 +97,12 @@ export function ForgotPasswordPage() {
           {error ? <p className="form-error">{error}</p> : null}
           {message ? <p className="toast">{message}</p> : null}
           <button type="submit" className="btn btn--primary btn--wide" disabled={busy || !username.trim()}>
-            {busy ? "שולח..." : "שלח בקשה למנהל"}
+            {busy ? "שולח..." : "שלח בקשה"}
           </button>
         </form>
 
         <div className="auth-links">
-          <Link to="/login">חזרה להתחברות</Link>
+          <Link to="/login">חזרה לכניסה</Link>
         </div>
       </div>
     </div>

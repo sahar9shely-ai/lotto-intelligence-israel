@@ -449,6 +449,70 @@ def test_split_admin_and_personal_accounts():
         db.close()
 
 
+def test_must_reset_password_allows_login_then_self_change():
+    _ensure_seeded()
+    db: Session = InvestmentSessionLocal()
+    try:
+        user = db.query(User).filter(User.username == "ofek").first()
+        assert user is not None
+        user.password_hash = hash_password("TempPass12!")
+        user.access_password = "TempPass12!"
+        user.must_reset_password = True
+        db.commit()
+    finally:
+        db.close()
+
+    blocked_without_hash_setup = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ofek", "password": "TempPass12!"},
+    )
+    assert blocked_without_hash_setup.status_code == 200
+    body = blocked_without_hash_setup.json()
+    assert body["user"]["must_reset_password"] is True
+    assert body["user"]["access_password"] in (None, "TempPass12!")
+    token = body["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    me = client.get("/api/v1/auth/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["must_reset_password"] is True
+    assert me.json()["access_password"] is None
+
+    bad = client.post(
+        "/api/v1/auth/me/password",
+        headers=headers,
+        json={"current_password": "wrong-pass", "new_password": "OfekNew99!"},
+    )
+    assert bad.status_code == 400
+
+    changed = client.post(
+        "/api/v1/auth/me/password",
+        headers=headers,
+        json={"current_password": "TempPass12!", "new_password": "OfekNew99!"},
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["must_reset_password"] is False
+    assert changed.json()["access_password"] is None
+
+    old = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ofek", "password": "TempPass12!"},
+    )
+    assert old.status_code == 401
+
+    fresh = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ofek", "password": "OfekNew99!"},
+    )
+    assert fresh.status_code == 200
+    assert fresh.json()["user"]["must_reset_password"] is False
+
+    manager = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=manager).json()
+    ofek = next(u for u in users if u["username"] == "ofek")
+    assert ofek["access_password"] in (None, "")
+
+
 def test_personal_sahar_cannot_access_manager_routes():
     _ensure_seeded()
     _set_password("sahar", "SaharPass1!")

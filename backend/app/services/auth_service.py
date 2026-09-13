@@ -135,7 +135,8 @@ def set_user_password(db: Session, user: User, new_password: str) -> User:
         raise ValueError("הסיסמה חייבת להכיל לפחות 8 תווים")
     user.password_hash = hash_password(new_password)
     user.access_password = new_password
-    user.must_reset_password = False
+    # Temporary password from the manager — investor must choose their own next.
+    user.must_reset_password = True
     user.password_set_at = utcnow()
     # Close open reset requests when manager sets a password.
     db.query(PasswordResetRequest).filter(
@@ -184,7 +185,7 @@ def ensure_user_for_investor(
         access_password=password,
         investor_id=investor.id,
         role="manager" if investor.is_manager else "investor",
-        must_reset_password=password is None,
+        must_reset_password=True,
         password_hash=hash_password(password) if password else None,
         password_set_at=utcnow() if password else None,
         is_active=True,
@@ -633,13 +634,13 @@ def seed_users(db: Session) -> dict:
     return {"created_users": created, "updated": updated}
 
 
-def serialize_user(user: User) -> dict:
+def serialize_user(user: User, *, include_access_password: bool = True) -> dict:
     return {
         "id": user.id,
         "username": user.username,
         "email": user.email,
         "phone": user.investor.phone if user.investor else None,
-        "access_password": user.access_password,
+        "access_password": user.access_password if include_access_password else None,
         "role": user.role,
         "investor_id": user.investor_id,
         "investor_name": user.investor.name if user.investor else "",
@@ -663,9 +664,9 @@ def login_user(db: Session, username: str, password: str) -> dict:
     if not user:
         raise ValueError("שם משתמש או סיסמה שגויים")
 
-    if user.must_reset_password or not user.password_hash:
+    if not user.password_hash:
         raise PermissionError(
-            "אין סיסמה לחשבון זה עדיין. פנה למנהל להגדרת סיסמה — אין איפוס עצמי."
+            "אין סיסמה לחשבון זה עדיין. פנו למנהל להגדרת סיסמה."
         )
 
     if not verify_password(password, user.password_hash):
@@ -678,7 +679,11 @@ def login_user(db: Session, username: str, password: str) -> dict:
     token = create_access_token(
         user_id=user.id, role=user.role, investor_id=user.investor_id
     )
-    return {"access_token": token, "token_type": "bearer", "user": serialize_user(user)}
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": serialize_user(user, include_access_password=is_manager(user)),
+    }
 
 
 def request_password_reset(
@@ -695,8 +700,8 @@ def request_password_reset(
     # Always same message to avoid username enumeration.
     generic = {
         "message": (
-            "אם שם המשתמש קיים — נשלחה בקשת איפוס למנהל. "
-            "רק המנהל יכול להגדיר סיסמה חדשה."
+            "אם שם המשתמש שלך קיים — הבקשה הגיעה למנהל. "
+            "תקבלו סיסמה חדשה אחרי שהוא יאשר."
         )
     }
     if not user:
@@ -779,7 +784,7 @@ def fulfill_password_reset(
 
     user.password_hash = hash_password(new_password)
     user.access_password = new_password
-    user.must_reset_password = False
+    user.must_reset_password = True
     user.password_set_at = utcnow()
     req.status = "fulfilled"
     req.resolved_at = utcnow()
@@ -844,3 +849,26 @@ def reject_password_reset(
     db.commit()
     db.refresh(req)
     return req
+
+
+def change_own_password(
+    db: Session,
+    user: User,
+    *,
+    current_password: str,
+    new_password: str,
+) -> User:
+    if not user.password_hash or not verify_password(current_password, user.password_hash):
+        raise ValueError("הסיסמה הנוכחית שגויה")
+    if len(new_password) < 8:
+        raise ValueError("הסיסמה החדשה חייבת להכיל לפחות 8 תווים")
+    if current_password == new_password:
+        raise ValueError("בחרו סיסמה חדשה, שונה מהנוכחית")
+    user.password_hash = hash_password(new_password)
+    # Do not keep the investor's chosen password in plaintext for screenshots.
+    user.access_password = None
+    user.must_reset_password = False
+    user.password_set_at = utcnow()
+    db.commit()
+    db.refresh(user)
+    return user

@@ -4,7 +4,15 @@ import { PDF_BASE_STYLES, renderHtmlToPdfBlob, savePdfBlob } from "./pdfDocument
 import { buildMonthSchedule } from "./quoteSchedule";
 import { planTypeLabel } from "./planTypes";
 import { suggestUsername } from "./quoteAccess";
-import { canSendQuoteAccessMessage } from "./quoteStatus";
+import { canSendQuoteAccessMessage, normalizeQuoteStatus } from "./quoteStatus";
+
+function quoteDocumentBadge(status: string): string | null {
+  const normalized = normalizeQuoteStatus(status);
+  if (normalized === "pending" || status === "draft") return "טיוטה";
+  if (normalized === "approved") return "הצעה";
+  if (normalized === "converted") return "מסלול פעיל";
+  return null;
+}
 
 export type { MonthRow } from "./quoteSchedule";
 export { buildMonthSchedule } from "./quoteSchedule";
@@ -31,12 +39,12 @@ function formatQuoteDate(value?: string | null): string {
 function accessSectionHtml(quote: Quote): string {
   if (!canSendQuoteAccessMessage(quote.status)) return "";
   const start = quote.start_date ? formatQuoteDate(quote.start_date) : "";
-  if (!quote.access_username && !quote.access_password && !start) return "";
+  if (!quote.access_username && !start) return "";
   return `
     <section class="pdf-access">
       <div class="pdf-section-title">
-        <h2>כניסה למערכת תזרים</h2>
-        <p>פרטי הגישה נשלחים יחד עם ההצעה — אפשר להתחבר מיד אחרי האישור</p>
+        <h2>כניסה לתיק הפרטי</h2>
+        <p>שם המשתמש מוכן — הסיסמה נשלחת בנפרד, לא מודפסת כאן</p>
       </div>
       <div class="pdf-access__grid">
         ${
@@ -52,14 +60,6 @@ function accessSectionHtml(quote: Quote): string {
             ? `<div class="pdf-access__item">
           <span>שם משתמש</span>
           <strong class="ltr">${escapeHtml(quote.access_username)}</strong>
-        </div>`
-            : ""
-        }
-        ${
-          quote.access_password
-            ? `<div class="pdf-access__item">
-          <span>סיסמה</span>
-          <strong class="ltr">${escapeHtml(quote.access_password)}</strong>
         </div>`
             : ""
         }
@@ -115,7 +115,11 @@ function buildQuoteDocumentHtml(quote: Quote): string {
       </div>
       <div class="pdf-meta">
         <span>${created}</span>
-        <span class="pdf-badge">טיוטה</span>
+        ${
+          quoteDocumentBadge(quote.status)
+            ? `<span class="pdf-badge">${quoteDocumentBadge(quote.status)}</span>`
+            : ""
+        }
       </div>
     </header>
 
@@ -131,7 +135,7 @@ function buildQuoteDocumentHtml(quote: Quote): string {
       ${
         showCash
           ? `<div class="pdf-kpi">
-        <span class="pdf-kpi__label">רווח חודשי (מזומן)</span>
+        <span class="pdf-kpi__label">החזר חודשי (מזומן)</span>
         <strong class="pdf-kpi__value">${formatMoney(quote.monthly_investor_payout, true)}</strong>
       </div>`
           : ""
@@ -172,7 +176,7 @@ function buildQuoteDocumentHtml(quote: Quote): string {
             ? "צבירה לחיסכון עם ריבית דריבית כל 12 חודשים"
             : quote.plan_type === "hybrid"
               ? "החזר חודשי במזומן + צבירה לחיסכון עם ריבית דריבית"
-              : "רווח קבוע בכל חודש לאורך המסלול"
+              : "החזר קבוע בכל חודש לאורך המסלול"
         }</p>
       </div>
       <table class="pdf-table">
