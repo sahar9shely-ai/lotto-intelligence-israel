@@ -6532,6 +6532,18 @@ body {
   gap: 14px;
 }
 
+@media (min-width: 860px) {
+  .urgent-ops {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+
+  .urgent-ops__head,
+  .urgent-ops__loading {
+    grid-column: 1 / -1;
+  }
+}
+
 .urgent-ops__title {
   font-size: 0.72rem;
   font-weight: 600;
