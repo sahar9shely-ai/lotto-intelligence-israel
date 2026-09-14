@@ -17,6 +17,7 @@ from app.schemas.investments import (
     InvestorCreate,
     InvestorOut,
     InvestorUpdate,
+    PaymentNudgeListOut,
     PaymentOut,
     PaymentReportOut,
     PaymentUpdate,
@@ -51,16 +52,30 @@ InvestmentBase.metadata.create_all(bind=investment_engine)
 
 
 def init_investment_db() -> None:
-    from app.db.investment_session import InvestmentSessionLocal
+    import logging
+    import os
+
+    from app.db.investment_session import IS_SQLITE, InvestmentSessionLocal
     from app.db.schema_migrate import ensure_schema
 
     ensure_schema(investment_engine)
+    if IS_SQLITE and (os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID")):
+        logging.getLogger(__name__).warning(
+            "SQLite on Render is ephemeral — passwords and usernames vanish on every deploy. "
+            "Set DATABASE_URL to a Neon Postgres connection string."
+        )
 
     db = InvestmentSessionLocal()
     try:
         svc.seed_defaults(db)
         svc.repair_reporting_year_plans(db)
         svc.sync_track_continuity(db)
+        try:
+            svc.record_overdue_payment_nudge_events(db)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "payment confirmation nudge scan failed on startup"
+            )
     finally:
         db.close()
 
@@ -109,6 +124,8 @@ def get_site_status(
     db: Session = Depends(get_investment_db),
 ):
     """Readable by every logged-in user — drives the global update banner."""
+    from app.db.investment_session import storage_status
+
     settings = svc.ensure_settings(db)
     public_url = None
     # Managers see the live tunnel URL so bookmarks stay current after free-tunnel rotates.
@@ -116,11 +133,14 @@ def get_site_status(
         getattr(getattr(user, "investor", None), "is_manager", False)
     ):
         public_url = _read_public_url()
+    store = storage_status()
     return {
         "site_updating": bool(getattr(settings, "site_updating", False)),
         "site_updating_message": getattr(settings, "site_updating_message", None)
         or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
         "public_url": public_url,
+        "data_store": store["data_store"],
+        "data_persistent": store["data_persistent"],
     }
 
 
@@ -166,7 +186,9 @@ def update_settings(
 
 
 def _serialize_settings(settings) -> dict:
-    key = (getattr(settings, "assistant_api_key", None) or "").strip()
+    from app.services.assistant_service import _llm_credentials
+
+    provider, key = _llm_credentials(settings)
     return {
         "default_monthly_rate_percent": settings.default_monthly_rate_percent,
         "default_manager_fee_percent": settings.default_manager_fee_percent,
@@ -177,7 +199,7 @@ def _serialize_settings(settings) -> dict:
         "site_updating_message": getattr(settings, "site_updating_message", None)
         or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
         "slack_webhook_url": getattr(settings, "slack_webhook_url", None) or None,
-        "assistant_provider": getattr(settings, "assistant_provider", None) or "gemini",
+        "assistant_provider": provider or "gemini",
         "assistant_api_key_set": bool(key),
         "assistant_api_key_hint": (f"…{key[-4:]}" if len(key) >= 4 else None) if key else None,
     }
@@ -295,10 +317,11 @@ def list_investors(
     )
     if not is_manager(user):
         query = query.filter(Investor.id == user.investor_id)
-    investors = query.order_by(Investor.is_manager.desc(), Investor.name).all()
+    investors = query.order_by(Investor.name).all()
     for investor in investors:
         svc.sync_investor_track_continuity(db, investor)
-    rows = [svc.serialize_investor(i, db=db) for i in investors]
+    book = [i for i in investors if not svc.is_admin_shell(i)]
+    rows = [svc.serialize_investor(i, db=db) for i in book]
     db.commit()
     return rows
 
@@ -420,7 +443,11 @@ def list_plans(
     db.commit()
     plans = query.order_by(InvestmentPlan.start_date.desc()).all()
     hide_fees = not is_manager(user)
-    return [svc.serialize_plan(p, hide_fees=hide_fees) for p in plans]
+    return [
+        svc.serialize_plan(p, hide_fees=hide_fees)
+        for p in plans
+        if not svc.is_admin_shell(p.investor)
+    ]
 
 
 @router.post("/plans", response_model=PlanOut, status_code=201)
@@ -1224,7 +1251,11 @@ def list_payments(
         key=lambda p: (p.due_date, p.id),
         reverse=year is None,
     )
-    return [svc.serialize_payment(p) for p in ordered]
+    return [
+        svc.serialize_payment(p)
+        for p in ordered
+        if not svc.is_admin_shell(p.investor)
+    ]
 
 
 @router.get("/manager-income")
@@ -1283,6 +1314,29 @@ def align_calendar_year(
     return svc.align_plans_to_calendar_year(db, year=year)
 
 
+@router.get("/payments/confirmation-nudges", response_model=PaymentNudgeListOut)
+def list_confirmation_nudges(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Awaiting-confirmation payments that waited 3 Israel business days (Sun–Thu)."""
+    scoped = None if is_manager(user) else user.investor_id
+    items = svc.list_payment_confirmation_nudges(db, investor_id=scoped)
+    try:
+        svc.record_overdue_payment_nudge_events(db)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("payment nudge activity scan failed")
+    from app.services.israel_business_days import NUDGE_AFTER_BUSINESS_DAYS
+
+    return {
+        "items": items,
+        "after_business_days": NUDGE_AFTER_BUSINESS_DAYS,
+        "calendar": "israel_sun_thu",
+    }
+
+
 @router.patch("/payments/{payment_id}", response_model=PaymentOut)
 def update_payment(
     payment_id: int,
@@ -1325,6 +1379,7 @@ def update_payment(
 
     if data.get("status") in {"scheduled", "skipped"}:
         data["paid_at"] = None
+        payment.confirmation_requested_at = None
     for key, value in data.items():
         setattr(payment, key, value)
     db.commit()

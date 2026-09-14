@@ -290,13 +290,18 @@ def _apply_user_update(
     data = payload.model_dump(exclude_unset=True)
 
     if "username" in data and data["username"]:
+        username = auth_svc.normalize_username(str(data["username"]))
         try:
-            username = auth_svc.validate_username(str(data["username"]))
+            username = auth_svc.validate_username(username)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         clash = db.query(User).filter(User.username == username, User.id != user_id).first()
         if clash:
-            raise HTTPException(status_code=400, detail="שם המשתמש כבר בשימוש")
+            clash_name = clash.investor.name if clash.investor else clash.username
+            raise HTTPException(
+                status_code=400,
+                detail=f"שם המשתמש «{username}» כבר בשימוש אצל {clash_name}. בחרו שם אחר.",
+            )
         user.username = username
 
     if "email" in data:
@@ -348,8 +353,35 @@ def _apply_user_update(
         phone = str(data["phone"]).strip() if data["phone"] else None
         user.investor.phone = phone or None
 
+    new_password = data.get("new_password")
+    if new_password:
+        try:
+            auth_svc.set_user_password(db, user, str(new_password), commit=False)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     db.commit()
     db.refresh(user)
+    if user.investor:
+        db.refresh(user.investor)
+
+    from app.services import activity_service as activity_svc
+
+    changed = [key for key in data if data.get(key) not in (None, "")]
+    activity_svc.log_activity(
+        db,
+        kind="user_updated",
+        title=f"משתמש עודכן · {user.investor.name if user.investor else user.username}",
+        body=" · ".join(changed) or "פרטי משתמש",
+        severity="info",
+        actor=actor,
+        investor_id=user.investor_id,
+        investor_name=user.investor.name if user.investor else user.username,
+        entity_type="user",
+        entity_id=user.id,
+        href="/users",
+        commit=True,
+    )
     return auth_svc.serialize_user(user)
 
 

@@ -17,6 +17,14 @@ from app.models.investments import (
     SavingsAction,
     utcnow,
 )
+from app.services.israel_business_days import (
+    add_israel_business_days,
+    as_israel_date,
+    confirmation_nudge_due,
+    israel_business_days_elapsed,
+    israel_today,
+    is_israel_business_day,
+)
 
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 # Sunday–Thursday (Python weekday: Mon=0 … Sun=6).
@@ -32,6 +40,31 @@ MANAGER_FEE_KEYS = (
 QUOTE_STATUSES = frozenset({"pending", "approved", "converted", "rejected"})
 OPEN_QUOTE_STATUSES = frozenset({"pending", "approved", "converted"})
 _LEGACY_QUOTE_STATUS = {"draft": "pending", "sent": "pending", "archived": "rejected"}
+_ADMIN_SHELL_NAMES = frozenset({"מנהל מערכת", "מנהל", "מנהלת"})
+
+
+def is_admin_shell(investor: Optional[Investor]) -> bool:
+    """Operational admin row — not an investment book (unlike סהר)."""
+    if investor is None:
+        return False
+    from app.services.auth_service import (
+        ADMIN_INVESTOR_NAME,
+        ADMIN_USERNAME,
+        PERSONAL_INVESTOR_NAME,
+    )
+
+    name = (investor.name or "").strip()
+    if name == PERSONAL_INVESTOR_NAME:
+        return False
+    if name == ADMIN_INVESTOR_NAME or name in _ADMIN_SHELL_NAMES:
+        return True
+    user = getattr(investor, "user", None)
+    if user is not None and (getattr(user, "username", None) or "") == ADMIN_USERNAME:
+        return True
+    if not investor.is_manager:
+        return False
+    plans = list(getattr(investor, "plans", None) or [])
+    return not any((getattr(plan, "principal", 0) or 0) > 0 for plan in plans)
 
 
 def normalize_quote_status(status: Optional[str]) -> str:
@@ -78,23 +111,6 @@ def _as_utc(moment: datetime) -> datetime:
     if moment.tzinfo is None:
         return moment.replace(tzinfo=timezone.utc)
     return moment.astimezone(timezone.utc)
-
-
-def is_israel_business_day(day: date) -> bool:
-    return day.weekday() in ISRAEL_BUSINESS_WEEKDAYS
-
-
-def add_israel_business_days(start: date, count: int) -> date:
-    """Advance `count` Israeli business days after `start` (start itself is not counted)."""
-    if count <= 0:
-        return start
-    day = start
-    remaining = count
-    while remaining:
-        day += timedelta(days=1)
-        if is_israel_business_day(day):
-            remaining -= 1
-    return day
 
 
 def cooling_off_deadline_utc(approved_at: datetime, *, business_days: int = TOPUP_COOLING_OFF_BUSINESS_DAYS) -> datetime:
@@ -291,8 +307,9 @@ SYSTEM_INVESTOR_NAMES = frozenset({"מנהל מערכת", "סהר", "מנהל", 
 def seed_defaults(db: Session) -> dict:
     """Seed investors + users. Idempotent; safe on legacy DBs with a combined manager row.
 
-    Demo investors (בר/אופק/…) are created only on first bootstrap. After that they are
-    never recreated — deleting a user stays deleted across restarts/deploys.
+    Demo investors (בר/אופק/…) and the personal portfolio (סהר / sahar) are created only
+    on first bootstrap. After that they are never recreated — deleting a user stays
+    deleted across restarts/deploys. The operational admin account is independent.
     """
     from app.services.auth_service import ADMIN_INVESTOR_NAME, PERSONAL_INVESTOR_NAME
 
@@ -303,26 +320,33 @@ def seed_defaults(db: Session) -> dict:
     def investor_names() -> set[str]:
         return {i.name for i in db.query(Investor).all()}
 
-    # 1) Personal portfolio row — keep legacy id + plans (rename מנהל/מנהלת → סהר).
+    # 1) Personal portfolio row — first bootstrap only (never resurrect after delete).
+    # Keep legacy id + plans when renaming מנהל/מנהלת → סהר on unsplit DBs.
+    personal_seeded = bool(getattr(settings, "personal_investor_seeded", False))
     personal = db.query(Investor).filter(Investor.name == PERSONAL_INVESTOR_NAME).first()
     if personal is None:
         legacy = (
             db.query(Investor)
-            .filter(Investor.name.in_(("מנהל", "מנהלת", PERSONAL_INVESTOR_NAME)))
+            .filter(Investor.name.in_(("מנהל", "מנהלת")))
             .order_by(Investor.id.asc())
             .first()
         )
         if legacy is not None:
-            if legacy.name != PERSONAL_INVESTOR_NAME:
-                old_name = legacy.name
-                legacy.name = PERSONAL_INVESTOR_NAME
-                updated.append(f"renamed:{old_name}->{PERSONAL_INVESTOR_NAME}")
-        else:
-            db.add(Investor(name=PERSONAL_INVESTOR_NAME, is_manager=False))
+            old_name = legacy.name
+            legacy.name = PERSONAL_INVESTOR_NAME
+            legacy.is_manager = False
+            updated.append(f"renamed:{old_name}->{PERSONAL_INVESTOR_NAME}")
+            personal = legacy
+        elif not personal_seeded:
+            personal = Investor(name=PERSONAL_INVESTOR_NAME, is_manager=False)
+            db.add(personal)
             created.append(PERSONAL_INVESTOR_NAME)
-    personal = db.query(Investor).filter(Investor.name == PERSONAL_INVESTOR_NAME).first()
     if personal is not None:
         personal.is_manager = False
+
+    if not personal_seeded:
+        settings.personal_investor_seeded = True
+        updated.append("personal_investor_seeded")
 
     db.flush()
     personal_id = personal.id if personal else None
@@ -1030,6 +1054,7 @@ def serialize_payment(payment: Payment) -> dict:
         "manager_amount": payment.manager_amount,
         "status": payment.status,
         "paid_at": payment.paid_at,
+        "confirmation_requested_at": payment.confirmation_requested_at,
         "notes": payment.notes,
     }
 
@@ -1816,6 +1841,8 @@ def _plans_for_savings_summary(
     plans = query.order_by(InvestmentPlan.start_date, InvestmentPlan.id).all()
     chosen: list[InvestmentPlan] = []
     for plan in plans:
+        if is_admin_shell(plan.investor):
+            continue
         kind, _, savings_rate = normalize_plan_rates(
             getattr(plan, "plan_type", None) or "monthly",
             plan.monthly_rate_percent,
@@ -1855,11 +1882,11 @@ def available_payment_years(
 def get_payment_report(
     db: Session, *, year: int, investor_id: Optional[int] = None
 ) -> dict:
-    base = db.query(Payment)
+    base = db.query(Payment).options(joinedload(Payment.investor))
     if investor_id is not None:
         base = base.filter(Payment.investor_id == investor_id)
 
-    lifetime = base.all()
+    lifetime = [p for p in base.all() if not is_admin_shell(p.investor)]
     yearly = [
         p
         for p in lifetime
@@ -2282,6 +2309,7 @@ def request_payment_confirmation(
     if same_person:
         payment.status = "paid"
         payment.paid_at = date.today()
+        payment.confirmation_requested_at = None
         if commit:
             db.commit()
         return {
@@ -2293,6 +2321,8 @@ def request_payment_confirmation(
 
     payment.status = "awaiting_confirmation"
     payment.paid_at = None
+    if payment.confirmation_requested_at is None:
+        payment.confirmation_requested_at = utcnow()
     _notify_payment_confirmation_request(db, payment)
     if commit:
         db.commit()
@@ -2310,6 +2340,7 @@ def confirm_payment(db: Session, *, payment: Payment, actor) -> dict:
         raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "paid"
     payment.paid_at = date.today()
+    payment.confirmation_requested_at = None
     _notify_payment_confirmed(db, payment)
     db.commit()
     return {"status": "paid", "payment_id": payment.id}
@@ -2327,8 +2358,110 @@ def reject_payment_confirmation(db: Session, *, payment: Payment, actor) -> dict
         raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "scheduled"
     payment.paid_at = None
+    payment.confirmation_requested_at = None
     db.commit()
     return {"status": "scheduled", "payment_id": payment.id}
+
+
+def payment_focus_path(payment: Payment) -> str:
+    due = payment.due_date.isoformat() if payment.due_date else ""
+    params = f"investor_id={payment.investor_id}&payment_id={payment.id}"
+    if due:
+        params += f"&year={due[:4]}&month={due[:7]}"
+    return f"/payments?{params}"
+
+
+def serialize_payment_nudge(payment: Payment, *, today: Optional[date] = None) -> dict:
+    requested = payment.confirmation_requested_at or payment.due_date
+    start = as_israel_date(requested)
+    waiting = israel_business_days_elapsed(start, today) if start else 0
+    phone = payment.investor.phone if payment.investor else None
+    return {
+        "id": payment.id,
+        "plan_id": payment.plan_id,
+        "investor_id": payment.investor_id,
+        "investor_name": payment.investor.name if payment.investor else "",
+        "investor_phone": phone,
+        "due_date": payment.due_date,
+        "investor_amount": float(payment.investor_amount or 0),
+        "status": payment.status,
+        "confirmation_requested_at": payment.confirmation_requested_at,
+        "business_days_waiting": waiting,
+        "href": payment_focus_path(payment),
+        "has_phone": bool(phone and str(phone).strip()),
+    }
+
+
+def list_payment_confirmation_nudges(
+    db: Session,
+    *,
+    investor_id: Optional[int] = None,
+    today: Optional[date] = None,
+) -> list[dict]:
+    """Awaiting confirmations that waited 3 Israel business days (Sun–Thu)."""
+    today = israel_today(today)
+    query = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.status == "awaiting_confirmation")
+    )
+    if investor_id is not None:
+        query = query.filter(Payment.investor_id == investor_id)
+    rows: list[dict] = []
+    for payment in query.order_by(Payment.due_date.asc(), Payment.id.asc()).all():
+        requested = payment.confirmation_requested_at or payment.due_date
+        if not confirmation_nudge_due(requested, today=today):
+            continue
+        if is_admin_shell(payment.investor):
+            continue
+        rows.append(serialize_payment_nudge(payment, today=today))
+    return rows
+
+
+def record_overdue_payment_nudge_events(db: Session, *, today: Optional[date] = None) -> int:
+    """One activity event per overdue confirmation, at most once per Israel calendar day."""
+    from app.models.auth import ActivityEvent
+    from app.services import activity_service as activity_svc
+
+    today = israel_today(today)
+    items = list_payment_confirmation_nudges(db, today=today)
+    if not items:
+        return 0
+    logged = 0
+    for item in items:
+        existing = (
+            db.query(ActivityEvent)
+            .filter(
+                ActivityEvent.kind == "payment_nudge",
+                ActivityEvent.entity_type == "payment",
+                ActivityEvent.entity_id == item["id"],
+            )
+            .order_by(ActivityEvent.created_at.desc())
+            .first()
+        )
+        if existing and as_israel_date(existing.created_at) == today:
+            continue
+        activity_svc.log_activity(
+            db,
+            kind="payment_nudge",
+            title=f"נודניק אישור תשלום · {item['investor_name']}",
+            body=(
+                f"עברו {item['business_days_waiting']} ימי עסקים בלי אישור "
+                f"לחודש {item['due_date']} בסך {item['investor_amount']:,.0f} ₪"
+            ),
+            severity="urgent",
+            investor_id=item["investor_id"],
+            investor_name=item["investor_name"],
+            entity_type="payment",
+            entity_id=item["id"],
+            href=item["href"],
+            meta={"business_days_waiting": item["business_days_waiting"]},
+            commit=False,
+        )
+        logged += 1
+    if logged:
+        db.commit()
+    return logged
 
 
 def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
@@ -2350,6 +2483,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     if investor_id is not None:
         investors_query = investors_query.filter(Investor.id == investor_id)
     investors = investors_query.all()
+    book_investors = [i for i in investors if not is_admin_shell(i)]
 
     plans_query = (
         db.query(InvestmentPlan)
@@ -2358,7 +2492,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     )
     if investor_id is not None:
         plans_query = plans_query.filter(InvestmentPlan.investor_id == investor_id)
-    plans = plans_query.all()
+    plans = [p for p in plans_query.all() if not is_admin_shell(p.investor)]
 
     total_principal = 0.0
     monthly_investor_cash = 0.0
@@ -2368,6 +2502,8 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     monthly_manager_own_cash = 0.0
     monthly_manager_own_savings = 0.0
 
+    from app.services.auth_service import PERSONAL_INVESTOR_NAME
+
     for plan in plans:
         metrics = plan_metrics(plan, today)
         total_principal += plan.principal
@@ -2375,11 +2511,11 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         monthly_investor_savings += metrics["monthly_savings_accrual"]
         projected_savings_total += metrics["projected_savings_balance"]
         monthly_manager_fees += metrics["monthly_manager_fee"]
-        if plan.investor and plan.investor.is_manager:
+        if plan.investor and plan.investor.name == PERSONAL_INVESTOR_NAME:
             monthly_manager_own_cash += metrics["monthly_investor_payout"]
             monthly_manager_own_savings += metrics["monthly_savings_accrual"]
 
-    investors_summary = [serialize_investor(i, today) for i in investors]
+    investors_summary = [serialize_investor(i, today) for i in book_investors]
     # Lifetime savings across all tracks (completed + active), already de-overlapped.
     current_savings_total = round(
         sum(float(s.get("current_savings_balance") or 0) for s in investors_summary),
@@ -2387,19 +2523,23 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     )
 
     year_start = date(today.year, 1, 1)
-    paid_query = db.query(Payment).filter(
+    paid_query = db.query(Payment).options(joinedload(Payment.investor)).filter(
         Payment.status == "paid", Payment.paid_at >= year_start
     )
     if investor_id is not None:
         paid_query = paid_query.filter(Payment.investor_id == investor_id)
-    paid_year = paid_query.all()
+    paid_year = [p for p in paid_query.all() if not is_admin_shell(p.investor)]
     ytd_investor = sum(p.investor_amount for p in paid_year)
     ytd_manager = sum(p.manager_amount for p in paid_year)
 
-    lifetime_query = db.query(Payment).filter(Payment.status == "paid")
+    lifetime_query = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.status == "paid")
+    )
     if investor_id is not None:
         lifetime_query = lifetime_query.filter(Payment.investor_id == investor_id)
-    paid_lifetime = lifetime_query.all()
+    paid_lifetime = [p for p in lifetime_query.all() if not is_admin_shell(p.investor)]
     lifetime_investor = sum(p.investor_amount for p in paid_lifetime)
     lifetime_manager = sum(p.manager_amount for p in paid_lifetime)
 
@@ -2411,6 +2551,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     if investor_id is not None:
         upcoming_query = upcoming_query.filter(Payment.investor_id == investor_id)
     upcoming = upcoming_query.order_by(Payment.due_date.asc()).limit(16).all()
+    upcoming = [p for p in upcoming if not is_admin_shell(p.investor)]
     upcoming.sort(
         key=lambda p: (0 if p.status == "awaiting_confirmation" else 1, p.due_date, p.id)
     )
@@ -2424,6 +2565,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     if investor_id is not None:
         recent_query = recent_query.filter(Payment.investor_id == investor_id)
     recent = recent_query.order_by(Payment.paid_at.desc(), Payment.id.desc()).limit(8).all()
+    recent = [p for p in recent if not is_admin_shell(p.investor)][:8]
 
     monthly_manager_own = round(monthly_manager_own_cash + monthly_manager_own_savings, 2)
     return {
@@ -2446,7 +2588,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         "ytd_manager_earned": round(ytd_manager, 2),
         "lifetime_investor_paid": round(lifetime_investor, 2),
         "lifetime_manager_earned": round(lifetime_manager, 2),
-        "active_investors": len([i for i in investors if not i.is_manager and i.plans]),
+        "active_investors": len([i for i in book_investors if i.plans]),
         "active_plans": len(plans),
         "upcoming_payments": [serialize_payment(p) for p in upcoming],
         "recent_payments": [serialize_payment(p) for p in recent],
@@ -2473,7 +2615,7 @@ def get_manager_income_board(db: Session) -> dict:
     fee_rows: list[dict] = []
     monthly_fees_total = 0.0
     for inv in investors:
-        if inv.is_manager:
+        if is_admin_shell(inv):
             continue
         active = [p for p in (inv.plans or []) if p.status == "active"]
         if not active:
@@ -2511,8 +2653,6 @@ def get_manager_income_board(db: Session) -> dict:
     from app.services.auth_service import PERSONAL_INVESTOR_NAME
 
     manager_inv = next((i for i in investors if i.name == PERSONAL_INVESTOR_NAME), None)
-    if manager_inv is None:
-        manager_inv = next((i for i in investors if i.is_manager), None)
     own_plans_out: list[dict] = []
     own_principal = 0.0
     own_cash = 0.0

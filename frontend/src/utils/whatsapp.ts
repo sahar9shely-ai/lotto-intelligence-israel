@@ -97,6 +97,56 @@ export function whatsAppAccessUrl(
   return `https://wa.me/${number}?text=${text}`;
 }
 
+export type PaymentNudgeShare = {
+  investorName: string;
+  phone?: string | null;
+  dueDate: string;
+  amount: number;
+  href: string;
+  businessDaysWaiting: number;
+};
+
+export function paymentConfirmAbsoluteUrl(href: string, publicUrl?: string | null): string {
+  const base = (publicUrl || (typeof window !== "undefined" ? window.location.origin : "")).replace(
+    /\/$/,
+    "",
+  );
+  if (href.startsWith("http")) return href;
+  return `${base}${href.startsWith("/") ? href : `/${href}`}`;
+}
+
+export function buildPaymentNudgeWhatsAppMessage(
+  row: PaymentNudgeShare,
+  publicUrl?: string | null,
+): string {
+  const name = row.investorName.trim() || "שלום";
+  const month = row.dueDate.slice(0, 7);
+  const [year, mon] = month.split("-");
+  const monthLabel = mon && year ? `${mon}/${year}` : row.dueDate;
+  const amount = Math.round(row.amount).toLocaleString("he-IL");
+  const link = paymentConfirmAbsoluteUrl(row.href, publicUrl);
+  return [
+    `היי ${name},`,
+    "",
+    `עברו ${row.businessDaysWaiting} ימי עסקים מאז שנשלחה ההעברה לחודש ${monthLabel} בסך ${amount} ₪.`,
+    "אפשר לאשר קבלת התשלום כאן:",
+    link,
+    "",
+    "תודה,",
+    "תזרים",
+  ].join("\n");
+}
+
+export function whatsAppPaymentNudgeUrl(
+  row: PaymentNudgeShare,
+  publicUrl?: string | null,
+): string | null {
+  const number = toWhatsAppNumber(row.phone);
+  if (!number) return null;
+  const text = encodeURIComponent(buildPaymentNudgeWhatsAppMessage(row, publicUrl));
+  return `https://wa.me/${number}?text=${text}`;
+}
+
 export function canSharePdfFile(file: File): boolean {
   const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
   try {

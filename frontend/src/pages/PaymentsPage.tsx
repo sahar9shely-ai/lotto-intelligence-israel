@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
 import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
@@ -20,7 +21,18 @@ import {
 import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
 import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
 import { planTypeLabel } from "../utils/planTypes";
+import { isAdminShellInvestor } from "../utils/roles";
+import {
+  hasPaymentsFocus,
+  parsePaymentsFocusSearch,
+  paymentsFocusSearchKey,
+} from "../utils/paymentOps";
 import type { Plan } from "../types/investments";
+
+function visibleFocusEl(selector: string): HTMLElement | null {
+  const nodes = [...document.querySelectorAll<HTMLElement>(selector)];
+  return nodes.find((n) => n.getClientRects().length > 0) ?? nodes[0] ?? null;
+}
 
 type DetailFocus =
   | "yearly-paid"
@@ -98,11 +110,17 @@ export function PaymentsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const [searchParams] = useSearchParams();
   const yearNow = new Date().getFullYear();
-  const [year, setYear] = useState(yearNow);
-  const [status, setStatus] = useState<string>("");
-  const [investorId, setInvestorId] = useState<string>("");
+  const incomingFocus = parsePaymentsFocusSearch(searchParams);
+  const [year, setYear] = useState(incomingFocus.year ?? yearNow);
+  const [status, setStatus] = useState<string>(incomingFocus.status ?? "");
+  const [investorId, setInvestorId] = useState<string>(incomingFocus.investorId);
+  const [focusPaymentId, setFocusPaymentId] = useState<number | null>(incomingFocus.paymentId);
+  const [focusMonth, setFocusMonth] = useState<string | null>(incomingFocus.month);
   const [allYears, setAllYears] = useState(false);
+  const appliedSearchRef = useRef<string | null>(null);
+  const scrolledFocusRef = useRef("");
   const [detailFocus, setDetailFocus] = useState<DetailFocus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
@@ -116,6 +134,33 @@ export function PaymentsPage() {
   const [manageYear, setManageYear] = useState(false);
   const paymentsPanelRef = useRef<HTMLDivElement | null>(null);
   const savingsPanelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const key = paymentsFocusSearchKey(searchParams);
+    if (appliedSearchRef.current === key) return;
+    const prev = appliedSearchRef.current;
+    appliedSearchRef.current = key;
+    const focus = parsePaymentsFocusSearch(searchParams);
+    if (!hasPaymentsFocus(focus)) {
+      if (prev) {
+        setInvestorId("");
+        setStatus("");
+        setYear(yearNow);
+        setAllYears(false);
+        setFocusPaymentId(null);
+        setFocusMonth(null);
+      }
+      return;
+    }
+    scrolledFocusRef.current = "";
+    if (focus.year) setYear(focus.year);
+    setStatus(focus.status ?? "");
+    setInvestorId(focus.investorId);
+    setAllYears(false);
+    setDetailFocus(null);
+    setFocusPaymentId(focus.paymentId);
+    setFocusMonth(focus.month);
+  }, [searchParams, yearNow]);
 
   const investorFilter = investorId ? Number(investorId) : undefined;
 
@@ -169,6 +214,58 @@ export function PaymentsPage() {
       a.due_date === b.due_date ? a.id - b.id : a.due_date < b.due_date ? -1 : 1,
     );
   }, [data]);
+
+  useEffect(() => {
+    if (!focusPaymentId && !focusMonth) return;
+    if (loading) return;
+    const token = `${focusPaymentId ?? ""}|${focusMonth ?? ""}|${investorId}|${year}|${payments.length}`;
+    if (scrolledFocusRef.current === token) return;
+
+    const findTarget = (): HTMLElement | null => {
+      if (focusPaymentId) {
+        const byId = visibleFocusEl(`[data-payment-id="${focusPaymentId}"]`);
+        if (byId) return byId;
+      }
+      if (!focusMonth) return null;
+      const monthMatches = [
+        ...document.querySelectorAll<HTMLElement>(`[data-payment-month="${focusMonth}"]`),
+      ];
+      const forInvestor = investorId
+        ? monthMatches.filter((n) => n.dataset.investorId === investorId)
+        : monthMatches;
+      return forInvestor.find((n) => n.getClientRects().length > 0) ?? forInvestor[0] ?? null;
+    };
+
+    const timers: number[] = [];
+    const reveal = (el: HTMLElement) => {
+      el.classList.add("is-target");
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      scrolledFocusRef.current = token;
+    };
+
+    const attempt = () => {
+      const el = findTarget();
+      if (!el) {
+        if (payments.length === 0) {
+          paymentsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          scrolledFocusRef.current = token;
+        }
+        return;
+      }
+      reveal(el);
+      // Status-report / savings panels load after the list and push the row down.
+      timers.push(
+        window.setTimeout(() => {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 700),
+      );
+      timers.push(window.setTimeout(() => el.classList.remove("is-target"), 4200));
+    };
+
+    timers.push(window.setTimeout(attempt, 80));
+    return () => timers.forEach((id) => window.clearTimeout(id));
+  }, [loading, payments, focusPaymentId, focusMonth, investorId, year]);
+
   const yearly = report?.yearly;
   const lifetime = report?.lifetime;
 
@@ -179,6 +276,7 @@ export function PaymentsPage() {
     }
     return [...map.entries()]
       .map(([id, name]) => ({ id, name }))
+      .filter((inv) => !isAdminShellInvestor(inv))
       .sort((a, b) => a.name.localeCompare(b.name, "he"));
   }, [yearAll]);
 
@@ -359,11 +457,6 @@ export function PaymentsPage() {
     savingsPlansInView,
   ]);
 
-  const selectedTrackPlan = useMemo(() => {
-    if (!investorFilter) return null;
-    return primaryPlanForInvestor(plans, investorFilter, year);
-  }, [plans, investorFilter, year]);
-
   function clearDetailFocus() {
     setDetailFocus(null);
     setAllYears(false);
@@ -462,9 +555,9 @@ export function PaymentsPage() {
 
   const yearOptions = useMemo(() => {
     const fromApi = report?.available_years ?? [];
-    const set = new Set<number>([...fromApi, yearNow, yearNow - 1, yearNow - 2, 2025]);
+    const set = new Set<number>([...fromApi, yearNow, yearNow - 1, yearNow - 2, 2025, year]);
     return [...set].sort((a, b) => b - a);
-  }, [report?.available_years, yearNow]);
+  }, [report?.available_years, yearNow, year]);
 
   const selectedInvestorName = useMemo(() => {
     if (!investorId) return null;
@@ -795,21 +888,9 @@ export function PaymentsPage() {
       <Toast message={message} onClear={clearMessage} />
       <header className="page-intro">
         <div>
-          <p className="page-intro__eyebrow">
-            {isManager ? "ניהול תשלומים" : "התיק הפרטי"}
-          </p>
           <h1 className="page-intro__title">
             {isManager ? "תשלומים והיסטוריה" : "התשלומים שלך"}
           </h1>
-          <p className="page-intro__lead">
-            {isManager
-              ? selectedTrackPlan && selectedInvestorName
-                ? `${selectedInvestorName} · ${formatCalendarMonth(selectedTrackPlan.start_date)} ${selectedTrackPlan.start_date.slice(0, 4)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))} ${planTrackEnd(selectedTrackPlan).slice(0, 4)}`
-                : `שנת ${year} · בחרו משקיע למעלה כדי לראות מסלול אחד בבירור.`
-              : selectedTrackPlan
-                ? `המסלול שלך · ${formatCalendarMonth(selectedTrackPlan.start_date)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))}`
-                : "כאן מאשרים קבלה ורואים מה שולם ומה מתוכנן."}
-          </p>
         </div>
         <div className="page-head__actions">
           <button
@@ -818,11 +899,11 @@ export function PaymentsPage() {
             disabled={pdfBusy}
             onClick={() => void exportMonthlyPdf()}
           >
-            {pdfBusy ? "מכינים PDF..." : "הורדת דוח חודשי"}
+            {pdfBusy ? "מכינים PDF..." : "דוח חודשי"}
           </button>
           <button
             type="button"
-            className="btn btn--ghost"
+            className="btn btn--ghost hide-on-phone"
             disabled={pdfBusy}
             onClick={exportYearPdf}
           >
@@ -923,7 +1004,9 @@ export function PaymentsPage() {
               }}
             >
               <option value="">הכל</option>
-              {(investors ?? []).map((i) => (
+              {(investors ?? [])
+                .filter((i) => !isAdminShellInvestor(i))
+                .map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
                 </option>
@@ -933,10 +1016,9 @@ export function PaymentsPage() {
         ) : null}
       </div>
 
-      <div className="grid-2">
+      <div className="grid-2 hide-on-phone">
         <Panel
           title="סיכום שנתי"
-          subtitle={`שנת ${year} · לחצו על משבצת לפירוט`}
         >
           <div className="stats-grid stats-grid--compact">
             <Stat
@@ -978,7 +1060,6 @@ export function PaymentsPage() {
 
         <Panel
           title="סיכום סה״כ"
-          subtitle="כל השנים · לחצו על משבצת לפירוט"
         >
           <div className="stats-grid stats-grid--compact">
             <Stat
@@ -1024,6 +1105,18 @@ export function PaymentsPage() {
         </Panel>
       </div>
 
+      {(focusPaymentId || focusMonth) && !detailFocus ? (
+        <div className="detail-focus-banner" role="status">
+          <div>
+            <strong>טיפול בהעברה</strong>
+            <span className="muted">
+              {selectedInvestorName ? ` · ${selectedInvestorName}` : ""}
+              {focusMonth ? ` · ${formatCalendarMonth(`${focusMonth}-01`)}` : ""}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
       {detailFocus ? (
         <div className="detail-focus-banner" role="status">
           <div>
@@ -1049,8 +1142,8 @@ export function PaymentsPage() {
 
       {isManager && yearInvestors.length > 0 ? (
         <Panel
+          className="hide-on-phone"
           title={`מי בלוח ${year}`}
-          subtitle="לחצו על שם כדי לראות רק אותו. הסרה מהשנה נמצאת תחת עריכה."
           action={
             <button
               type="button"
@@ -1118,12 +1211,15 @@ export function PaymentsPage() {
       {activeSavingsPlans.length > 0 ? (
         <div
           ref={savingsPanelRef}
-          className={
+          className={[
+            "hide-on-phone",
             detailFocus === "lifetime-savings-now" ||
             detailFocus === "lifetime-savings-end"
               ? "detail-target detail-target--active"
-              : undefined
-          }
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined}
         >
           <Panel
             title={
@@ -1133,7 +1229,6 @@ export function PaymentsPage() {
                   ? "פירוט · חיסכון עד סוף מסלול"
                   : "חיסכון פעיל · לפי תנאי מסלול"
             }
-            subtitle="מסלולים פעילים בלבד · כמה קיבל במזומן, כמה נצבר בחיסכון, ומה הסה״כ עד עכשיו"
           >
             {savingsByInvestorCards.length > 1 ? (
               <div className="savings-grand-total">
@@ -1323,8 +1418,8 @@ export function PaymentsPage() {
 
       {closedSavingsPlans.length > 0 ? (
         <Panel
+          className="hide-on-phone"
           title="תיקי חיסכון סגורים"
-          subtitle="מופרדים מהפעילים · מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה"
         >
           <div className="closed-plans">
             {closedSavingsPlans.map((p) => (
@@ -1357,8 +1452,8 @@ export function PaymentsPage() {
 
       {statusReportPlans.length > 0 ? (
         <Panel
+          className="hide-on-phone"
           title="דוח מצב · מתחילת מסלול עד סוף מסלול"
-          subtitle="לפי תנאי המסלול של כל משקיע — בלי חודשים שלפני ההתחלה ובלי קיצוץ מלאכותי לסוף שנה"
         >
           {statusReportPlans.map((p) => (
             <div
@@ -1380,6 +1475,7 @@ export function PaymentsPage() {
 
       <div
         ref={paymentsPanelRef}
+        id="payments-list"
         className={
           detailFocus &&
           detailFocus !== "lifetime-savings-now" &&
@@ -1398,18 +1494,11 @@ export function PaymentsPage() {
               ? "תשלומים · כל השנים"
               : `תשלומי ${year}`
         }
-        subtitle={
-          detailFocus === "yearly-fees" || detailFocus === "lifetime-fees"
-            ? "תשלומים שבוצעו · עמלה בעמודה ייעודית"
-            : allYears
-              ? "כל התשלומים בכל השנים · מסונן לפי המשבצת שנבחרה"
-              : "תשלומי מזומן שחלים בשנה זו · רק חודשים שהמשקיע במסלול בהם"
-        }
         action={
           isManager && !allYears && (yearly?.scheduled_count ?? 0) > 0 ? (
             <button
               type="button"
-              className="btn btn--small"
+              className="btn btn--small hide-on-phone"
               disabled={markBusy}
               onClick={markEntireYearPaid}
             >
@@ -1481,7 +1570,13 @@ export function PaymentsPage() {
               </thead>
               <tbody>
                 {payments.map((p) => (
-                  <tr key={p.id}>
+                  <tr
+                    key={p.id}
+                    className="payment-row"
+                    data-payment-id={p.id}
+                    data-payment-month={p.due_date.slice(0, 7)}
+                    data-investor-id={p.investor_id}
+                  >
                     {isManager ? <td>{p.investor_name}</td> : null}
                     {allYears ? <td>{p.due_date.slice(0, 4)}</td> : null}
                     <td>{formatCalendarMonth(p.due_date)}</td>
@@ -1519,7 +1614,13 @@ export function PaymentsPage() {
           </div>
           <ul className="pay-cards">
             {payments.map((p) => (
-              <li key={`card-${p.id}`} className={`pay-card pay-card--${p.status}`}>
+              <li
+                key={`card-${p.id}`}
+                className={`pay-card pay-card--${p.status}`}
+                data-payment-id={p.id}
+                data-payment-month={p.due_date.slice(0, 7)}
+                data-investor-id={p.investor_id}
+              >
                 <div className="pay-card__top">
                   <div>
                     <strong className="pay-card__title">

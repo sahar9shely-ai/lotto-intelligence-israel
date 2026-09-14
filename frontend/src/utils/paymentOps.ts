@@ -1,5 +1,6 @@
 import type { Payment } from "../types/investments";
 import { formatCalendarMonth, todayISO } from "./format";
+import { isAdminShellInvestor } from "./roles";
 
 export type UrgentInvestorRow = {
   investorId: number;
@@ -64,6 +65,7 @@ export function buildUrgentPaymentOps(
 
   for (const payment of payments) {
     if (cashAmount(payment) <= 0) continue;
+    if (isAdminShellInvestor({ name: payment.investor_name })) continue;
     if (investorId != null && payment.investor_id !== investorId) continue;
     if (!isOpenPayment(payment.status)) continue;
 
@@ -102,4 +104,61 @@ export function overdueMonthsLabel(monthKeys: string[]): string {
   if (labels.length === 0) return "";
   if (labels.length > 3) return "חודשים קודמים";
   return joinHebrewList(labels);
+}
+
+/** Oldest due date first — the payment the admin should handle now. */
+export function primaryUrgentRow(rows: UrgentInvestorRow[]): UrgentInvestorRow | null {
+  if (rows.length === 0) return null;
+  return [...rows].sort((a, b) => {
+    if (a.dueDate !== b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+    return a.investorName.localeCompare(b.investorName, "he");
+  })[0];
+}
+
+export type PaymentsFocusSearch = {
+  investorId: string;
+  paymentId: number | null;
+  year: number | null;
+  month: string | null;
+  status: string | null;
+};
+
+/** Deep-link to the payments board for one investor + month/payment. */
+export function paymentsFocusHref(row: {
+  investorId: number;
+  paymentId?: number | null;
+  dueDate?: string | null;
+}): string {
+  const params = new URLSearchParams();
+  params.set("investor_id", String(row.investorId));
+  if (row.paymentId) params.set("payment_id", String(row.paymentId));
+  const due = row.dueDate || "";
+  if (/^\d{4}-\d{2}/.test(due)) {
+    params.set("year", due.slice(0, 4));
+    params.set("month", due.slice(0, 7));
+  }
+  return `/payments?${params.toString()}`;
+}
+
+export function parsePaymentsFocusSearch(search: URLSearchParams): PaymentsFocusSearch {
+  const investorId = search.get("investor_id") || "";
+  const pidRaw = search.get("payment_id");
+  const paymentId = pidRaw && /^\d+$/.test(pidRaw) ? Number(pidRaw) : null;
+  const monthRaw = search.get("month");
+  const month = monthRaw && /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : null;
+  const yearRaw = search.get("year");
+  let year: number | null = null;
+  if (yearRaw && /^\d{4}$/.test(yearRaw)) year = Number(yearRaw);
+  else if (month) year = Number(month.slice(0, 4));
+  const statusRaw = search.get("status");
+  const status = statusRaw && statusRaw.length > 0 ? statusRaw : null;
+  return { investorId, paymentId, year, month, status };
+}
+
+export function paymentsFocusSearchKey(search: URLSearchParams): string {
+  return search.toString();
+}
+
+export function hasPaymentsFocus(focus: PaymentsFocusSearch): boolean {
+  return Boolean(focus.investorId || focus.paymentId || focus.month);
 }

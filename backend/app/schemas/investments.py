@@ -205,9 +205,31 @@ class PaymentOut(BaseModel):
     manager_amount: float
     status: str
     paid_at: Optional[date] = None
+    confirmation_requested_at: Optional[datetime] = None
     notes: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class PaymentNudgeOut(BaseModel):
+    id: int
+    plan_id: int
+    investor_id: int
+    investor_name: str
+    investor_phone: Optional[str] = None
+    due_date: date
+    investor_amount: float
+    status: str
+    confirmation_requested_at: Optional[datetime] = None
+    business_days_waiting: int
+    href: str
+    has_phone: bool
+
+
+class PaymentNudgeListOut(BaseModel):
+    items: list[PaymentNudgeOut]
+    after_business_days: int = 3
+    calendar: str = "israel_sun_thu"
 
 
 class QuoteCreate(BaseModel):
@@ -319,6 +341,8 @@ class SiteStatusOut(BaseModel):
     site_updating: bool
     site_updating_message: str
     public_url: Optional[str] = None
+    data_store: str = "sqlite"
+    data_persistent: bool = True
 
 
 class SlackAnnounceOut(BaseModel):

@@ -56,6 +56,15 @@ InvestmentSessionLocal = sessionmaker(
 )
 
 
+def storage_status() -> dict:
+    """Describe where investor/user data lives and whether it survives Render deploys."""
+    on_render = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"))
+    return {
+        "data_store": "sqlite" if IS_SQLITE else "postgres",
+        "data_persistent": not (IS_SQLITE and on_render),
+    }
+
+
 def get_investment_db():
     db = InvestmentSessionLocal()
     try:

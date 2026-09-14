@@ -13,7 +13,7 @@ import { api } from "../services/api";
 import type { Quote } from "../types/investments";
 import { suggestPassword, suggestUsername } from "../utils/quoteAccess";
 import { buildMonthSchedule, downloadQuotePdf, quotePdfDisplayLabel, quotePdfFile, saveQuotePdfFile } from "../utils/quotePdf";
-import { formatDate, formatMoney, formatPercent, todayISO } from "../utils/format";
+import { formatDate, formatMoney, todayISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
 import {
   canApproveQuote,
@@ -26,7 +26,6 @@ import {
   isRejectedQuote,
   normalizeQuoteStatus,
   quoteMoneyPhaseLabel,
-  quotePipelineStepIndex,
   quoteStatusLabel,
   type QuoteViewTab,
 } from "../utils/quoteStatus";
@@ -384,11 +383,7 @@ export function QuotesPage() {
       {confirmDialog}
       <header className="page-intro page-intro--admin">
         <div>
-          <p className="page-intro__eyebrow">ניהול הצעות</p>
           <h1 className="page-intro__title">הצעות למשקיעים חדשים</h1>
-          <p className="page-intro__lead">
-            משפך ברור: הצעה → אישור → קליטה כמשקיע → שליחת כניסה.
-          </p>
         </div>
         <div className="page-head__actions">
           <button
@@ -430,7 +425,6 @@ export function QuotesPage() {
       {formOpen ? (
         <Panel
           title={editing ? `עריכת הצעה — ${editing.prospect_name}` : "סיכום הצעה"}
-          subtitle="בחרו סוג מסלול: החזר חודשי, חיסכון או משולב"
         >
           <form className="form" onSubmit={onSave} key={editing?.id ?? "new"}>
             <div className="form__grid">
@@ -653,9 +647,6 @@ export function QuotesPage() {
                 <p className="quote-phase-line">{quoteMoneyPhaseLabel(q.status)}</p>
                 {nextHint && viewTab === "pipeline" ? (
                   <div className="step-window">
-                    <p className="step-window__eyebrow">
-                      שלב {quotePipelineStepIndex(q.status) + 1} מתוך 3
-                    </p>
                     <p className="step-window__title">{nextHint}</p>
                     <div className="step-window__cta">
                       {canApproveQuote(q.status) ? (
@@ -701,15 +692,6 @@ export function QuotesPage() {
                     </div>
                   </div>
                 ) : null}
-                <p className="quote-card__lead">
-                  {planTypeLabel(q.plan_type)} · קרן {formatMoney(q.principal)} ·{" "}
-                  {q.plan_type === "savings"
-                    ? `${formatPercent(q.savings_rate_percent)} לחיסכון`
-                    : q.plan_type === "hybrid"
-                      ? `${formatPercent(q.monthly_rate_percent)} חודשי + ${formatPercent(q.savings_rate_percent)} חיסכון`
-                      : `${formatPercent(q.monthly_rate_percent)} לחודש`}{" "}
-                  · {q.duration_months} חודשים
-                </p>
                 <dl className="quote-dl">
                   {q.plan_type !== "savings" ? (
                     <div>
@@ -966,10 +948,6 @@ export function QuotesPage() {
             </header>
             <form className="request-form modal__form" onSubmit={convertQuote}>
               <div className="modal__body">
-                <p className="request-form__lead">
-                  {planTypeLabel(converting.plan_type)} · קרן {formatMoney(converting.principal)} ·{" "}
-                  {converting.duration_months} חודשים. ייפתח משקיע חדש עם מסלול פעיל לפי ההצעה.
-                </p>
                 {convertError ? <p className="form-error">{convertError}</p> : null}
                 <label>
                   תחילת המסלול
@@ -1050,10 +1028,6 @@ export function QuotesPage() {
             </header>
             <div className="request-form modal__form">
               <div className="modal__body">
-              <p className="request-form__lead">
-                הקובץ ירד למחשב. וואטסאפ בדפדפן לא מצרף קבצים אוטומטית — צריך לצרף את ה-PDF
-                ידנית לפני השליחה.
-              </p>
               <p className="whatsapp-send__file">
                 {quotePdfDisplayLabel(whatsappSend.quote)}
                 <span className="whatsapp-send__file-tech">{whatsappSend.file.name}</span>

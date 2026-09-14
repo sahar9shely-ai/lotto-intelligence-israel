@@ -1,5 +1,5 @@
-import { FormEvent, useCallback, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { RevealSecret } from "../components/RevealSecret";
 import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
@@ -14,6 +14,7 @@ import { api } from "../services/api";
 import type { Investor, Plan, Settings } from "../types/investments";
 import { formatMoney, formatPercent, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
+import { isAdminShellInvestor } from "../utils/roles";
 import {
   copyAccessWhatsAppMessage,
   formatPhoneDisplay,
@@ -38,6 +39,7 @@ function totalMonthlyOf(inv: Investor) {
 export function InvestorsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
+  const [searchParams] = useSearchParams();
   const { data: investors, error, loading, reload } = useAsync(() => api.investors(), []);
   const { data: settings } = useAsync(
     () => (isManager ? api.settings() : Promise.resolve(null)),
@@ -61,6 +63,12 @@ export function InvestorsPage() {
   const [showTopupCreate, setShowTopupCreate] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "topup" && !isManager) {
+      setShowTopupCreate(true);
+    }
+  }, [searchParams, isManager]);
 
   const refreshAll = useCallback(() => {
     reload();
@@ -101,17 +109,22 @@ export function InvestorsPage() {
     setMessage(`נפתחה הודעת התחברות מוכנה עבור ${inv.name}`);
   }
 
+  const bookInvestors = useMemo(
+    () => (investors ?? []).filter((inv) => !isAdminShellInvestor(inv)),
+    [investors],
+  );
+
   const effectiveScope: Scope = useMemo(() => {
     if (scope != null) return scope;
-    if (!isManager && investors?.[0]) return investors[0].id;
+    if (!isManager && bookInvestors[0]) return bookInvestors[0].id;
     return "all";
-  }, [scope, isManager, investors]);
+  }, [scope, isManager, bookInvestors]);
 
   const selected = useMemo(() => {
-    if (!investors?.length) return null;
+    if (!bookInvestors.length) return null;
     if (effectiveScope === "all") return null;
-    return investors.find((i) => i.id === effectiveScope) ?? investors[0] ?? null;
-  }, [investors, effectiveScope]);
+    return bookInvestors.find((i) => i.id === effectiveScope) ?? bookInvestors[0] ?? null;
+  }, [bookInvestors, effectiveScope]);
 
   const selectedPlans = useMemo(() => {
     if (!selected) return [];
@@ -134,16 +147,14 @@ export function InvestorsPage() {
   );
 
   const portfolio = useMemo(() => {
-    const list = investors ?? [];
+    const list = bookInvestors;
     return {
       principal: list.reduce((s, i) => s + (i.active_principal || 0), 0),
       cash: list.reduce((s, i) => s + cashOf(i), 0),
       savings: list.reduce((s, i) => s + savingsOf(i), 0),
       savingsBalance: list.reduce((s, i) => s + (i.current_savings_balance || 0), 0),
-      count: list.length,
-      activePlans: list.reduce((s, i) => s + (i.active_plans_count || 0), 0),
     };
-  }, [investors]);
+  }, [bookInvestors]);
 
   async function onCreateInvestor(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -319,7 +330,7 @@ export function InvestorsPage() {
           >
             סה״כ כולם
           </button>
-          {investors.map((inv) => (
+          {bookInvestors.map((inv) => (
             <button
               key={inv.id}
               type="button"
@@ -342,7 +353,6 @@ export function InvestorsPage() {
         <div className="stack">
           <Panel
             title="סיכום כל המשקיעים"
-            subtitle={`${portfolio.count} משקיעים · ${portfolio.activePlans} מסלולים פעילים · מזומן ≠ חיסכון`}
           >
             <div className="money-ledger">
               <div className="money-ledger__item money-ledger__item--accent">
@@ -371,7 +381,7 @@ export function InvestorsPage() {
             </div>
           </Panel>
 
-          <Panel title="פירוט לפי משקיע" subtitle="לחצו על שם כדי לפתוח את הכרטיס המלא">
+          <Panel title="פירוט לפי משקיע">
             <div className="investor-table-wrap table-wrap--desktop">
               <table className="investor-table">
                 <thead>
@@ -387,7 +397,7 @@ export function InvestorsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {investors.map((inv) => (
+                  {bookInvestors.map((inv) => (
                     <tr key={inv.id}>
                       <td>
                         <button
@@ -419,7 +429,7 @@ export function InvestorsPage() {
               </table>
             </div>
             <ul className="investor-cards">
-              {investors.map((inv) => (
+              {bookInvestors.map((inv) => (
                 <li key={`card-${inv.id}`}>
                   <button
                     type="button"
@@ -472,11 +482,6 @@ export function InvestorsPage() {
         <div className="stack">
           <Panel
             title={selected.name}
-            subtitle={
-              selected.is_manager
-                ? "השקעה עצמית · עמלה נפרדת בדשבורד"
-                : `${selected.months_in_program} חודשים בתוכנית · ${selected.active_plans_count ?? activeSelectedPlans.length} מסלולים פעילים`
-            }
             action={
               <div className="investor-access-actions">
                 <Link className="text-link" to="/payments">
@@ -555,7 +560,7 @@ export function InvestorsPage() {
           </Panel>
 
           {selectedPlans.length === 0 ? (
-            <Panel title="אין מסלול עדיין" subtitle="פתחו מסלול כדי להגדיר קרן ואחוזים">
+            <Panel title="אין מסלול עדיין">
               <p className="empty">עדיין אין מסלול למשקיע הזה.</p>
               {isManager ? (
                 <button
@@ -630,7 +635,6 @@ export function InvestorsPage() {
                 ) : (
                   <Panel
                     title="אין מסלול פעיל"
-                    subtitle="המסלולים הסגורים נמצאים בלשונית תיקים סגורים"
                   >
                     <p className="empty">אין מסלול פעיל למשקיע הזה כרגע.</p>
                     {closedSelectedPlans.length > 0 ? (
@@ -656,7 +660,6 @@ export function InvestorsPage() {
               ) : closedSelectedPlans.length > 0 ? (
                 <Panel
                   title="תיקים סגורים"
-                  subtitle="מופרדים מהפעילים · מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה"
                 >
                   <div className="closed-plans">
                     {closedSelectedPlans.map((plan) => (
@@ -700,7 +703,7 @@ export function InvestorsPage() {
                   </div>
                 </Panel>
               ) : (
-                <Panel title="אין תיקים סגורים" subtitle="עדיין לא נסגר אף מסלול למשקיע הזה">
+                <Panel title="אין תיקים סגורים">
                   <p className="empty">אין תיקים סגורים.</p>
                   <button
                     type="button"
@@ -824,8 +827,7 @@ function PlanCard({
 
   return (
     <Panel
-      title={`${planTypeLabel(plan.plan_type)} · מסלול #${plan.id}`}
-      subtitle={`${statusLabelHe} · ${plan.duration_months} חודשים · ${plan.months_elapsed}/${plan.duration_months}`}
+      title={`${statusLabelHe} · ${planTypeLabel(plan.plan_type)} · מסלול #${plan.id}`}
       action={
         <div className="page-head__actions">
           <button type="button" className="btn btn--small btn--ghost" onClick={onToggleReport}>

@@ -1,12 +1,16 @@
 # Free forever stack for תזרים:
 # - Web service on Render Free (sleeps after ~15 min idle — first open may take ~1 min)
 # - Postgres data on Neon Free (persistent — survives sleep/redeploy)
+# SQLite inside the container is EPHEMERAL on Render Free (no disk). Without DATABASE_URL
+# every deploy wipes users/passwords and re-runs seed. Neon is required in production.
 #
 # Setup:
 # 1) Create a free Neon DB: https://console.neon.tech
 # 2) Copy the connection string
 # 3) In Render → New → Blueprint → this repo
-# 4) Set DATABASE_URL to the Neon string (and APP_PUBLIC_URL after first deploy)
+# 4) Set DATABASE_URL to the Neon string (required — otherwise passwords vanish on deploy)
+# 5) Optional: GEMINI_API_KEY for the personal assistant (or GOOGLE_API_KEY / OPENAI_API_KEY)
+# 6) APP_PUBLIC_URL after first deploy
 services:
   - type: web
     name: tazrim
@@ -21,6 +25,8 @@ services:
       - key: APP_PUBLIC_URL
         sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
         sync: false
       - key: FRONTEND_DIST
         value: /app/frontend/dist

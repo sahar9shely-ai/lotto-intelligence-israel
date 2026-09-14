@@ -101,9 +101,6 @@ function CreateTrackForm({
     >
       <div className="modal__body">
       {error ? <p className="form-error">{error}</p> : null}
-      <p className="request-form__lead">
-        הבקשה תעבור למנהל. לאחר אישור התנאים יופק חוזה לחתימה דיגיטלית של שני הצדדים.
-      </p>
       <label className="request-form__amount">
         <span>סכום הקרן למסלול החדש</span>
         <div className="money-input">
@@ -459,11 +456,6 @@ export function TopupRequestsPanel({
           <header className="panel__head">
             <div>
               <h2 className="panel__title">{isManager ? "בקשות מסלול" : "הוסף מסלול"}</h2>
-              <p className="panel__subtitle">
-                {isManager
-                  ? "הכן חוזה לפי האחוזים של המשקיע, חתום דיגיטלית, והמסלול יבוצע רק אחרי שתי חתימות."
-                  : "עקבו אחרי סטטוס הבקשה, חתמו על החוזה והורידו את הקובץ החתום."}
-              </p>
             </div>
           </header>
 

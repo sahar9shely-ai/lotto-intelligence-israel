@@ -1409,3 +1409,33 @@ def test_rollover_no_double_count_and_idempotent():
         assert after2_inv["current_savings_balance"] == after1_inv["current_savings_balance"]
     finally:
         db.close()
+
+
+def test_admin_shell_excluded_from_investor_books():
+    """מנהל מערכת is an operator shell — not a row in investor tables or totals."""
+    headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    names = {i["name"] for i in investors}
+    assert "מנהל מערכת" not in names
+    assert "סהר" in names
+
+    db = InvestmentSessionLocal()
+    try:
+        from app.models.investments import Investor
+
+        admin = db.query(Investor).filter(Investor.name == "מנהל מערכת").one()
+        sahar = db.query(Investor).filter(Investor.name == "סהר").one()
+        assert inv_svc.is_admin_shell(admin) is True
+        assert inv_svc.is_admin_shell(sahar) is False
+    finally:
+        db.close()
+
+    dash = client.get("/api/v1/investments/dashboard", headers=headers).json()
+    dash_names = {i["name"] for i in dash["investors_summary"]}
+    assert "מנהל מערכת" not in dash_names
+    assert "סהר" in dash_names
+
+    income = client.get("/api/v1/investments/manager-income", headers=headers).json()
+    fee_names = {row["investor_name"] for row in income["investors"]}
+    assert "מנהל מערכת" not in fee_names
+    assert income["manager_own"]["investor_name"] != "מנהל מערכת"

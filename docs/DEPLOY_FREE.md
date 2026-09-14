@@ -9,7 +9,9 @@
 | האפליקציה | [Render](https://render.com) Free | ₪0 |
 | מסד הנתונים | [Neon](https://neon.tech) Free | ₪0 |
 
-> בלי Neon הנתונים נמחקים כש־Render נרדם. לכן חובה לחבר את שניהם.
+> בלי Neon הנתונים נמחקים כש־Render נרדם **או מתדיפלoy**. ב־Render Free אין דיסק קבוע:
+> SQLite בתוך הקונטיינר (`/data/investments.db`) נמחק בכל דיפלוי, ולכן סיסמה/שם משתמש
+> «לא נשמרים בענן». חובה להדביק `DATABASE_URL` מ־Neon.
 
 ## מגבלות (חינם)
 
@@ -36,7 +38,8 @@
 3. בחר את הריפו `lotto-intelligence-israel` (ענף `main` אחרי המיזוג, או הענף שלך)
 4. Render יזהה את `render.yaml`
 5. לפני Deploy הגדר משתני סביבה:
-   - `DATABASE_URL` = מחרוזת החיבור מ־Neon (הדבק כמו שהיא)
+   - `DATABASE_URL` = מחרוזת החיבור מ־Neon (הדבק כמו שהיא) — **חובה**, אחרת סיסמאות נמחקות
+   - `GEMINI_API_KEY` = מפתח Gemini לעוזר האישי (מומלץ). חלופה: `GOOGLE_API_KEY` או `OPENAI_API_KEY`
    - `APP_PUBLIC_URL` = אפשר להשאיר ריק קודם, ואז לעדכן לכתובת ש־Render נותן  
      למשל `https://tazrim.onrender.com`
 6. לחץ Deploy והמתן לסיום הבנייה

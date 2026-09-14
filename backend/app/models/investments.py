@@ -107,6 +107,7 @@ class Payment(Base):
     manager_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="scheduled")
     paid_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    confirmation_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     plan: Mapped["InvestmentPlan"] = relationship(back_populates="payments")
@@ -210,3 +211,5 @@ class AppSettings(Base):
     assistant_api_key: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     # Once true, demo investors (בר/אופק/…) are never auto-recreated after delete.
     demo_investors_seeded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Once true, the personal portfolio (סהר / sahar) is never auto-recreated after delete.
+    personal_investor_seeded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

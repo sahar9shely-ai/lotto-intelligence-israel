@@ -30,6 +30,17 @@ class ChatResponse(BaseModel):
     pdf_suggested: bool = False
     what_if: Optional[dict] = None
     configured: bool = False
+    cta: Optional[dict] = None
+    suggestions: list[dict] = Field(default_factory=list)
+
+
+class AssistantOpeningOut(BaseModel):
+    greeting: str
+    suggestions: list[dict] = Field(default_factory=list)
+    cta: Optional[dict] = None
+    role: str = "investor"
+    tips: list[str] = Field(default_factory=list)
+    configured: bool = False
 
 
 class EndSessionRequest(BaseModel):
@@ -59,13 +70,13 @@ def assistant_status(
     db: Session = Depends(get_investment_db),
 ):
     settings = inv_svc.ensure_settings(db)
-    key = (getattr(settings, "assistant_api_key", None) or "").strip()
+    provider, key = asst._llm_credentials(settings)
     hint = None
     if key and is_manager(user):
         hint = f"…{key[-4:]}" if len(key) >= 4 else "****"
     return {
         "configured": bool(key),
-        "provider": (getattr(settings, "assistant_provider", None) or "gemini"),
+        "provider": provider or "gemini",
         "api_key_set": bool(key),
         "api_key_hint": hint,
     }
@@ -91,6 +102,19 @@ def assistant_chat(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result
+
+
+@router.get("/opening", response_model=AssistantOpeningOut)
+def assistant_opening(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    if not user.investor_id:
+        raise HTTPException(status_code=403, detail="אין תיק מקושר")
+    try:
+        return asst.opening_state(db, user=user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @router.post("/what-if")

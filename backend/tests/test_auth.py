@@ -254,6 +254,88 @@ def test_manager_can_update_user_phone():
     assert res.json()["phone"] == "052-535-7071"
 
 
+def test_manager_updates_username_and_password_in_one_save():
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    almog = next(u for u in users if u["username"] == "almog")
+    res = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"username": "almog-new", "new_password": "AlmogSave99!"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["username"] == "almog-new"
+    assert res.json()["has_password"] is True
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "almog-new", "password": "AlmogSave99!"},
+    )
+    assert login.status_code == 200, login.text
+    revert = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"username": "almog"},
+    )
+    assert revert.status_code == 200
+
+
+def test_username_conflict_returns_hebrew_error():
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    almog = next(u for u in users if u["username"] == "almog")
+    res = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"username": "ofek"},
+    )
+    assert res.status_code == 400
+    assert "כבר בשימוש" in res.json()["detail"]
+
+
+def test_invalid_username_rejected_with_hebrew_message():
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    almog = next(u for u in users if u["username"] == "almog")
+    res = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"username": "user1 sahar"},
+    )
+    assert res.status_code in {400, 422}
+    text = res.text
+    assert "שם משתמש" in text or "רווח" in text or "אותיות" in text
+
+
+def test_custom_username_survives_reseed():
+    """Manager-set usernames must not be reset to demo defaults on Render boot."""
+    from app.models.auth import User
+
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    ofek = next(u for u in users if u["username"] == "ofek")
+    renamed = client.patch(
+        f"/api/v1/auth/users/{ofek['id']}",
+        headers=headers,
+        json={"username": "ofek-keep"},
+    )
+    assert renamed.status_code == 200, renamed.text
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        inv_svc.seed_defaults(db)
+        row = db.query(User).filter(User.id == ofek["id"]).one()
+        assert row.username == "ofek-keep"
+    finally:
+        db.close()
+        restore = client.patch(
+            f"/api/v1/auth/users/{ofek['id']}",
+            headers=headers,
+            json={"username": "ofek"},
+        )
+        assert restore.status_code == 200
+
+
 def test_delete_user_removes_investor_and_history():
     from datetime import date
 
@@ -377,6 +459,64 @@ def test_deleted_demo_investor_not_resurrected_on_reseed():
             db.flush()
             auth_svc.ensure_user_for_investor(
                 db, inv, username="bar", email="bar050297@gmail.com", password=None
+            )
+            db.commit()
+    finally:
+        db.close()
+
+
+def test_deleted_personal_sahar_not_resurrected_on_reseed():
+    """Deleting סהר / sahar must stay deleted after restart/seed. Admin stays intact."""
+    from app.models.investments import Investor
+    from app.services import auth_service as auth_svc
+
+    _ensure_seeded()
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    sahar_user = next((u for u in users if u["username"] == "sahar"), None)
+    assert sahar_user is not None, "seed should create sahar once"
+    assert sahar_user["role"] == "investor"
+    assert sahar_user["is_manager"] is False
+
+    deleted = client.delete(f"/api/v1/auth/users/{sahar_user['id']}", headers=headers)
+    assert deleted.status_code == 204, deleted.text
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        inv_svc.seed_defaults(db)
+        names = {i.name for i in db.query(Investor).all()}
+        assert "סהר" not in names
+        assert db.query(User).filter(User.username == "sahar").first() is None
+        admin = db.query(User).filter(User.username == "admin").one()
+        admin_inv = db.query(Investor).filter(Investor.id == admin.investor_id).one()
+        assert admin.role == "manager"
+        assert admin_inv.name == "מנהל מערכת"
+        assert admin_inv.is_manager is True
+        settings = inv_svc.ensure_settings(db)
+        assert settings.personal_investor_seeded is True
+    finally:
+        db.close()
+
+    users_after = client.get("/api/v1/auth/users", headers=headers).json()
+    assert all(u["username"] != "sahar" for u in users_after)
+    assert all(u["investor_name"] != "סהר" for u in users_after)
+    assert any(u["username"] == "admin" for u in users_after)
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "ManagerPass1!"},
+    )
+    assert login.status_code == 200, login.text
+
+    db = InvestmentSessionLocal()
+    try:
+        if db.query(Investor).filter(Investor.name == "סהר").first() is None:
+            inv = Investor(name="סהר", is_manager=False)
+            db.add(inv)
+            db.flush()
+            auth_svc.ensure_user_for_investor(
+                db, inv, username="sahar", email=None, password=None
             )
             db.commit()
     finally:
