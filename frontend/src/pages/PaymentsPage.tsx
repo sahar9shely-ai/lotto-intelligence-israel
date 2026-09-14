@@ -217,35 +217,52 @@ export function PaymentsPage() {
   useEffect(() => {
     if (!focusPaymentId && !focusMonth) return;
     if (loading) return;
-    const token = `${focusPaymentId ?? ""}|${focusMonth ?? ""}|${investorId}|${year}`;
+    const token = `${focusPaymentId ?? ""}|${focusMonth ?? ""}|${investorId}|${year}|${payments.length}`;
     if (scrolledFocusRef.current === token) return;
-    const timer = window.setTimeout(() => {
-      let el: HTMLElement | null = null;
+
+    const findTarget = (): HTMLElement | null => {
       if (focusPaymentId) {
-        el = visibleFocusEl(`[data-payment-id="${focusPaymentId}"]`);
+        const byId = visibleFocusEl(`[data-payment-id="${focusPaymentId}"]`);
+        if (byId) return byId;
       }
-      if (!el && focusMonth) {
-        const monthMatches = [...document.querySelectorAll<HTMLElement>(
-          `[data-payment-month="${focusMonth}"]`,
-        )];
-        const forInvestor = investorId
-          ? monthMatches.filter((n) => n.dataset.investorId === investorId)
-          : monthMatches;
-        el =
-          (forInvestor.find((n) => n.getClientRects().length > 0) ?? forInvestor[0]) ||
-          null;
-      }
-      if (!el) {
-        paymentsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        scrolledFocusRef.current = token;
-        return;
-      }
+      if (!focusMonth) return null;
+      const monthMatches = [
+        ...document.querySelectorAll<HTMLElement>(`[data-payment-month="${focusMonth}"]`),
+      ];
+      const forInvestor = investorId
+        ? monthMatches.filter((n) => n.dataset.investorId === investorId)
+        : monthMatches;
+      return forInvestor.find((n) => n.getClientRects().length > 0) ?? forInvestor[0] ?? null;
+    };
+
+    const timers: number[] = [];
+    const reveal = (el: HTMLElement) => {
       el.classList.add("is-target");
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       scrolledFocusRef.current = token;
-      window.setTimeout(() => el?.classList.remove("is-target"), 3600);
-    }, 120);
-    return () => window.clearTimeout(timer);
+    };
+
+    const attempt = () => {
+      const el = findTarget();
+      if (!el) {
+        if (payments.length === 0) {
+          paymentsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          scrolledFocusRef.current = token;
+        }
+        return;
+      }
+      reveal(el);
+      // Status-report / savings panels load after the list and push the row down.
+      timers.push(
+        window.setTimeout(() => {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 700),
+      );
+      timers.push(window.setTimeout(() => el.classList.remove("is-target"), 4200));
+    };
+
+    timers.push(window.setTimeout(attempt, 80));
+    return () => timers.forEach((id) => window.clearTimeout(id));
   }, [loading, payments, focusPaymentId, focusMonth, investorId, year]);
 
   const yearly = report?.yearly;
