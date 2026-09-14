@@ -899,11 +899,11 @@ export function PaymentsPage() {
             disabled={pdfBusy}
             onClick={() => void exportMonthlyPdf()}
           >
-            {pdfBusy ? "מכינים PDF..." : "הורדת דוח חודשי"}
+            {pdfBusy ? "מכינים PDF..." : "דוח חודשי"}
           </button>
           <button
             type="button"
-            className="btn btn--ghost"
+            className="btn btn--ghost hide-on-phone"
             disabled={pdfBusy}
             onClick={exportYearPdf}
           >
@@ -1016,7 +1016,7 @@ export function PaymentsPage() {
         ) : null}
       </div>
 
-      <div className="grid-2">
+      <div className="grid-2 hide-on-phone">
         <Panel
           title="סיכום שנתי"
         >
@@ -1142,6 +1142,7 @@ export function PaymentsPage() {
 
       {isManager && yearInvestors.length > 0 ? (
         <Panel
+          className="hide-on-phone"
           title={`מי בלוח ${year}`}
           action={
             <button
@@ -1210,12 +1211,15 @@ export function PaymentsPage() {
       {activeSavingsPlans.length > 0 ? (
         <div
           ref={savingsPanelRef}
-          className={
+          className={[
+            "hide-on-phone",
             detailFocus === "lifetime-savings-now" ||
             detailFocus === "lifetime-savings-end"
               ? "detail-target detail-target--active"
-              : undefined
-          }
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined}
         >
           <Panel
             title={

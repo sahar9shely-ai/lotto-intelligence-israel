@@ -146,7 +146,7 @@ export function DashboardPage() {
                 : `שלום ${user?.investor_name || user?.username || ""}`}
             </h1>
           </div>
-          <div className="page-head__actions">
+          <div className="page-head__actions hide-on-phone">
             <Link className="btn btn--admin" to="/investors">
               למשקיעים
             </Link>
@@ -282,7 +282,7 @@ export function DashboardPage() {
       </div>
 
       {isManager && filterId == null && !isAdmin ? (
-        <div className="stats-grid stats-grid--compact">
+        <div className="stats-grid stats-grid--compact hide-on-phone">
           <Stat
             label="עמלת ניהול חודשית"
             value={formatMoney(data.monthly_manager_fees)}
@@ -304,6 +304,7 @@ export function DashboardPage() {
 
       {showOpsFeed ? (
         <Panel
+          className="hide-on-phone"
           title="יומן מעקב"
           action={
             <div className="inline-form">

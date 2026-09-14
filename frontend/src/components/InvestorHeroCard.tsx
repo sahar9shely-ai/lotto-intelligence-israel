@@ -34,7 +34,7 @@ export function InvestorHeroCard({
           {nextPayment ? (
             <>
               <strong>{formatMoney(nextPayment.investor_amount)}</strong>
-              <em>
+              <em className="hide-on-phone">
                 {formatDate(nextPayment.due_date)}
                 {nextIsAwaiting ? " · ממתין לאישורך" : ""}
               </em>
@@ -42,14 +42,14 @@ export function InvestorHeroCard({
           ) : (
             <>
               <strong className="investor-hero__quiet">אין תשלום מתוכנן</strong>
-              <em>נעדכן כאן כשיהיה מועד הבא</em>
+              <em className="hide-on-phone">נעדכן כאן כשיהיה מועד הבא</em>
             </>
           )}
         </div>
         <div className="investor-hero__cell">
           <span>שולם השנה</span>
           <strong>{formatMoney(paidThisYear)}</strong>
-          <em>מזומן שהגיע אליך</em>
+          <em className="hide-on-phone">מזומן שהגיע אליך</em>
         </div>
       </div>
       <div className="investor-hero__actions">
@@ -60,10 +60,10 @@ export function InvestorHeroCard({
             disabled={monthlyBusy}
             onClick={onDownloadMonthly}
           >
-            {monthlyBusy ? "מכינים דוח..." : "הורדת דוח חודשי"}
+            {monthlyBusy ? "מכינים דוח..." : "דוח חודשי"}
           </button>
         ) : null}
-        <Link className="btn btn--ghost" to="/payments">
+        <Link className="btn btn--ghost hide-on-phone" to="/payments">
           לתשלומים
         </Link>
       </div>

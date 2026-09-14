@@ -327,8 +327,8 @@ export function UsersPage() {
           <h1 className="page-intro__title">משתמשים והרשאות</h1>
         </div>
         <div className="page-head__actions">
-          <button type="button" className="btn btn--admin" onClick={() => setShowCreate(true)}>
-            + משתמש חדש
+          <button type="button" className="btn btn--ghost btn--small" onClick={() => setShowCreate(true)}>
+            משתמש חדש
           </button>
         </div>
       </header>
@@ -392,7 +392,7 @@ export function UsersPage() {
                 </button>
                 <button
                   type="button"
-                  className="btn btn--small btn--admin"
+                  className="btn btn--small btn--admin hide-on-phone"
                   onClick={() => jumpToUserPassword(u.id)}
                 >
                   הגדר סיסמה

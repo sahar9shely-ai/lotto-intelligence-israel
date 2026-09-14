@@ -174,7 +174,7 @@ export function DashboardUrgentOps({ investorId = null }: Props) {
           <p className="urgent-card__eyebrow">{ops.currentMonthLabel}</p>
           <h3 className="urgent-card__title">הכול מעודכן</h3>
           <p className="urgent-card__detail">אין תשלום חסר החודש.</p>
-          <Link className="btn btn--small btn--ghost" to="/payments">
+          <Link className="btn btn--small btn--ghost hide-on-phone" to="/payments">
             לתשלומים
           </Link>
         </article>
