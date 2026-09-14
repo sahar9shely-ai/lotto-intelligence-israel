@@ -1,5 +1,6 @@
 import type { Payment } from "../types/investments";
 import { formatCalendarMonth, todayISO } from "./format";
+import { isAdminShellInvestor } from "./roles";
 
 export type UrgentInvestorRow = {
   investorId: number;
@@ -64,6 +65,7 @@ export function buildUrgentPaymentOps(
 
   for (const payment of payments) {
     if (cashAmount(payment) <= 0) continue;
+    if (isAdminShellInvestor({ name: payment.investor_name })) continue;
     if (investorId != null && payment.investor_id !== investorId) continue;
     if (!isOpenPayment(payment.status)) continue;
 

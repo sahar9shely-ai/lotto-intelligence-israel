@@ -12,7 +12,7 @@ import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import { formatDate, formatMoney, formatPercent, statusLabel } from "../utils/format";
 import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
-import { isAdminAccount } from "../utils/roles";
+import { isAdminAccount, isAdminShellInvestor } from "../utils/roles";
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -73,7 +73,7 @@ export function DashboardPage() {
     filterId != null
       ? investors?.find((i) => i.id === filterId)?.name ?? "משקיע"
       : null;
-  const investorScopeOptions = (investors ?? []).filter((inv) => !inv.is_manager);
+  const investorScopeOptions = (investors ?? []).filter((inv) => !isAdminShellInvestor(inv));
   const awaitingPayments = (investorPayments ?? []).filter(
     (p) => p.status === "awaiting_confirmation",
   );
@@ -416,7 +416,7 @@ export function DashboardPage() {
             }
             delay={80}
           >
-            {data.investors_summary.filter((inv) => !inv.is_manager).length === 0 ? (
+            {data.investors_summary.filter((inv) => !isAdminShellInvestor(inv)).length === 0 ? (
               <div className="empty-block">
                 <p className="empty">עדיין אין משקיעים.</p>
                 <Link className="btn btn--small btn--primary" to="/investors">
@@ -426,7 +426,7 @@ export function DashboardPage() {
             ) : (
               <ul className="list">
                 {data.investors_summary
-                  .filter((inv) => !inv.is_manager)
+                  .filter((inv) => !isAdminShellInvestor(inv))
                   .map((inv) => (
                   <li key={inv.id} className="list__row">
                     <button

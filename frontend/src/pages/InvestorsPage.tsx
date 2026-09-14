@@ -14,6 +14,7 @@ import { api } from "../services/api";
 import type { Investor, Plan, Settings } from "../types/investments";
 import { formatMoney, formatPercent, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
+import { isAdminShellInvestor } from "../utils/roles";
 import {
   copyAccessWhatsAppMessage,
   formatPhoneDisplay,
@@ -108,17 +109,22 @@ export function InvestorsPage() {
     setMessage(`נפתחה הודעת התחברות מוכנה עבור ${inv.name}`);
   }
 
+  const bookInvestors = useMemo(
+    () => (investors ?? []).filter((inv) => !isAdminShellInvestor(inv)),
+    [investors],
+  );
+
   const effectiveScope: Scope = useMemo(() => {
     if (scope != null) return scope;
-    if (!isManager && investors?.[0]) return investors[0].id;
+    if (!isManager && bookInvestors[0]) return bookInvestors[0].id;
     return "all";
-  }, [scope, isManager, investors]);
+  }, [scope, isManager, bookInvestors]);
 
   const selected = useMemo(() => {
-    if (!investors?.length) return null;
+    if (!bookInvestors.length) return null;
     if (effectiveScope === "all") return null;
-    return investors.find((i) => i.id === effectiveScope) ?? investors[0] ?? null;
-  }, [investors, effectiveScope]);
+    return bookInvestors.find((i) => i.id === effectiveScope) ?? bookInvestors[0] ?? null;
+  }, [bookInvestors, effectiveScope]);
 
   const selectedPlans = useMemo(() => {
     if (!selected) return [];
@@ -141,14 +147,14 @@ export function InvestorsPage() {
   );
 
   const portfolio = useMemo(() => {
-    const list = investors ?? [];
+    const list = bookInvestors;
     return {
       principal: list.reduce((s, i) => s + (i.active_principal || 0), 0),
       cash: list.reduce((s, i) => s + cashOf(i), 0),
       savings: list.reduce((s, i) => s + savingsOf(i), 0),
       savingsBalance: list.reduce((s, i) => s + (i.current_savings_balance || 0), 0),
     };
-  }, [investors]);
+  }, [bookInvestors]);
 
   async function onCreateInvestor(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -324,7 +330,7 @@ export function InvestorsPage() {
           >
             סה״כ כולם
           </button>
-          {investors.map((inv) => (
+          {bookInvestors.map((inv) => (
             <button
               key={inv.id}
               type="button"
@@ -391,7 +397,7 @@ export function InvestorsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {investors.map((inv) => (
+                  {bookInvestors.map((inv) => (
                     <tr key={inv.id}>
                       <td>
                         <button
@@ -423,7 +429,7 @@ export function InvestorsPage() {
               </table>
             </div>
             <ul className="investor-cards">
-              {investors.map((inv) => (
+              {bookInvestors.map((inv) => (
                 <li key={`card-${inv.id}`}>
                   <button
                     type="button"

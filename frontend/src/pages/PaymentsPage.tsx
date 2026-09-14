@@ -21,6 +21,7 @@ import {
 import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
 import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
 import { planTypeLabel } from "../utils/planTypes";
+import { isAdminShellInvestor } from "../utils/roles";
 import {
   hasPaymentsFocus,
   parsePaymentsFocusSearch,
@@ -275,6 +276,7 @@ export function PaymentsPage() {
     }
     return [...map.entries()]
       .map(([id, name]) => ({ id, name }))
+      .filter((inv) => !isAdminShellInvestor(inv))
       .sort((a, b) => a.name.localeCompare(b.name, "he"));
   }, [yearAll]);
 
@@ -1002,7 +1004,9 @@ export function PaymentsPage() {
               }}
             >
               <option value="">הכל</option>
-              {(investors ?? []).map((i) => (
+              {(investors ?? [])
+                .filter((i) => !isAdminShellInvestor(i))
+                .map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
                 </option>

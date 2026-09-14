@@ -317,10 +317,11 @@ def list_investors(
     )
     if not is_manager(user):
         query = query.filter(Investor.id == user.investor_id)
-    investors = query.order_by(Investor.is_manager.desc(), Investor.name).all()
+    investors = query.order_by(Investor.name).all()
     for investor in investors:
         svc.sync_investor_track_continuity(db, investor)
-    rows = [svc.serialize_investor(i, db=db) for i in investors]
+    book = [i for i in investors if not svc.is_admin_shell(i)]
+    rows = [svc.serialize_investor(i, db=db) for i in book]
     db.commit()
     return rows
 
@@ -442,7 +443,11 @@ def list_plans(
     db.commit()
     plans = query.order_by(InvestmentPlan.start_date.desc()).all()
     hide_fees = not is_manager(user)
-    return [svc.serialize_plan(p, hide_fees=hide_fees) for p in plans]
+    return [
+        svc.serialize_plan(p, hide_fees=hide_fees)
+        for p in plans
+        if not svc.is_admin_shell(p.investor)
+    ]
 
 
 @router.post("/plans", response_model=PlanOut, status_code=201)
@@ -1246,7 +1251,11 @@ def list_payments(
         key=lambda p: (p.due_date, p.id),
         reverse=year is None,
     )
-    return [svc.serialize_payment(p) for p in ordered]
+    return [
+        svc.serialize_payment(p)
+        for p in ordered
+        if not svc.is_admin_shell(p.investor)
+    ]
 
 
 @router.get("/manager-income")

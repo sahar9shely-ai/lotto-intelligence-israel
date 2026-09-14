@@ -40,6 +40,31 @@ MANAGER_FEE_KEYS = (
 QUOTE_STATUSES = frozenset({"pending", "approved", "converted", "rejected"})
 OPEN_QUOTE_STATUSES = frozenset({"pending", "approved", "converted"})
 _LEGACY_QUOTE_STATUS = {"draft": "pending", "sent": "pending", "archived": "rejected"}
+_ADMIN_SHELL_NAMES = frozenset({"מנהל מערכת", "מנהל", "מנהלת"})
+
+
+def is_admin_shell(investor: Optional[Investor]) -> bool:
+    """Operational admin row — not an investment book (unlike סהר)."""
+    if investor is None:
+        return False
+    from app.services.auth_service import (
+        ADMIN_INVESTOR_NAME,
+        ADMIN_USERNAME,
+        PERSONAL_INVESTOR_NAME,
+    )
+
+    name = (investor.name or "").strip()
+    if name == PERSONAL_INVESTOR_NAME:
+        return False
+    if name == ADMIN_INVESTOR_NAME or name in _ADMIN_SHELL_NAMES:
+        return True
+    user = getattr(investor, "user", None)
+    if user is not None and (getattr(user, "username", None) or "") == ADMIN_USERNAME:
+        return True
+    if not investor.is_manager:
+        return False
+    plans = list(getattr(investor, "plans", None) or [])
+    return not any((getattr(plan, "principal", 0) or 0) > 0 for plan in plans)
 
 
 def normalize_quote_status(status: Optional[str]) -> str:
@@ -1816,6 +1841,8 @@ def _plans_for_savings_summary(
     plans = query.order_by(InvestmentPlan.start_date, InvestmentPlan.id).all()
     chosen: list[InvestmentPlan] = []
     for plan in plans:
+        if is_admin_shell(plan.investor):
+            continue
         kind, _, savings_rate = normalize_plan_rates(
             getattr(plan, "plan_type", None) or "monthly",
             plan.monthly_rate_percent,
@@ -1855,11 +1882,11 @@ def available_payment_years(
 def get_payment_report(
     db: Session, *, year: int, investor_id: Optional[int] = None
 ) -> dict:
-    base = db.query(Payment)
+    base = db.query(Payment).options(joinedload(Payment.investor))
     if investor_id is not None:
         base = base.filter(Payment.investor_id == investor_id)
 
-    lifetime = base.all()
+    lifetime = [p for p in base.all() if not is_admin_shell(p.investor)]
     yearly = [
         p
         for p in lifetime
@@ -2385,6 +2412,8 @@ def list_payment_confirmation_nudges(
         requested = payment.confirmation_requested_at or payment.due_date
         if not confirmation_nudge_due(requested, today=today):
             continue
+        if is_admin_shell(payment.investor):
+            continue
         rows.append(serialize_payment_nudge(payment, today=today))
     return rows
 
@@ -2454,6 +2483,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     if investor_id is not None:
         investors_query = investors_query.filter(Investor.id == investor_id)
     investors = investors_query.all()
+    book_investors = [i for i in investors if not is_admin_shell(i)]
 
     plans_query = (
         db.query(InvestmentPlan)
@@ -2462,7 +2492,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     )
     if investor_id is not None:
         plans_query = plans_query.filter(InvestmentPlan.investor_id == investor_id)
-    plans = plans_query.all()
+    plans = [p for p in plans_query.all() if not is_admin_shell(p.investor)]
 
     total_principal = 0.0
     monthly_investor_cash = 0.0
@@ -2472,6 +2502,8 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     monthly_manager_own_cash = 0.0
     monthly_manager_own_savings = 0.0
 
+    from app.services.auth_service import PERSONAL_INVESTOR_NAME
+
     for plan in plans:
         metrics = plan_metrics(plan, today)
         total_principal += plan.principal
@@ -2479,11 +2511,11 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         monthly_investor_savings += metrics["monthly_savings_accrual"]
         projected_savings_total += metrics["projected_savings_balance"]
         monthly_manager_fees += metrics["monthly_manager_fee"]
-        if plan.investor and plan.investor.is_manager:
+        if plan.investor and plan.investor.name == PERSONAL_INVESTOR_NAME:
             monthly_manager_own_cash += metrics["monthly_investor_payout"]
             monthly_manager_own_savings += metrics["monthly_savings_accrual"]
 
-    investors_summary = [serialize_investor(i, today) for i in investors]
+    investors_summary = [serialize_investor(i, today) for i in book_investors]
     # Lifetime savings across all tracks (completed + active), already de-overlapped.
     current_savings_total = round(
         sum(float(s.get("current_savings_balance") or 0) for s in investors_summary),
@@ -2491,19 +2523,23 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     )
 
     year_start = date(today.year, 1, 1)
-    paid_query = db.query(Payment).filter(
+    paid_query = db.query(Payment).options(joinedload(Payment.investor)).filter(
         Payment.status == "paid", Payment.paid_at >= year_start
     )
     if investor_id is not None:
         paid_query = paid_query.filter(Payment.investor_id == investor_id)
-    paid_year = paid_query.all()
+    paid_year = [p for p in paid_query.all() if not is_admin_shell(p.investor)]
     ytd_investor = sum(p.investor_amount for p in paid_year)
     ytd_manager = sum(p.manager_amount for p in paid_year)
 
-    lifetime_query = db.query(Payment).filter(Payment.status == "paid")
+    lifetime_query = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.status == "paid")
+    )
     if investor_id is not None:
         lifetime_query = lifetime_query.filter(Payment.investor_id == investor_id)
-    paid_lifetime = lifetime_query.all()
+    paid_lifetime = [p for p in lifetime_query.all() if not is_admin_shell(p.investor)]
     lifetime_investor = sum(p.investor_amount for p in paid_lifetime)
     lifetime_manager = sum(p.manager_amount for p in paid_lifetime)
 
@@ -2515,6 +2551,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     if investor_id is not None:
         upcoming_query = upcoming_query.filter(Payment.investor_id == investor_id)
     upcoming = upcoming_query.order_by(Payment.due_date.asc()).limit(16).all()
+    upcoming = [p for p in upcoming if not is_admin_shell(p.investor)]
     upcoming.sort(
         key=lambda p: (0 if p.status == "awaiting_confirmation" else 1, p.due_date, p.id)
     )
@@ -2528,6 +2565,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     if investor_id is not None:
         recent_query = recent_query.filter(Payment.investor_id == investor_id)
     recent = recent_query.order_by(Payment.paid_at.desc(), Payment.id.desc()).limit(8).all()
+    recent = [p for p in recent if not is_admin_shell(p.investor)][:8]
 
     monthly_manager_own = round(monthly_manager_own_cash + monthly_manager_own_savings, 2)
     return {
@@ -2550,7 +2588,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
         "ytd_manager_earned": round(ytd_manager, 2),
         "lifetime_investor_paid": round(lifetime_investor, 2),
         "lifetime_manager_earned": round(lifetime_manager, 2),
-        "active_investors": len([i for i in investors if not i.is_manager and i.plans]),
+        "active_investors": len([i for i in book_investors if i.plans]),
         "active_plans": len(plans),
         "upcoming_payments": [serialize_payment(p) for p in upcoming],
         "recent_payments": [serialize_payment(p) for p in recent],
@@ -2577,7 +2615,7 @@ def get_manager_income_board(db: Session) -> dict:
     fee_rows: list[dict] = []
     monthly_fees_total = 0.0
     for inv in investors:
-        if inv.is_manager:
+        if is_admin_shell(inv):
             continue
         active = [p for p in (inv.plans or []) if p.status == "active"]
         if not active:
@@ -2615,8 +2653,6 @@ def get_manager_income_board(db: Session) -> dict:
     from app.services.auth_service import PERSONAL_INVESTOR_NAME
 
     manager_inv = next((i for i in investors if i.name == PERSONAL_INVESTOR_NAME), None)
-    if manager_inv is None:
-        manager_inv = next((i for i in investors if i.is_manager), None)
     own_plans_out: list[dict] = []
     own_principal = 0.0
     own_cash = 0.0
