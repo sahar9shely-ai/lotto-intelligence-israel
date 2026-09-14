@@ -856,6 +856,26 @@ button.stat {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #1f6b55) 18%, transparent);
 }
 
+tr.payment-row.is-target td {
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+}
+
+tr.payment-row.is-target {
+  outline: 2px solid color-mix(in srgb, var(--gold) 65%, var(--line));
+  outline-offset: -2px;
+}
+
+tr.payment-row,
+.pay-card {
+  scroll-margin-top: 88px;
+}
+
+.pay-card.is-target {
+  outline: 2px solid color-mix(in srgb, var(--gold) 70%, var(--line));
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--gold-soft);
+}
+
 .table--clickable-rows tbody tr {
   cursor: pointer;
   transition: background 0.12s ease;
@@ -4344,8 +4364,35 @@ input[type="date"] {
   border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
 }
 
+.urgent-card__list > li:last-child .urgent-card__row,
 .urgent-card__row:last-child {
   border-bottom: 0;
+}
+
+a.urgent-card__row {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  width: 100%;
+  margin-inline: -8px;
+  padding-inline: 8px;
+  border-radius: 10px;
+  transition: background 0.15s ease;
+}
+
+a.urgent-card__row:hover,
+a.urgent-card__row:focus-visible {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.urgent-card--overdue a.urgent-card__row:hover,
+.urgent-card--overdue a.urgent-card__row:focus-visible {
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+}
+
+.urgent-card--missing a.urgent-card__row:hover,
+.urgent-card--missing a.urgent-card__row:focus-visible {
+  background: color-mix(in srgb, var(--admin) 10%, transparent);
 }
 
 .urgent-card__row strong {

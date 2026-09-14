@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
 import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
@@ -20,7 +21,17 @@ import {
 import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
 import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
 import { planTypeLabel } from "../utils/planTypes";
+import {
+  hasPaymentsFocus,
+  parsePaymentsFocusSearch,
+  paymentsFocusSearchKey,
+} from "../utils/paymentOps";
 import type { Plan } from "../types/investments";
+
+function visibleFocusEl(selector: string): HTMLElement | null {
+  const nodes = [...document.querySelectorAll<HTMLElement>(selector)];
+  return nodes.find((n) => n.getClientRects().length > 0) ?? nodes[0] ?? null;
+}
 
 type DetailFocus =
   | "yearly-paid"
@@ -98,11 +109,17 @@ export function PaymentsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const [searchParams] = useSearchParams();
   const yearNow = new Date().getFullYear();
-  const [year, setYear] = useState(yearNow);
-  const [status, setStatus] = useState<string>("");
-  const [investorId, setInvestorId] = useState<string>("");
+  const incomingFocus = parsePaymentsFocusSearch(searchParams);
+  const [year, setYear] = useState(incomingFocus.year ?? yearNow);
+  const [status, setStatus] = useState<string>(incomingFocus.status ?? "");
+  const [investorId, setInvestorId] = useState<string>(incomingFocus.investorId);
+  const [focusPaymentId, setFocusPaymentId] = useState<number | null>(incomingFocus.paymentId);
+  const [focusMonth, setFocusMonth] = useState<string | null>(incomingFocus.month);
   const [allYears, setAllYears] = useState(false);
+  const appliedSearchRef = useRef<string | null>(null);
+  const scrolledFocusRef = useRef("");
   const [detailFocus, setDetailFocus] = useState<DetailFocus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
@@ -116,6 +133,33 @@ export function PaymentsPage() {
   const [manageYear, setManageYear] = useState(false);
   const paymentsPanelRef = useRef<HTMLDivElement | null>(null);
   const savingsPanelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const key = paymentsFocusSearchKey(searchParams);
+    if (appliedSearchRef.current === key) return;
+    const prev = appliedSearchRef.current;
+    appliedSearchRef.current = key;
+    const focus = parsePaymentsFocusSearch(searchParams);
+    if (!hasPaymentsFocus(focus)) {
+      if (prev) {
+        setInvestorId("");
+        setStatus("");
+        setYear(yearNow);
+        setAllYears(false);
+        setFocusPaymentId(null);
+        setFocusMonth(null);
+      }
+      return;
+    }
+    scrolledFocusRef.current = "";
+    if (focus.year) setYear(focus.year);
+    setStatus(focus.status ?? "");
+    setInvestorId(focus.investorId);
+    setAllYears(false);
+    setDetailFocus(null);
+    setFocusPaymentId(focus.paymentId);
+    setFocusMonth(focus.month);
+  }, [searchParams, yearNow]);
 
   const investorFilter = investorId ? Number(investorId) : undefined;
 
@@ -169,6 +213,41 @@ export function PaymentsPage() {
       a.due_date === b.due_date ? a.id - b.id : a.due_date < b.due_date ? -1 : 1,
     );
   }, [data]);
+
+  useEffect(() => {
+    if (!focusPaymentId && !focusMonth) return;
+    if (loading) return;
+    const token = `${focusPaymentId ?? ""}|${focusMonth ?? ""}|${investorId}|${year}`;
+    if (scrolledFocusRef.current === token) return;
+    const timer = window.setTimeout(() => {
+      let el: HTMLElement | null = null;
+      if (focusPaymentId) {
+        el = visibleFocusEl(`[data-payment-id="${focusPaymentId}"]`);
+      }
+      if (!el && focusMonth) {
+        const monthMatches = [...document.querySelectorAll<HTMLElement>(
+          `[data-payment-month="${focusMonth}"]`,
+        )];
+        const forInvestor = investorId
+          ? monthMatches.filter((n) => n.dataset.investorId === investorId)
+          : monthMatches;
+        el =
+          (forInvestor.find((n) => n.getClientRects().length > 0) ?? forInvestor[0]) ||
+          null;
+      }
+      if (!el) {
+        paymentsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        scrolledFocusRef.current = token;
+        return;
+      }
+      el.classList.add("is-target");
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      scrolledFocusRef.current = token;
+      window.setTimeout(() => el?.classList.remove("is-target"), 3600);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [loading, payments, focusPaymentId, focusMonth, investorId, year]);
+
   const yearly = report?.yearly;
   const lifetime = report?.lifetime;
 
@@ -457,9 +536,9 @@ export function PaymentsPage() {
 
   const yearOptions = useMemo(() => {
     const fromApi = report?.available_years ?? [];
-    const set = new Set<number>([...fromApi, yearNow, yearNow - 1, yearNow - 2, 2025]);
+    const set = new Set<number>([...fromApi, yearNow, yearNow - 1, yearNow - 2, 2025, year]);
     return [...set].sort((a, b) => b - a);
-  }, [report?.available_years, yearNow]);
+  }, [report?.available_years, yearNow, year]);
 
   const selectedInvestorName = useMemo(() => {
     if (!investorId) return null;
@@ -1005,6 +1084,18 @@ export function PaymentsPage() {
         </Panel>
       </div>
 
+      {(focusPaymentId || focusMonth) && !detailFocus ? (
+        <div className="detail-focus-banner" role="status">
+          <div>
+            <strong>טיפול בהעברה</strong>
+            <span className="muted">
+              {selectedInvestorName ? ` · ${selectedInvestorName}` : ""}
+              {focusMonth ? ` · ${formatCalendarMonth(`${focusMonth}-01`)}` : ""}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
       {detailFocus ? (
         <div className="detail-focus-banner" role="status">
           <div>
@@ -1357,6 +1448,7 @@ export function PaymentsPage() {
 
       <div
         ref={paymentsPanelRef}
+        id="payments-list"
         className={
           detailFocus &&
           detailFocus !== "lifetime-savings-now" &&
@@ -1451,7 +1543,13 @@ export function PaymentsPage() {
               </thead>
               <tbody>
                 {payments.map((p) => (
-                  <tr key={p.id}>
+                  <tr
+                    key={p.id}
+                    className="payment-row"
+                    data-payment-id={p.id}
+                    data-payment-month={p.due_date.slice(0, 7)}
+                    data-investor-id={p.investor_id}
+                  >
                     {isManager ? <td>{p.investor_name}</td> : null}
                     {allYears ? <td>{p.due_date.slice(0, 4)}</td> : null}
                     <td>{formatCalendarMonth(p.due_date)}</td>
@@ -1489,7 +1587,13 @@ export function PaymentsPage() {
           </div>
           <ul className="pay-cards">
             {payments.map((p) => (
-              <li key={`card-${p.id}`} className={`pay-card pay-card--${p.status}`}>
+              <li
+                key={`card-${p.id}`}
+                className={`pay-card pay-card--${p.status}`}
+                data-payment-id={p.id}
+                data-payment-month={p.due_date.slice(0, 7)}
+                data-investor-id={p.investor_id}
+              >
                 <div className="pay-card__top">
                   <div>
                     <strong className="pay-card__title">

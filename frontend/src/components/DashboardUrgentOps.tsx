@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
-import { formatMoney, todayISO } from "../utils/format";
+import { formatCalendarMonth, formatMoney, todayISO } from "../utils/format";
 import {
   buildUrgentPaymentOps,
   overdueMonthsLabel,
+  paymentsFocusHref,
+  primaryUrgentRow,
   type UrgentInvestorRow,
 } from "../utils/paymentOps";
 
@@ -38,15 +40,21 @@ function VisibleRows({
   return (
     <ul className="urgent-card__list">
       {visible.map((row) => (
-        <li key={`${row.investorId}-${row.dueDate}`} className="urgent-card__row">
-          <div>
-            <strong>{row.investorName}</strong>
-            <span className="muted">
-              {monthHint ? `${monthHint} · ` : ""}
-              {statusHint(row.status)}
-            </span>
-          </div>
-          <span className="urgent-card__amount">{formatMoney(row.amount)}</span>
+        <li key={`${row.investorId}-${row.dueDate}`}>
+          <Link
+            className="urgent-card__row"
+            to={paymentsFocusHref(row)}
+            aria-label={`לטפל בהעברה של ${row.investorName}`}
+          >
+            <div>
+              <strong>{row.investorName}</strong>
+              <span className="muted">
+                {`${monthHint || formatCalendarMonth(row.dueDate)} · `}
+                {statusHint(row.status)}
+              </span>
+            </div>
+            <span className="urgent-card__amount">{formatMoney(row.amount)}</span>
+          </Link>
         </li>
       ))}
       {extra > 0 ? (
@@ -114,6 +122,8 @@ export function DashboardUrgentOps({ investorId = null }: Props) {
   const missingTotal = missing.reduce((sum, row) => sum + row.amount, 0);
   const overdueTotal = overdue.reduce((sum, row) => sum + row.amount, 0);
   const overdueLabel = overdueMonthsLabel(ops.overdueMonthKeys);
+  const overdueFocus = primaryUrgentRow(overdue);
+  const missingFocus = primaryUrgentRow(missing);
 
   return (
     <section className="urgent-ops" aria-label="דחוף עכשיו">
@@ -131,7 +141,10 @@ export function DashboardUrgentOps({ investorId = null }: Props) {
               : `${overdue.length} ממתינים להעברה`}
           </h3>
           <VisibleRows rows={overdue} />
-          <Link className="btn btn--small btn--gold" to="/payments">
+          <Link
+            className="btn btn--small btn--gold"
+            to={overdueFocus ? paymentsFocusHref(overdueFocus) : "/payments"}
+          >
             לטפל בהעברה
           </Link>
         </article>
@@ -147,7 +160,10 @@ export function DashboardUrgentOps({ investorId = null }: Props) {
               : `${missing.length} טרם קיבלו ב${ops.currentMonthLabel}`}
           </h3>
           <VisibleRows rows={missing} monthHint={ops.currentMonthLabel} />
-          <Link className="btn btn--small btn--admin" to="/payments">
+          <Link
+            className="btn btn--small btn--admin"
+            to={missingFocus ? paymentsFocusHref(missingFocus) : "/payments"}
+          >
             לתשלומים
           </Link>
         </article>
