@@ -52,7 +52,7 @@ export function ForgotPasswordPage() {
 
   return (
     <div className="auth-screen">
-      <div className="atmosphere" aria-hidden="true" />
+      <div className="atmosphere atmosphere--private" aria-hidden="true" />
       <div className="auth-card">
         <p className="auth-card__eyebrow">שחזור גישה</p>
         <h1 className="auth-card__brand">תזרים</h1>

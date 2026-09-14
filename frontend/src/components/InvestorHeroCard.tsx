@@ -3,12 +3,14 @@ import type { Payment } from "../types/investments";
 import { formatDate, formatMoney } from "../utils/format";
 
 export function InvestorHeroCard({
+  greeting,
   principal,
   nextPayment,
   paidThisYear,
   onDownloadMonthly,
   monthlyBusy,
 }: {
+  greeting?: string;
   principal: number;
   nextPayment?: Payment | null;
   paidThisYear: number;
@@ -19,8 +21,11 @@ export function InvestorHeroCard({
 
   return (
     <section className="investor-hero" aria-label="התיק הפרטי">
+      <p className="investor-hero__eyebrow">
+        {greeting ? `שלום ${greeting}` : "התיק הפרטי"}
+      </p>
       <div className="investor-hero__fund">
-        <span>הקרן שלך</span>
+        <span>הקרן</span>
         <strong>{formatMoney(principal)}</strong>
       </div>
       <div className="investor-hero__grid">

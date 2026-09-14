@@ -50,7 +50,7 @@ function VisibleRows({
         </li>
       ))}
       {extra > 0 ? (
-        <li className="urgent-card__more muted">ועוד {extra} משקיעים</li>
+        <li className="urgent-card__more muted">ועוד {extra}</li>
       ) : null}
     </ul>
   );
@@ -119,21 +119,17 @@ export function DashboardUrgentOps({ investorId = null }: Props) {
     <section className="urgent-ops" aria-label="דחוף עכשיו">
       <header className="urgent-ops__head">
         <h2 className="urgent-ops__title">דחוף עכשיו</h2>
-        <p className="urgent-ops__subtitle">מידע לחוץ בלבד — בלי משפך שלבים</p>
       </header>
 
       {overdue.length > 0 ? (
         <article className="urgent-card urgent-card--overdue" aria-label="העברה חודשית שעבר מועדה">
-          <p className="urgent-card__eyebrow">תזכורת · עבר חודש</p>
+          <p className="urgent-card__eyebrow">עבר מועד · {overdueLabel || "חודש קודם"}</p>
+          <p className="urgent-card__hero">{formatMoney(overdueTotal)}</p>
           <h3 className="urgent-card__title">
             {overdue.length === 1
-              ? `${overdue[0].investorName} ממתין להעברה חודשית`
-              : `${overdue.length} משקיעים ממתינים להעברה חודשית`}
+              ? `${overdue[0].investorName} ממתין להעברה`
+              : `${overdue.length} ממתינים להעברה`}
           </h3>
-          <p className="urgent-card__detail">
-            עבר מועד {overdueLabel || "החודש הקודם"} · {formatMoney(overdueTotal)} טרם הועבר.
-            פתחו תשלומים ושלחו לאישור.
-          </p>
           <VisibleRows rows={overdue} />
           <Link className="btn btn--small btn--gold" to="/payments">
             לטפל בהעברה
@@ -143,15 +139,13 @@ export function DashboardUrgentOps({ investorId = null }: Props) {
 
       {missing.length > 0 ? (
         <article className="urgent-card urgent-card--missing" aria-label="חסר תשלום החודש">
-          <p className="urgent-card__eyebrow">דחוף · {ops.currentMonthLabel}</p>
+          <p className="urgent-card__eyebrow">{ops.currentMonthLabel}</p>
+          <p className="urgent-card__hero">{formatMoney(missingTotal)}</p>
           <h3 className="urgent-card__title">
             {missing.length === 1
-              ? `${missing[0].investorName} לא קיבל תשלום החודש`
-              : `${missing.length} משקיעים לא קיבלו תשלום ב${ops.currentMonthLabel}`}
+              ? `${missing[0].investorName} טרם קיבל החודש`
+              : `${missing.length} טרם קיבלו ב${ops.currentMonthLabel}`}
           </h3>
-          <p className="urgent-card__detail">
-            סה״כ {formatMoney(missingTotal)} שעדיין לא סומן כבוצע לחודש הנוכחי.
-          </p>
           <VisibleRows rows={missing} monthHint={ops.currentMonthLabel} />
           <Link className="btn btn--small btn--admin" to="/payments">
             לתשלומים
@@ -161,13 +155,11 @@ export function DashboardUrgentOps({ investorId = null }: Props) {
 
       {overdue.length === 0 && missing.length === 0 ? (
         <article className="urgent-card urgent-card--ok" aria-label="אין תשלומים דחופים">
-          <p className="urgent-card__eyebrow">מעודכן · {ops.currentMonthLabel}</p>
-          <h3 className="urgent-card__title">אין תשלום חסר החודש</h3>
-          <p className="urgent-card__detail">
-            אין משקיעים שממתינים להעברה חודשית שעבר מועדה, ואין תשלום פתוח לחודש הנוכחי.
-          </p>
+          <p className="urgent-card__eyebrow">{ops.currentMonthLabel}</p>
+          <h3 className="urgent-card__title">הכול מעודכן</h3>
+          <p className="urgent-card__detail">אין תשלום חסר החודש.</p>
           <Link className="btn btn--small btn--ghost" to="/payments">
-            למסך תשלומים
+            לתשלומים
           </Link>
         </article>
       ) : null}

@@ -200,7 +200,7 @@ export function AppShell() {
         </div>
       ) : null}
 
-      <div className="chrome" role="banner">
+      <div className="chrome chrome--quiet" role="banner">
         <div className="chrome__inner">
           {isManager && siteStatus?.public_url ? (
             <div className="public-link-bar" role="region" aria-label="כניסה מהירה">
@@ -249,7 +249,7 @@ export function AppShell() {
             <div className="brand">
               <span className="brand__mark">תזרים</span>
               <span className="brand__tag">
-                {displayName}
+                <span className="brand__who">{displayName}</span>
                 <span className={roleChipClass}>{roleLabel}</span>
               </span>
             </div>

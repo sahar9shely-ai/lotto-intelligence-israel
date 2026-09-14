@@ -35,9 +35,9 @@ export function ChangePasswordPage() {
 
   return (
     <div className="auth-screen">
-      <div className="atmosphere" aria-hidden="true" />
+      <div className="atmosphere atmosphere--private" aria-hidden="true" />
       <div className="auth-card">
-        <p className="auth-card__eyebrow">{forced ? "צעד קצר לפני הכניסה" : "התיק הפרטי שלך"}</p>
+        <p className="auth-card__eyebrow">{forced ? "צעד קצר לפני הכניסה" : "התיק הפרטי"}</p>
         <h1 className="auth-card__brand">תזרים</h1>
         <p className="auth-card__welcome">
           {forced

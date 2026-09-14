@@ -135,43 +135,29 @@ export function DashboardPage() {
   return (
     <div className="page">
       <Toast message={dashMessage} onClear={() => setDashMessage(null)} />
-      <header
-        className={`page-intro${isAdmin ? " page-intro--admin" : ""}${
-          !isManager ? " page-intro--investor" : ""
-        }`}
-      >
-        <div>
-          {isManager ? (
+      {isManager ? (
+        <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
+          <div>
             <p className="page-intro__eyebrow">
               {isAdmin ? "מנהל מערכת" : "ניהול שותפים"}
             </p>
-          ) : (
-            <p className="page-intro__eyebrow">התיק הפרטי</p>
-          )}
-          <h1 className="page-intro__title">
-            {isAdmin
-              ? scopeName
-                ? `החזר חודשי · ${scopeName}`
-                : "לוח בקרה"
-              : `שלום ${user?.investor_name || user?.username || ""}`}
-          </h1>
-          {isManager ? (
+            <h1 className="page-intro__title">
+              {isAdmin
+                ? scopeName
+                  ? `החזר חודשי · ${scopeName}`
+                  : "לוח בקרה"
+                : `שלום ${user?.investor_name || user?.username || ""}`}
+            </h1>
             <p className="page-intro__lead">
               {isAdmin
                 ? scopeName
-                  ? `עמלת ניהול חודשית מ${scopeName} — לפי מסלולים פעילים.`
-                  : "מה דחוף עכשיו: משקיעים שחסר להם תשלום, והעברה חודשית כשעובר חודש."
+                  ? `עמלת ניהול חודשית מ${scopeName}.`
+                  : "תשלומים חסרים והעברות שעבר מועדן."
                 : scopeName
                   ? `סיכום של ${scopeName} — מזומן וחיסכון בנפרד.`
-                  : "סיכום כולם — מזומן וחיסכון בנפרד. לחצו על משקיע ברשימה כדי לצמצם."}
+                  : "סיכום כולם — מזומן וחיסכון בנפרד."}
             </p>
-          ) : (
-            <p className="page-intro__lead">
-              הקרן שלך, התשלום הבא, ומה ששולם השנה — במבט אחד.
-            </p>
-          )}
-        </div>
-        {isManager ? (
+          </div>
           <div className="page-head__actions">
             <Link className="btn btn--admin" to="/investors">
               למשקיעים
@@ -180,18 +166,17 @@ export function DashboardPage() {
               תשלומים
             </Link>
           </div>
-        ) : null}
-      </header>
-
-      {!isManager ? (
+        </header>
+      ) : (
         <InvestorHeroCard
+          greeting={user?.investor_name || user?.username || ""}
           principal={data.total_principal}
           nextPayment={nextPayment}
           paidThisYear={data.ytd_investor_paid}
           onDownloadMonthly={() => void downloadMonthly()}
           monthlyBusy={monthlyBusy}
         />
-      ) : null}
+      )}
 
       {!isManager ? (
         <PaymentCeremonyCard
