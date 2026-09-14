@@ -140,8 +140,6 @@ export function InvestorsPage() {
       cash: list.reduce((s, i) => s + cashOf(i), 0),
       savings: list.reduce((s, i) => s + savingsOf(i), 0),
       savingsBalance: list.reduce((s, i) => s + (i.current_savings_balance || 0), 0),
-      count: list.length,
-      activePlans: list.reduce((s, i) => s + (i.active_plans_count || 0), 0),
     };
   }, [investors]);
 
@@ -342,7 +340,6 @@ export function InvestorsPage() {
         <div className="stack">
           <Panel
             title="סיכום כל המשקיעים"
-            subtitle={`${portfolio.count} משקיעים · ${portfolio.activePlans} מסלולים פעילים · מזומן ≠ חיסכון`}
           >
             <div className="money-ledger">
               <div className="money-ledger__item money-ledger__item--accent">
@@ -371,7 +368,7 @@ export function InvestorsPage() {
             </div>
           </Panel>
 
-          <Panel title="פירוט לפי משקיע" subtitle="לחצו על שם כדי לפתוח את הכרטיס המלא">
+          <Panel title="פירוט לפי משקיע">
             <div className="investor-table-wrap table-wrap--desktop">
               <table className="investor-table">
                 <thead>
@@ -472,11 +469,6 @@ export function InvestorsPage() {
         <div className="stack">
           <Panel
             title={selected.name}
-            subtitle={
-              selected.is_manager
-                ? "השקעה עצמית · עמלה נפרדת בדשבורד"
-                : `${selected.months_in_program} חודשים בתוכנית · ${selected.active_plans_count ?? activeSelectedPlans.length} מסלולים פעילים`
-            }
             action={
               <div className="investor-access-actions">
                 <Link className="text-link" to="/payments">
@@ -555,7 +547,7 @@ export function InvestorsPage() {
           </Panel>
 
           {selectedPlans.length === 0 ? (
-            <Panel title="אין מסלול עדיין" subtitle="פתחו מסלול כדי להגדיר קרן ואחוזים">
+            <Panel title="אין מסלול עדיין">
               <p className="empty">עדיין אין מסלול למשקיע הזה.</p>
               {isManager ? (
                 <button
@@ -630,7 +622,6 @@ export function InvestorsPage() {
                 ) : (
                   <Panel
                     title="אין מסלול פעיל"
-                    subtitle="המסלולים הסגורים נמצאים בלשונית תיקים סגורים"
                   >
                     <p className="empty">אין מסלול פעיל למשקיע הזה כרגע.</p>
                     {closedSelectedPlans.length > 0 ? (
@@ -656,7 +647,6 @@ export function InvestorsPage() {
               ) : closedSelectedPlans.length > 0 ? (
                 <Panel
                   title="תיקים סגורים"
-                  subtitle="מופרדים מהפעילים · מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה"
                 >
                   <div className="closed-plans">
                     {closedSelectedPlans.map((plan) => (
@@ -700,7 +690,7 @@ export function InvestorsPage() {
                   </div>
                 </Panel>
               ) : (
-                <Panel title="אין תיקים סגורים" subtitle="עדיין לא נסגר אף מסלול למשקיע הזה">
+                <Panel title="אין תיקים סגורים">
                   <p className="empty">אין תיקים סגורים.</p>
                   <button
                     type="button"
@@ -824,8 +814,7 @@ function PlanCard({
 
   return (
     <Panel
-      title={`${planTypeLabel(plan.plan_type)} · מסלול #${plan.id}`}
-      subtitle={`${statusLabelHe} · ${plan.duration_months} חודשים · ${plan.months_elapsed}/${plan.duration_months}`}
+      title={`${statusLabelHe} · ${planTypeLabel(plan.plan_type)} · מסלול #${plan.id}`}
       action={
         <div className="page-head__actions">
           <button type="button" className="btn btn--small btn--ghost" onClick={onToggleReport}>

@@ -78,12 +78,7 @@ export function ActivityPage() {
     <div className="activity-page stack">
       <header className="activity-page__hero">
         <div>
-          <p className="eyebrow">מעקב מלא</p>
           <h1>יומן פעילות והתראות</h1>
-          <p className="lede">
-            כל כניסה, תשלום, הצעה, מסלול ושינוי במערכת — במקום אחד. התראות כניסה מופיעות מיד
-            גם בפעמון למעלה.
-          </p>
         </div>
         <div className="activity-page__stats">
           <div>
@@ -99,7 +94,6 @@ export function ActivityPage() {
 
       <Panel
         title="סינון"
-        subtitle="בחרו קטגוריה או הציגו רק מה שעדיין לא נקרא"
         action={
           <div className="inline-form">
             <label className="check-row">
@@ -137,7 +131,6 @@ export function ActivityPage() {
 
       <Panel
         title="אירועים"
-        subtitle={loading ? "מרענן…" : `${events?.length ?? 0} רשומות`}
         action={
           <button type="button" className="btn btn--small btn--ghost" onClick={() => reload()}>
             רענון

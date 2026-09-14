@@ -138,9 +138,6 @@ export function DashboardPage() {
       {isManager ? (
         <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
           <div>
-            <p className="page-intro__eyebrow">
-              {isAdmin ? "מנהל מערכת" : "ניהול שותפים"}
-            </p>
             <h1 className="page-intro__title">
               {isAdmin
                 ? scopeName
@@ -148,15 +145,6 @@ export function DashboardPage() {
                   : "לוח בקרה"
                 : `שלום ${user?.investor_name || user?.username || ""}`}
             </h1>
-            <p className="page-intro__lead">
-              {isAdmin
-                ? scopeName
-                  ? `עמלת ניהול חודשית מ${scopeName}.`
-                  : "תשלומים חסרים והעברות שעבר מועדן."
-                : scopeName
-                  ? `סיכום של ${scopeName} — מזומן וחיסכון בנפרד.`
-                  : "סיכום כולם — מזומן וחיסכון בנפרד."}
-            </p>
           </div>
           <div className="page-head__actions">
             <Link className="btn btn--admin" to="/investors">
@@ -194,13 +182,6 @@ export function DashboardPage() {
       ) ? (
         <Panel
           title={isManager ? "בקשות מסלול" : "הוסף מסלול"}
-          subtitle={
-            (topupRequests ?? []).some((r) => r.status === "pending" || r.status === "contract")
-              ? isManager
-                ? "יש בקשות ממתינות לחוזה או לחתימה"
-                : "עקבו אחרי הסטטוס, חתמו על החוזה והורידו את הקובץ"
-              : "יש השקעה בחלון ביטול של 3 ימי עסקים"
-          }
           action={
             <Link className="btn btn--small btn--primary" to="/investors">
               {isManager ? "לטיפול בבקשות" : "לפרטים"}
@@ -324,7 +305,6 @@ export function DashboardPage() {
       {showOpsFeed ? (
         <Panel
           title="יומן מעקב"
-          subtitle="כניסות, תשלומים, הצעות ובקשות — הכול במקום אחד"
           action={
             <div className="inline-form">
               <Link className="btn btn--small btn--ghost" to="/activity">
@@ -386,7 +366,6 @@ export function DashboardPage() {
       {showOpsFeed && (alerts?.length ?? 0) > 0 ? (
         <Panel
           title="התראות כניסה"
-          subtitle="מישהו התחבר למערכת"
           action={
             <button
               type="button"
@@ -430,7 +409,6 @@ export function DashboardPage() {
         {isManager ? (
           <Panel
             title={scopeName ? `פירוט · ${scopeName}` : "משקיעים"}
-            subtitle={`${data.active_plans} מסלולים פעילים`}
             action={
               <Link className="text-link" to="/investors">
                 כרטיסים מלאים
@@ -479,7 +457,7 @@ export function DashboardPage() {
             )}
           </Panel>
         ) : (
-          <Panel title="הסיכום שלך" subtitle="המסלולים הפעילים בתיק" delay={80}>
+          <Panel title="הסיכום שלך" delay={80}>
             <ul className="list">
               {data.investors_summary.map((inv) => (
                 <li key={inv.id} className="list__row">
@@ -504,7 +482,6 @@ export function DashboardPage() {
 
         <Panel
           title="תשלומים קרובים"
-          subtitle="מזומן בלבד — לפי לוח הזמנים"
           action={
             <Link className="text-link" to="/payments">
               היסטוריה
@@ -541,7 +518,6 @@ export function DashboardPage() {
       {!isAdmin ? (
       <Panel
         title="סיכום שנתי וסה״כ"
-        subtitle="שולם בפועל במזומן · חיסכון לא נספר כאן כתשלום"
         delay={200}
       >
         <div className="stats-grid stats-grid--compact">

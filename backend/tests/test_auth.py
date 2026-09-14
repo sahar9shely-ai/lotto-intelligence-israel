@@ -383,6 +383,64 @@ def test_deleted_demo_investor_not_resurrected_on_reseed():
         db.close()
 
 
+def test_deleted_personal_sahar_not_resurrected_on_reseed():
+    """Deleting סהר / sahar must stay deleted after restart/seed. Admin stays intact."""
+    from app.models.investments import Investor
+    from app.services import auth_service as auth_svc
+
+    _ensure_seeded()
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    sahar_user = next((u for u in users if u["username"] == "sahar"), None)
+    assert sahar_user is not None, "seed should create sahar once"
+    assert sahar_user["role"] == "investor"
+    assert sahar_user["is_manager"] is False
+
+    deleted = client.delete(f"/api/v1/auth/users/{sahar_user['id']}", headers=headers)
+    assert deleted.status_code == 204, deleted.text
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        inv_svc.seed_defaults(db)
+        names = {i.name for i in db.query(Investor).all()}
+        assert "סהר" not in names
+        assert db.query(User).filter(User.username == "sahar").first() is None
+        admin = db.query(User).filter(User.username == "admin").one()
+        admin_inv = db.query(Investor).filter(Investor.id == admin.investor_id).one()
+        assert admin.role == "manager"
+        assert admin_inv.name == "מנהל מערכת"
+        assert admin_inv.is_manager is True
+        settings = inv_svc.ensure_settings(db)
+        assert settings.personal_investor_seeded is True
+    finally:
+        db.close()
+
+    users_after = client.get("/api/v1/auth/users", headers=headers).json()
+    assert all(u["username"] != "sahar" for u in users_after)
+    assert all(u["investor_name"] != "סהר" for u in users_after)
+    assert any(u["username"] == "admin" for u in users_after)
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "ManagerPass1!"},
+    )
+    assert login.status_code == 200, login.text
+
+    db = InvestmentSessionLocal()
+    try:
+        if db.query(Investor).filter(Investor.name == "סהר").first() is None:
+            inv = Investor(name="סהר", is_manager=False)
+            db.add(inv)
+            db.flush()
+            auth_svc.ensure_user_for_investor(
+                db, inv, username="sahar", email=None, password=None
+            )
+            db.commit()
+    finally:
+        db.close()
+
+
 def test_dedupe_removes_empty_duplicate_investors():
     """Two empty «אופק» rows → one investor + one user after seed/dedupe."""
     from app.models.investments import Investor

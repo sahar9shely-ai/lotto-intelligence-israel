@@ -71,11 +71,7 @@ export function SettingsPage() {
     <div className="page">
       <header className="page-intro page-intro--admin">
         <div>
-          <p className="page-intro__eyebrow">הגדרות מערכת</p>
           <h1 className="page-intro__title">הגדרות גלובליות</h1>
-          <p className="page-intro__lead">
-            ברירות מחדל למסלולים, הודעת עדכון למשתמשים, Slack ועוזר אישי.
-          </p>
         </div>
         <div className="page-head__actions">
           <Link className="btn btn--admin" to="/users">
@@ -86,7 +82,7 @@ export function SettingsPage() {
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
-      <Panel title="הסיסמה שלי" subtitle="החלפה אישית — לא מוצגת בכותרת העליונה">
+      <Panel title="הסיסמה שלי">
         <p className="hint">
           אפשר להחליף את הסיסמה בכל רגע. הסיסמה החדשה נשארת אצלך בלבד.
         </p>
@@ -99,7 +95,6 @@ export function SettingsPage() {
 
       <Panel
         title="האתר בעדכון"
-        subtitle="כשמופעל — כל משתמש מחובר רואה באנר בראש האתר"
       >
         <p className="hint">
           {data.site_updating
@@ -129,7 +124,7 @@ export function SettingsPage() {
         </div>
       </Panel>
 
-      <Panel title="גישה למשתמשים" subtitle="מיילים והרשאות מתנהלים באפליקציה">
+      <Panel title="גישה למשתמשים">
         <p className="hint">
           לכל משקיע חובה מייל אמיתי כדי לקבל גישה. עדכון מייל, בחירת הרשאה (משקיע /
           מנהל) ושליחת הזמנה — הכל במסך{" "}
@@ -142,7 +137,6 @@ export function SettingsPage() {
 
       <Panel
         title="צ'אט עבודה · Slack"
-        subtitle="פתיחה מהירה של תזרים מהערוץ — כפתור אחד"
       >
         <p className="hint">
           צרו Incoming Webhook ב-Slack (Apps → Incoming Webhooks), הדביקו כאן, ושמרו.
@@ -167,11 +161,6 @@ export function SettingsPage() {
 
       <Panel
         title="עוזר אישי · מודל"
-        subtitle={
-          data.assistant_api_key_set
-            ? `מפתח מוגדר (${data.assistant_api_key_hint || "****"}) · ${data.assistant_provider || "gemini"}`
-            : "בלי מפתח — חישובים מהתיק עובדים; שיחה חופשית דורשת Gemini חינמי"
-        }
       >
         <p className="hint">
           המפתח נשמר רק אצלך במערכת ולא חוזר במלואו למסך. מומלץ Gemini (חינם) מ־
@@ -220,7 +209,6 @@ export function SettingsPage() {
 
       <Panel
         title="אחוזים ומשך"
-        subtitle="לא משנים מסלולים קיימים אוטומטית — רק ערכי פתיחה"
       >
         <form className="form" onSubmit={onSave}>
           <div className="form__grid">

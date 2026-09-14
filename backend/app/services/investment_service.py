@@ -291,8 +291,9 @@ SYSTEM_INVESTOR_NAMES = frozenset({"מנהל מערכת", "סהר", "מנהל", 
 def seed_defaults(db: Session) -> dict:
     """Seed investors + users. Idempotent; safe on legacy DBs with a combined manager row.
 
-    Demo investors (בר/אופק/…) are created only on first bootstrap. After that they are
-    never recreated — deleting a user stays deleted across restarts/deploys.
+    Demo investors (בר/אופק/…) and the personal portfolio (סהר / sahar) are created only
+    on first bootstrap. After that they are never recreated — deleting a user stays
+    deleted across restarts/deploys. The operational admin account is independent.
     """
     from app.services.auth_service import ADMIN_INVESTOR_NAME, PERSONAL_INVESTOR_NAME
 
@@ -303,26 +304,33 @@ def seed_defaults(db: Session) -> dict:
     def investor_names() -> set[str]:
         return {i.name for i in db.query(Investor).all()}
 
-    # 1) Personal portfolio row — keep legacy id + plans (rename מנהל/מנהלת → סהר).
+    # 1) Personal portfolio row — first bootstrap only (never resurrect after delete).
+    # Keep legacy id + plans when renaming מנהל/מנהלת → סהר on unsplit DBs.
+    personal_seeded = bool(getattr(settings, "personal_investor_seeded", False))
     personal = db.query(Investor).filter(Investor.name == PERSONAL_INVESTOR_NAME).first()
     if personal is None:
         legacy = (
             db.query(Investor)
-            .filter(Investor.name.in_(("מנהל", "מנהלת", PERSONAL_INVESTOR_NAME)))
+            .filter(Investor.name.in_(("מנהל", "מנהלת")))
             .order_by(Investor.id.asc())
             .first()
         )
         if legacy is not None:
-            if legacy.name != PERSONAL_INVESTOR_NAME:
-                old_name = legacy.name
-                legacy.name = PERSONAL_INVESTOR_NAME
-                updated.append(f"renamed:{old_name}->{PERSONAL_INVESTOR_NAME}")
-        else:
-            db.add(Investor(name=PERSONAL_INVESTOR_NAME, is_manager=False))
+            old_name = legacy.name
+            legacy.name = PERSONAL_INVESTOR_NAME
+            legacy.is_manager = False
+            updated.append(f"renamed:{old_name}->{PERSONAL_INVESTOR_NAME}")
+            personal = legacy
+        elif not personal_seeded:
+            personal = Investor(name=PERSONAL_INVESTOR_NAME, is_manager=False)
+            db.add(personal)
             created.append(PERSONAL_INVESTOR_NAME)
-    personal = db.query(Investor).filter(Investor.name == PERSONAL_INVESTOR_NAME).first()
     if personal is not None:
         personal.is_manager = False
+
+    if not personal_seeded:
+        settings.personal_investor_seeded = True
+        updated.append("personal_investor_seeded")
 
     db.flush()
     personal_id = personal.id if personal else None

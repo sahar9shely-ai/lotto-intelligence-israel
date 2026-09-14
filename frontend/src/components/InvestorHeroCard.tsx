@@ -21,9 +21,9 @@ export function InvestorHeroCard({
 
   return (
     <section className="investor-hero" aria-label="התיק הפרטי">
-      <p className="investor-hero__eyebrow">
+      <h1 className="investor-hero__title">
         {greeting ? `שלום ${greeting}` : "התיק הפרטי"}
-      </p>
+      </h1>
       <div className="investor-hero__fund">
         <span>הקרן</span>
         <strong>{formatMoney(principal)}</strong>

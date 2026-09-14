@@ -359,11 +359,6 @@ export function PaymentsPage() {
     savingsPlansInView,
   ]);
 
-  const selectedTrackPlan = useMemo(() => {
-    if (!investorFilter) return null;
-    return primaryPlanForInvestor(plans, investorFilter, year);
-  }, [plans, investorFilter, year]);
-
   function clearDetailFocus() {
     setDetailFocus(null);
     setAllYears(false);
@@ -795,21 +790,9 @@ export function PaymentsPage() {
       <Toast message={message} onClear={clearMessage} />
       <header className="page-intro">
         <div>
-          <p className="page-intro__eyebrow">
-            {isManager ? "ניהול תשלומים" : "התיק הפרטי"}
-          </p>
           <h1 className="page-intro__title">
             {isManager ? "תשלומים והיסטוריה" : "התשלומים שלך"}
           </h1>
-          <p className="page-intro__lead">
-            {isManager
-              ? selectedTrackPlan && selectedInvestorName
-                ? `${selectedInvestorName} · ${formatCalendarMonth(selectedTrackPlan.start_date)} ${selectedTrackPlan.start_date.slice(0, 4)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))} ${planTrackEnd(selectedTrackPlan).slice(0, 4)}`
-                : `שנת ${year} · בחרו משקיע למעלה כדי לראות מסלול אחד בבירור.`
-              : selectedTrackPlan
-                ? `המסלול שלך · ${formatCalendarMonth(selectedTrackPlan.start_date)} עד ${formatCalendarMonth(planTrackEnd(selectedTrackPlan))}`
-                : "כאן מאשרים קבלה ורואים מה שולם ומה מתוכנן."}
-          </p>
         </div>
         <div className="page-head__actions">
           <button
@@ -936,7 +919,6 @@ export function PaymentsPage() {
       <div className="grid-2">
         <Panel
           title="סיכום שנתי"
-          subtitle={`שנת ${year} · לחצו על משבצת לפירוט`}
         >
           <div className="stats-grid stats-grid--compact">
             <Stat
@@ -978,7 +960,6 @@ export function PaymentsPage() {
 
         <Panel
           title="סיכום סה״כ"
-          subtitle="כל השנים · לחצו על משבצת לפירוט"
         >
           <div className="stats-grid stats-grid--compact">
             <Stat
@@ -1050,7 +1031,6 @@ export function PaymentsPage() {
       {isManager && yearInvestors.length > 0 ? (
         <Panel
           title={`מי בלוח ${year}`}
-          subtitle="לחצו על שם כדי לראות רק אותו. הסרה מהשנה נמצאת תחת עריכה."
           action={
             <button
               type="button"
@@ -1133,7 +1113,6 @@ export function PaymentsPage() {
                   ? "פירוט · חיסכון עד סוף מסלול"
                   : "חיסכון פעיל · לפי תנאי מסלול"
             }
-            subtitle="מסלולים פעילים בלבד · כמה קיבל במזומן, כמה נצבר בחיסכון, ומה הסה״כ עד עכשיו"
           >
             {savingsByInvestorCards.length > 1 ? (
               <div className="savings-grand-total">
@@ -1324,7 +1303,6 @@ export function PaymentsPage() {
       {closedSavingsPlans.length > 0 ? (
         <Panel
           title="תיקי חיסכון סגורים"
-          subtitle="מופרדים מהפעילים · מסלולים שהסתיימו או נסגרו אחרי משיכה/העברה"
         >
           <div className="closed-plans">
             {closedSavingsPlans.map((p) => (
@@ -1358,7 +1336,6 @@ export function PaymentsPage() {
       {statusReportPlans.length > 0 ? (
         <Panel
           title="דוח מצב · מתחילת מסלול עד סוף מסלול"
-          subtitle="לפי תנאי המסלול של כל משקיע — בלי חודשים שלפני ההתחלה ובלי קיצוץ מלאכותי לסוף שנה"
         >
           {statusReportPlans.map((p) => (
             <div
@@ -1397,13 +1374,6 @@ export function PaymentsPage() {
             : allYears
               ? "תשלומים · כל השנים"
               : `תשלומי ${year}`
-        }
-        subtitle={
-          detailFocus === "yearly-fees" || detailFocus === "lifetime-fees"
-            ? "תשלומים שבוצעו · עמלה בעמודה ייעודית"
-            : allYears
-              ? "כל התשלומים בכל השנים · מסונן לפי המשבצת שנבחרה"
-              : "תשלומי מזומן שחלים בשנה זו · רק חודשים שהמשקיע במסלול בהם"
         }
         action={
           isManager && !allYears && (yearly?.scheduled_count ?? 0) > 0 ? (

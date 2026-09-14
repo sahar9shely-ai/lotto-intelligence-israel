@@ -16,7 +16,7 @@ export function PaymentCeremonyCard({
 
   return (
     <section className="payment-ceremony" aria-label="אישור העברה">
-      <p className="payment-ceremony__eyebrow">אישור העברה</p>
+      <h2 className="payment-ceremony__title">אישור העברה</h2>
       <ul className="payment-ceremony__list">
         {payments.map((p) => (
           <li key={p.id} className="payment-ceremony__item">

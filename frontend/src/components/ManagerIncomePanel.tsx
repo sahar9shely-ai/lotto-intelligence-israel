@@ -24,7 +24,6 @@ export function ManagerIncomePanel({
     return (
       <Panel
         title={variant === "admin" ? "רווח חודשי ממשקיעים" : "הכנסות מנהל"}
-        subtitle="טוען..."
       >
         <p className="muted">טוען נתוני עמלות...</p>
       </Panel>
@@ -35,7 +34,6 @@ export function ManagerIncomePanel({
     return (
       <Panel
         title={variant === "admin" ? "רווח חודשי ממשקיעים" : "הכנסות מנהל"}
-        subtitle="למנהל בלבד"
       >
         <p className="form-error">{error || "לא ניתן לטעון"}</p>
         <button type="button" className="btn btn--small" onClick={reload}>
@@ -74,11 +72,6 @@ export function ManagerIncomeBoardView({
   return (
     <Panel
       title={feesOnly ? "רווח חודשי ממשקיעים" : "הכנסות מנהל · כל חודש"}
-      subtitle={
-        feesOnly
-          ? "עמלת ניהול מכל משקיע פעיל — סיכום חודשי"
-          : `למנהל בלבד · עמלות ממשקיעים + החזר ${name} לפי ההשקעה`
-      }
       className={feesOnly ? "panel--admin-profit" : undefined}
     >
       <div className="manager-income">

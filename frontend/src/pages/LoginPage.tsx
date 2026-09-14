@@ -42,11 +42,7 @@ export function LoginPage() {
     <div className="auth-screen">
       <div className="atmosphere atmosphere--private" aria-hidden="true" />
       <div className="auth-card">
-        <p className="auth-card__eyebrow">התיק הפרטי</p>
         <h1 className="auth-card__brand">תזרים</h1>
-        <p className="auth-card__welcome">
-          שלום. כאן רואים את הקרן, התשלום הבא ומה ששולם — בשקט ובבהירות.
-        </p>
 
         <form className="form auth-card__form" onSubmit={onSubmit} autoComplete="on">
           <label>

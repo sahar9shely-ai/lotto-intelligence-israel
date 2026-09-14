@@ -285,11 +285,7 @@ export function UsersPage() {
       {confirmDialog}
       <header className="page-intro page-intro--admin">
         <div>
-          <p className="page-intro__eyebrow">ניהול גישה</p>
           <h1 className="page-intro__title">משתמשים והרשאות</h1>
-          <p className="page-intro__lead">
-            התחברות בשם משתמש וסיסמה · רק אתה מגדיר סיסמאות, מאשר איפוסים ושולח כניסה בוואטסאפ.
-          </p>
         </div>
         <div className="page-head__actions">
           <button type="button" className="btn btn--admin" onClick={() => setShowCreate(true)}>
@@ -304,7 +300,6 @@ export function UsersPage() {
       {pendingResets.length > 0 ? (
         <Panel
           title="בקשות איפוס סיסמה"
-          subtitle={`${pendingResets.length} ממתינות לאישור שלך`}
         >
           <ul className="list">
             {pendingResets.map((req) => (
@@ -342,7 +337,6 @@ export function UsersPage() {
       {pendingUsers.length > 0 ? (
         <Panel
           title="ממתינים להגדרת סיסמה"
-          subtitle={`${pendingUsers.length} משתמשים בלי סיסמה פעילה`}
         >
           <ul className="list">
             {pendingUsers.map((u) => (
@@ -367,14 +361,20 @@ export function UsersPage() {
           key={u.id}
           className="user-card"
           title={u.investor_name}
-          subtitle={
-            u.has_password
-              ? `שם משתמש: ${u.username}${u.phone ? ` · ${formatPhoneDisplay(u.phone)}` : ""}${
-                  u.must_reset_password ? " · יחליף סיסמה בכניסה" : " · יש גישה פעילה"
-                }`
-              : `שם משתמש: ${u.username}${u.phone ? ` · ${formatPhoneDisplay(u.phone)}` : ""} · ממתין לסיסמה מהמנהל`
-          }
         >
+          <p className="user-card__meta">
+            <span>
+              שם משתמש <strong dir="ltr">{u.username}</strong>
+            </span>
+            {u.phone ? <span>טלפון {formatPhoneDisplay(u.phone)}</span> : null}
+            <span>
+              {u.has_password
+                ? u.must_reset_password
+                  ? "יחליף סיסמה בכניסה"
+                  : "יש גישה פעילה"
+                : "ממתין לסיסמה מהמנהל"}
+            </span>
+          </p>
           <details className="user-editor" {...(!u.has_password ? { open: true } : {})}>
             <summary className="user-editor__summary">
               <span>{u.has_password ? "עריכת פרטים וסיסמה" : "הגדרת סיסמה ופרטים"}</span>

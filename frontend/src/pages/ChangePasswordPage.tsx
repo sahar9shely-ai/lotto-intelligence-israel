@@ -37,13 +37,7 @@ export function ChangePasswordPage() {
     <div className="auth-screen">
       <div className="atmosphere atmosphere--private" aria-hidden="true" />
       <div className="auth-card">
-        <p className="auth-card__eyebrow">{forced ? "צעד קצר לפני הכניסה" : "התיק הפרטי"}</p>
         <h1 className="auth-card__brand">תזרים</h1>
-        <p className="auth-card__welcome">
-          {forced
-            ? "הסיסמה שקיבלת היא זמנית. בחרו סיסמה אישית — רק אתם תדעו אותה."
-            : "אפשר להחליף את הסיסמה בכל רגע. הסיסמה החדשה נשארת אצלך בלבד."}
-        </p>
 
         <form className="form auth-card__form" onSubmit={onSubmit} autoComplete="on">
           <PasswordField

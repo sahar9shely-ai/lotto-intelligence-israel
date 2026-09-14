@@ -4613,6 +4613,20 @@ input[type="date"] {
   display: none;
 }
 
+.user-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+}
+
+.user-card__meta strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
 .user-form__password {
   grid-column: 1 / -1;
 }
@@ -6125,7 +6139,8 @@ input[type="date"] {
   box-shadow: var(--shadow-soft);
 }
 
-.payment-ceremony__eyebrow {
+.payment-ceremony__eyebrow,
+.payment-ceremony__title {
   margin: 0;
   font-size: 0.78rem;
   font-weight: 700;
@@ -6377,13 +6392,21 @@ body {
   background: linear-gradient(90deg, transparent, rgba(212, 173, 74, 0.7), transparent);
 }
 
-.investor-hero__eyebrow {
+.investor-hero__eyebrow,
+.investor-hero__title {
   margin: 0;
   font-size: 0.74rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(246, 250, 248, 0.62);
+}
+
+.investor-hero__title {
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: rgba(246, 250, 248, 0.92);
 }
 
 .investor-hero__fund span,
@@ -6470,7 +6493,8 @@ body {
   box-shadow: var(--shadow-soft);
 }
 
-.payment-ceremony__eyebrow {
+.payment-ceremony__eyebrow,
+.payment-ceremony__title {
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.14em;
