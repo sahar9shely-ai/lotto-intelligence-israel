@@ -3133,7 +3133,6 @@ input[type="date"] {
   font-weight: 600;
 }
 
-.topbar__account,
 .topbar__logout {
   border: 1px solid transparent;
   background: transparent;
@@ -3150,12 +3149,6 @@ input[type="date"] {
   text-decoration: none;
   display: inline-flex;
   align-items: center;
-}
-
-.topbar__account:hover {
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .topbar__logout:hover {
@@ -5232,7 +5225,6 @@ input[type="date"] {
     display: none;
   }
 
-  .topbar__account,
   .topbar__logout {
     padding: 8px 12px;
     font-size: 0.84rem;
