@@ -4101,6 +4101,20 @@ input[type="date"] {
   filter: brightness(1.04);
 }
 
+.assistant-llm-hint {
+  margin: 0 16px 8px;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.assistant-llm-hint a {
+  color: var(--accent-strong);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 @media (max-width: 720px) {
   .assistant-fab {
     inset-inline-start: 12px;

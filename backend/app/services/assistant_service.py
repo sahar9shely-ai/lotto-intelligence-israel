@@ -267,15 +267,21 @@ def build_investor_context(db: Session, *, investor_id: int) -> dict[str, Any]:
     }
 
 
-def what_if_add_principal(context: dict[str, Any], extra: float) -> dict[str, Any]:
+def what_if_add_principal(
+    context: dict[str, Any], extra: float, months: Optional[int] = None
+) -> dict[str, Any]:
     """Pure calculation: add principal to active hybrid/monthly terms (weighted)."""
     extra = max(float(extra or 0), 0)
+    horizon = int(months) if months else None
+    if horizon is not None and not 1 <= horizon <= 120:
+        horizon = None
     active = [p for p in context.get("plans") or [] if p.get("status") == "active"]
     if not active:
         return {
             "ok": False,
             "detail": "אין מסלול פעיל לחישוב.",
             "extra": extra,
+            "horizon_months": horizon,
         }
 
     # Apply addition proportionally across active plans by current principal.
@@ -304,7 +310,7 @@ def what_if_add_principal(context: dict[str, Any], extra: float) -> dict[str, An
             }
         )
 
-    return {
+    result = {
         "ok": True,
         "extra": extra,
         "principal_now": context.get("active_principal"),
@@ -315,8 +321,15 @@ def what_if_add_principal(context: dict[str, Any], extra: float) -> dict[str, An
         "monthly_savings_after": round(new_savings, 2),
         "monthly_total_after": round(new_cash + new_savings, 2),
         "plans": rows,
-        "note": "חישוב הערכה לפי האחוזים הנוכחיים במסלול — לא משנה כלום במערכת.",
+        "note": (
+            "הערכה חוזית לפי האחוזים במסלול הפעיל — לא ייעוץ השקעות ולא הבטחת תשואה."
+        ),
     }
+    if horizon:
+        result["horizon_months"] = horizon
+        result["contractual_cash_over_horizon"] = round(new_cash * horizon, 2)
+        result["contractual_savings_over_horizon"] = round(new_savings * horizon, 2)
+    return result
 
 
 def build_manager_context(db: Session, *, user: User) -> dict[str, Any]:
@@ -366,18 +379,23 @@ def build_manager_context(db: Session, *, user: User) -> dict[str, Any]:
     if not tips:
         tips.append("אפשר לפתוח הצעה חדשה כשמתאים להרחיב תיק — בלי לחץ, לפי שיחה עם הלקוח.")
 
+    has_personal = bool(
+        own.get("has_active_plan") and float(own.get("active_principal") or 0) > 0
+    )
+
     return {
         "role": "manager",
         "investor_name": name,
-        "active_principal": own.get("active_principal", 0),
-        "monthly_cash": own.get("monthly_cash", 0),
-        "monthly_savings": own.get("monthly_savings", 0),
-        "monthly_total": own.get("monthly_total", 0),
-        "current_savings_balance": own.get("current_savings_balance", 0),
-        "lifetime_cash_paid": own.get("lifetime_cash_paid", 0),
-        "plans": own.get("plans") or [],
-        "has_active_plan": own.get("has_active_plan", False),
-        "next_payment": own.get("next_payment"),
+        "has_personal_book": has_personal,
+        "has_active_plan": has_personal,
+        "active_principal": own.get("active_principal") if has_personal else None,
+        "monthly_cash": own.get("monthly_cash") if has_personal else None,
+        "monthly_savings": own.get("monthly_savings") if has_personal else None,
+        "monthly_total": own.get("monthly_total") if has_personal else None,
+        "current_savings_balance": own.get("current_savings_balance") if has_personal else None,
+        "lifetime_cash_paid": own.get("lifetime_cash_paid") if has_personal else None,
+        "plans": own.get("plans") if has_personal else [],
+        "next_payment": own.get("next_payment") if has_personal else None,
         "awaiting_confirmations": [_payment_brief(p, include_name=True) for p in awaiting],
         "awaiting_count": awaiting_count,
         "overdue_open_count": overdue,
@@ -425,12 +443,17 @@ def opening_state(db: Session, *, user: User) -> dict[str, Any]:
     context = build_assistant_context(db, user=user)
     name = context.get("investor_name") or ""
     tip = (context.get("tips") or [""])[0]
+    configured = assistant_configured(db)
     if context.get("role") == "manager":
         greeting = (
             f"שלום {name}.\n"
             f"{tip}\n"
             "אפשר לשאול על ממתינים לאישור, העברות שעבר מועדן, או לפתוח הצעה חדשה."
         )
+        if not configured:
+            greeting += (
+                "\nכדי שיחה עם מודל, חברו מפתח ב«הגדרות» או GEMINI_API_KEY ב־Render."
+            )
     else:
         greeting = (
             f"שלום {name}.\n"
@@ -443,6 +466,7 @@ def opening_state(db: Session, *, user: User) -> dict[str, Any]:
         "cta": context.get("cta"),
         "role": context.get("role"),
         "tips": context.get("tips") or [],
+        "configured": configured,
     }
 
 
@@ -464,12 +488,16 @@ def scrub_assistant_text(text: str) -> str:
     return cleaned.strip() or FORBIDDEN_REPLY
 
 
-def system_prompt(investor_name: str, *, role: str = "investor") -> str:
+def system_prompt(
+    investor_name: str, *, role: str = "investor", context: Optional[dict[str, Any]] = None
+) -> str:
     if role == "manager":
         audience = (
-            f"אתה העוזר האישי השקט של המנהל {investor_name} במערכת «תזרים». "
-            "עזור בניהול תפעולי: אישורי תשלום ממתינים, העברות שעבר מועדן, בקשות מסלול והצעות. "
-            "מותר להזכיר שמות משקיעים רק בהקשר תפעולי קצר (מי ממתין לאישור, מי ביקש תוספת)."
+            f"אתה יועץ תפעולי שקט למנהל {investor_name} במערכת «תזרים». "
+            "עזור בניהול: אישורי תשלום ממתינים, העברות שעבר מועדן, בקשות מסלול והצעות. "
+            "מותר להזכיר שמות משקיעים רק בהקשר תפעולי קצר. "
+            "אם אין תיק אישי פעיל (has_personal_book=false) — אסור לדווח «קרן 0» או סיכום תיק ריק. "
+            "מעטפת מנהל המערכת אינה תיק השקעה."
         )
         cta_line = (
             "כשמתאים, הצע בעדינות לפתוח הצעה חדשה או לטפל בבקשת מסלול — "
@@ -477,27 +505,37 @@ def system_prompt(investor_name: str, *, role: str = "investor") -> str:
         )
     else:
         audience = (
-            f"אתה העוזר האישי השקט של המשקיע {investor_name} במערכת «תזרים». "
-            "מדברים רק על התיק של {investor_name}."
+            f"אתה יועץ שיחה שקט למשקיע {investor_name} במערכת «תזרים». "
+            "מדברים רק על התיק של {investor_name}. "
+            "הסבר מצב, תן טיפ פרקטי, וכשמתאים הצע בעדינות תוספת לקרן עם פוטנציאל גדילה "
+            "לפי האחוזים החוזיים בלבד (what_if)."
         )
         cta_line = (
             "כשמתאים לשיחה (שואלים על עוד כסף, מסלול חדש, תוספת, או אחרי סיכום רגוע), "
             "אפשר להציע בעדינות לבקש תוספת / מסלול נוסף בעמוד המשקיעים. "
-            "בלי לחץ, בלי «חייבים», בלי הבטחת תשואה."
+            "בלי לחץ, בלי «חייבים», בלי הבטחת תשואה מעבר לאחוז החוזי."
+        )
+    ctx_block = ""
+    if context is not None:
+        ctx_block = (
+            "\n\nהקשר עדכני (JSON פנימי — לא להעתיק כתבנית, לא לחזור עליו בכל תשובה):\n"
+            + json.dumps(context, ensure_ascii=False)
         )
     return f"""{audience}
 סגנון: private-banking lite. עברית קצרה, מדויקת, בלשון פנייה מכבדת. בלי אימוג׳י. בלי סיסמאות שיווקיות.
+ענה רק לשאלה האחרונה של המשתמש. אם זו ברכה («היי»/«שלום») — שלום קצר בלי מספרים.
 
 כללי חובה:
 1. אל תמציא מספרים. השתמש רק בנתונים שסופקו בהקשר.
 2. אסור להזכיר דמי ניהול, עמלות, או כמה המנהל לוקח.
 3. אסור לבצע שינויים במערכת. מותר להסביר ולהפנות למסך הקיים.
 4. אם שואלים על עמלה — סרב בנימוס והפנה למנהל בלי מספרים.
-5. אם מבקשים «מה אם אוסיף X» — השתמש ב־what_if שסופק והפרד מזומן מחיסכון.
+5. אם סופק what_if_calculation — השתמש בו. הפרד מזומן מחיסכון. אם יש horizon_months הצג את הסכום החוזי על פני החודשים.
 6. {cta_line}
 7. הפרד תמיד בין החזר חודשי (מזומן) לבין צבירת חיסכון.
-8. טיפ אחד לכל היותר, ורק אם הוא נובע מהמצב בהקשר (אישור ממתין, חודש חדש, מסלול לא פעיל).
-9. אם כבר נמסר סיכום תיק בהיסטוריה — אל תחזור עליו. ענה רק לשאלה החדשה."""
+8. טיפ אחד לכל היותר, ורק אם הוא נובע מהמצב בהקשר.
+9. אל תחזור על סיכום תיק שכבר נמסר בהיסטוריה.
+10. דיסקליימר חד־פעמי בלבד, רק כשמציגים מספרים: «המספרים לפי תנאי המסלול החוזי — לא ייעוץ השקעות.»{ctx_block}"""
 
 
 # Prefer free-tier-friendly models first; fall back if a model is quota-blocked.
@@ -523,30 +561,18 @@ def _friendly_model_error(status_code: int, body: str) -> str:
 
 
 def _call_gemini(api_key: str, system: str, messages: list[dict], context: dict) -> str:
-    # Build Gemini contents from history
+    del context  # already folded into the system prompt
     contents = []
     for m in messages[-16:]:
         role = "user" if m["role"] == "user" else "model"
         contents.append({"role": role, "parts": [{"text": m["content"]}]})
+    if not contents:
+        contents = [{"role": "user", "parts": [{"text": "שלום"}]}]
 
     payload = {
         "system_instruction": {"parts": [{"text": system}]},
-        "contents": contents
-        + [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            "הקשר תיק (JSON, לשימוש פנימי בלבד):\n"
-                            + json.dumps(context, ensure_ascii=False)
-                            + "\n\nענה לשאלה האחרונה של המשתמש לפי הכללים."
-                        )
-                    }
-                ],
-            }
-        ],
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1024},
+        "contents": contents,
+        "generationConfig": {"temperature": 0.35, "maxOutputTokens": 1024},
     }
     last_error: Optional[Exception] = None
     with httpx.Client(timeout=45.0) as client:
@@ -575,15 +601,12 @@ def _call_gemini(api_key: str, system: str, messages: list[dict], context: dict)
 
 
 def _call_openai(api_key: str, system: str, messages: list[dict], context: dict) -> str:
+    del context  # already folded into the system prompt
     payload = {
         "model": "gpt-4o-mini",
-        "temperature": 0.4,
+        "temperature": 0.35,
         "messages": [
             {"role": "system", "content": system},
-            {
-                "role": "system",
-                "content": "הקשר תיק JSON:\n" + json.dumps(context, ensure_ascii=False),
-            },
             *[
                 {"role": m["role"], "content": m["content"]}
                 for m in messages[-16:]
@@ -626,6 +649,28 @@ def detect_what_if_amount(text: str) -> Optional[float]:
     return None
 
 
+def detect_what_if_months(text: str) -> Optional[int]:
+    """Optional horizon: «ל-12 חודשים», «למשך 6 חודש»."""
+    m = re.search(r"(?:ל[־\-]?\s*|למשך\s*|עבור\s*|במשך\s*)?(\d{1,3})\s*חודש", text)
+    if not m:
+        return None
+    val = int(m.group(1))
+    if 1 <= val <= 120:
+        return val
+    return None
+
+
+_GREETING_RE = re.compile(
+    r"^(היי+|הי+|שלום|הלו|hello|hi|hey|בוקר\s*טוב|ערב\s*טוב|מה\s*נשמע|"
+    r"תודה|תודה\s+רבה|אוקיי|אוקי|ok|okay)[\s!.?]*$",
+    re.I,
+)
+
+
+def _is_greeting(message: str) -> bool:
+    return bool(_GREETING_RE.match((message or "").strip()))
+
+
 def wants_pdf(text: str) -> bool:
     return bool(
         re.search(r"\bpdf\b|פי.?די.?אף|הורד(ה|ת)?\s*סיכום|סיכום\s*(ל)?הורדה", text, re.I)
@@ -647,10 +692,12 @@ def asks_about_others(text: str) -> bool:
 
 def _intent(message: str) -> str:
     t = message.strip()
+    if _is_greeting(t):
+        return "greeting"
     if re.search(r"מה\s+המצב\s+בלוח|תשומת\s+לב|מה\s+דורש", t):
         return "ops"
     if wants_pdf(t) or re.search(
-        r"סיכום|מה\s+המצב|התיק\s+שלי|תסביר|מה\s+יש\s+לי", t
+        r"מה\s+המצב(\s+שלי)?\??$|התיק\s+שלי|מה\s+יש\s+לי|סיכום(\s+של)?(\s+ה)?תיק", t
     ):
         return "status"
     if re.search(r"תשלום\s+הבא|מתי\s+(ה)?(תשלום|ההעברה)|ההעברה\s+הבאה", t):
@@ -667,9 +714,9 @@ def _intent(message: str) -> str:
 
 
 def _wants_capital_cta(message: str, context: dict[str, Any]) -> bool:
-    if _intent(message) in {"add_capital", "status", "ops", "default", "tip"}:
+    if _intent(message) in {"add_capital", "status", "ops", "tip"}:
         return True
-    if not context.get("has_active_plan"):
+    if context.get("role") != "manager" and not context.get("has_active_plan"):
         return True
     return False
 
@@ -720,8 +767,9 @@ def chat(
     context = build_assistant_context(db, user=user)
     what_if = None
     amount = detect_what_if_amount(message)
-    if amount is not None:
-        what_if = what_if_add_principal(context, amount)
+    months = detect_what_if_months(message)
+    if amount is not None or months is not None:
+        what_if = what_if_add_principal(context, amount or 0, months=months)
         context = {**context, "what_if_calculation": what_if}
 
     settings = _settings(db)
@@ -741,7 +789,11 @@ def chat(
 
     msgs = [{"role": h["role"], "content": h["content"]} for h in history]
     msgs.append({"role": "user", "content": message})
-    system = system_prompt(context["investor_name"], role=context.get("role") or "investor")
+    system = system_prompt(
+        context["investor_name"],
+        role=context.get("role") or "investor",
+        context=context,
+    )
 
     try:
         if provider == "openai":
@@ -777,6 +829,15 @@ def _history_has_markers(history: list | None, markers: tuple[str, ...]) -> bool
     return False
 
 
+CONTRACT_DISCLAIMER = "המספרים לפי תנאי המסלול החוזי — לא ייעוץ השקעות."
+
+
+def _with_disclaimer(text: str, history: list | None) -> str:
+    if _history_has_markers(history, ("לא ייעוץ השקעות",)):
+        return text
+    return f"{text}\n{CONTRACT_DISCLAIMER}"
+
+
 def _local_reply(
     context: dict,
     message: str,
@@ -790,31 +851,14 @@ def _local_reply(
     tips = context.get("tips") or []
     next_pay = context.get("next_payment")
     awaiting = context.get("awaiting_confirmations") or []
+    has_personal = bool(
+        context.get("has_personal_book")
+        if role == "manager"
+        else context.get("has_active_plan")
+    )
 
-    if what_if and what_if.get("ok"):
-        return (
-            f"{name}, לפי החישוב על התיק:\n"
-            f"קרן היום {_money(context.get('active_principal'))} · "
-            f"אחרי תוספת {_money(what_if['extra'])} תהיה {_money(what_if['principal_after'])}.\n"
-            f"החזר חודשי במזומן: {_money(what_if['monthly_cash_now'])} → {_money(what_if['monthly_cash_after'])}.\n"
-            f"צבירת חיסכון חודשית: {_money(what_if['monthly_savings_now'])} → {_money(what_if['monthly_savings_after'])}.\n"
-            "זו הערכה לפי התנאים הנוכחיים — לא שיניתי כלום במערכת. "
-            f"אם מתאים, אפשר {cta.get('label', 'לבקש תוספת')}."
-        )
-    if what_if and not what_if.get("ok"):
-        return (
-            f"{what_if.get('detail') or 'אין מסלול פעיל לחישוב.'} "
-            f"אפשר {cta.get('label', 'לפתוח מסלול')} כשיתאים."
-        )
-
-    intent = _intent(message)
-    if role != "manager" and intent == "ops":
-        intent = "status"
-
-    if role == "manager" and intent in {"ops", "default", "awaiting", "tip"}:
-        if intent in {"ops", "default"} and _history_has_markers(
-            history, ("זה מה שעומד עכשיו", "ממתינים לאישור:")
-        ):
+    def ops_snapshot() -> str:
+        if _history_has_markers(history, ("זה מה שעומד עכשיו",)):
             return (
                 "המצב בלוח כבר מופיע למעלה. אפשר לפרט מי ממתין לאישור, "
                 "או לפתוח הצעה חדשה כשיתאים."
@@ -835,10 +879,78 @@ def _local_reply(
             lines.append(tips[0])
         return "\n".join(lines)
 
+    if what_if and what_if.get("ok"):
+        extra = float(what_if.get("extra") or 0)
+        lines = [f"{name}, לפי החישוב החוזי על המסלול:"]
+        if extra:
+            lines.append(
+                f"קרן היום {_money(context.get('active_principal'))} · "
+                f"אחרי תוספת {_money(extra)} תהיה {_money(what_if['principal_after'])}."
+            )
+        else:
+            lines.append(f"קרן פעילה {_money(context.get('active_principal'))}.")
+        lines.append(
+            f"החזר חודשי במזומן: {_money(what_if['monthly_cash_now'])} → {_money(what_if['monthly_cash_after'])}."
+        )
+        lines.append(
+            f"צבירת חיסכון חודשית: {_money(what_if['monthly_savings_now'])} → {_money(what_if['monthly_savings_after'])}."
+        )
+        horizon = what_if.get("horizon_months")
+        if horizon:
+            lines.append(
+                f"על פני {int(horizon)} חודשים לפי האחוז החוזי: "
+                f"מזומן {_money(what_if.get('contractual_cash_over_horizon'))}, "
+                f"חיסכון {_money(what_if.get('contractual_savings_over_horizon'))}."
+            )
+        lines.append("לא שיניתי כלום במערכת.")
+        if extra or not has_personal:
+            lines.append(f"אם מתאים, אפשר {cta.get('label', 'לבקש תוספת')}.")
+        return _with_disclaimer("\n".join(lines), history)
+    if what_if and not what_if.get("ok"):
+        return (
+            f"{what_if.get('detail') or 'אין מסלול פעיל לחישוב.'} "
+            f"אפשר {cta.get('label', 'לפתוח מסלול')} כשיתאים."
+        )
+
+    intent = _intent(message)
+    if role == "manager" and intent == "status" and not has_personal:
+        intent = "ops"
+    if role != "manager" and intent == "ops":
+        intent = "status"
+
+    if intent == "greeting":
+        if role == "manager":
+            return (
+                f"שלום {name}. במה אפשר לעזור בלוח — ממתינים לאישור, "
+                "הצעה חדשה, או בקשת מסלול?"
+            )
+        return (
+            f"שלום {name}. אפשר לשאול על התיק, התשלום הבא, "
+            "או על הוספת השקעה."
+        )
+
+    if role == "manager" and intent in {"ops", "awaiting", "tip"}:
+        if intent == "awaiting" and awaiting:
+            row = awaiting[0]
+            who = row.get("investor_name") or "משקיע"
+            return (
+                f"{who} ממתין לאישור · {row.get('month_label') or ''} · "
+                f"{_money(row.get('amount'))}."
+            )
+        if intent == "tip":
+            return tips[0] if tips else ops_snapshot()
+        return ops_snapshot()
+
     if role == "manager" and intent == "add_capital":
         return (
             "אפשר לפתוח הצעה חדשה בעמוד ההצעות, או לטפל בבקשת מסלול בעמוד המשקיעים. "
             "בלי לחץ — לפי השיחה עם הלקוח."
+        )
+
+    if role == "manager" and intent == "default":
+        return (
+            "אפשר לפרט: מי ממתין לאישור, מה דורש תשומת לב בלוח, "
+            "או לפתוח הצעה חדשה."
         )
 
     if intent == "next_payment":
@@ -851,10 +963,11 @@ def _local_reply(
         )
 
     if intent == "paid":
-        return (
+        return _with_disclaimer(
             f"עד עכשיו שולם במזומן {_money(context.get('lifetime_cash_paid'))}. "
             f"החזר חודשי נוכחי {_money(context.get('monthly_cash'))}, "
-            f"וצבירת חיסכון חודשית {_money(context.get('monthly_savings'))}."
+            f"וצבירת חיסכון חודשית {_money(context.get('monthly_savings'))}.",
+            history,
         )
 
     if intent == "awaiting":
@@ -871,21 +984,19 @@ def _local_reply(
         return (
             "אפשר לבקש תוספת לקרן או מסלול נוסף בעמוד המשקיעים. "
             "זו בקשה בלבד — בלי התחייבות ובלי לשנות את המסלול הקיים עד שיאושר. "
-            "אפשר גם לשאול «מה אם אוסיף 10000» כדי לראות הערכה לפי האחוזים החוזיים במסלול. "
+            "אפשר גם לשאול «מה אם אוסיף 10000 ל-12 חודשים» כדי לראות הערכה לפי האחוזים החוזיים. "
             f"{cta.get('label', 'לבקש תוספת או מסלול')}."
         )
 
     if intent == "tip":
         return tips[0] if tips else "אם מתאים, אפשר לעבור על התשלום הבא או לשקול תוספת לקרן."
 
-    # status / default — never dump the same snapshot twice in a row.
-    if intent == "default" and _history_has_markers(
-        history, ("זה המצב בתיק", "קרן פעילה")
-    ):
+    if intent == "default":
         return (
-            "הסיכום כבר למעלה. אפשר לפרט: תשלום הבא, כמה שולם, "
-            "אישור ממתין, או הוספת השקעה."
+            "אפשר לפרט: מצב התיק, תשלום הבא, כמה שולם, "
+            "או הוספת השקעה."
         )
+
     if intent == "status" and _history_has_markers(history, ("זה המצב בתיק",)):
         return (
             "התיק כפי שסוכם למעלה. אם מתאים — אפשר לבקש תוספת, "
@@ -909,9 +1020,8 @@ def _local_reply(
         lines.append("יש תשלום שממתין לאישור קבלה.")
     if tips:
         lines.append(tips[0])
-    if intent == "status":
-        lines.append("אפשר גם להוריד סיכום ב־PDF, או לבקש תוספת אם מתאים.")
-    return "\n".join(lines)
+    lines.append("אפשר גם להוריד סיכום ב־PDF, או לבקש תוספת אם מתאים.")
+    return _with_disclaimer("\n".join(lines), history)
 
 
 def summarize_conversation(

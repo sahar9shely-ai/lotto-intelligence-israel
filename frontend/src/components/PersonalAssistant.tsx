@@ -18,6 +18,7 @@ export function PersonalAssistant() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [cta, setCta] = useState<Cta | null>(null);
+  const [llmReady, setLlmReady] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -36,6 +37,7 @@ export function PersonalAssistant() {
         setMessages([{ role: "assistant", content: opening.greeting }]);
         setSuggestions(opening.suggestions || []);
         setCta(opening.cta || null);
+        setLlmReady(Boolean(opening.configured));
       })
       .catch(() => {
         if (cancelled) return;
@@ -67,6 +69,7 @@ export function PersonalAssistant() {
     try {
       const res = await api.assistantChat({ message: trimmed, history });
       setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
+      if (typeof res.configured === "boolean") setLlmReady(res.configured);
       if (res.cta?.href && res.cta.label) setCta(res.cta);
       if (res.suggestions?.length) setSuggestions(res.suggestions);
     } catch (err) {
@@ -199,6 +202,17 @@ export function PersonalAssistant() {
                 </button>
               ))}
             </div>
+          ) : null}
+
+          {user.is_manager && llmReady === false ? (
+            <p className="assistant-llm-hint">
+              המודל לא מחובר. חברו מפתח ב
+              <Link to="/settings" onClick={() => setOpen(false)}>
+                הגדרות
+              </Link>
+              {" "}
+              או GEMINI_API_KEY ב־Render.
+            </p>
           ) : null}
 
           {cta?.href ? (

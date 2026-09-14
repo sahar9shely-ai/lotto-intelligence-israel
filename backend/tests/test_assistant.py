@@ -130,6 +130,11 @@ def test_assistant_what_if_math():
         assert result["ok"] is True
         assert result["principal_after"] == round(ctx["active_principal"] + 10000, 2)
         assert result["monthly_cash_after"] > ctx["monthly_cash"]
+        horizon = asst.what_if_add_principal(ctx, 10000, months=12)
+        assert horizon["horizon_months"] == 12
+        assert horizon["contractual_cash_over_horizon"] == round(
+            horizon["monthly_cash_after"] * 12, 2
+        )
     finally:
         db.close()
 
@@ -140,17 +145,35 @@ def test_assistant_blocks_other_investors():
 
 
 def test_assistant_chat_endpoint_own_portfolio():
-    # Login as manager (always seeded) and ask about own book
+    # Admin shell has no personal book — must not dump «קרן 0».
     headers = _headers()
+    hi = client.post(
+        "/api/v1/assistant/chat",
+        headers=headers,
+        json={"message": "היי", "history": []},
+    )
+    assert hi.status_code == 200, hi.text
+    hi_reply = hi.json()["reply"]
+    assert "קרן" not in hi_reply
+    assert "₪0" not in hi_reply
+    assert "😊" not in hi_reply
+
     res = client.post(
         "/api/v1/assistant/chat",
         headers=headers,
-        json={"message": "תן לי סיכום של התיק שלי", "history": []},
+        json={
+            "message": "תן לי סיכום של התיק שלי",
+            "history": [
+                {"role": "user", "content": "היי"},
+                {"role": "assistant", "content": hi_reply},
+            ],
+        },
     )
     assert res.status_code == 200, res.text
     reply = res.json()["reply"]
-    assert "₪" in reply or "קרן" in reply
+    assert "קרן פעילה ₪0" not in reply
     assert "דמי ניהול" not in reply
+    assert "ממתינים" in reply or "הצעה" in reply or "לוח" in reply
 
 
 def _investor_ctx(**overrides):
@@ -202,6 +225,41 @@ def test_local_replies_status_next_payment_paid_and_topup():
         None,
     )
     assert "אישור ממתין" in wait
+
+
+def test_greeting_and_default_are_not_status_dump():
+    ctx = _investor_ctx()
+    hi = asst._local_reply(ctx, "היי", None)
+    assert "קרן פעילה" not in hi
+    assert "שלום" in hi
+    again = asst._local_reply(
+        ctx, "היי", None, history=[{"role": "assistant", "content": hi}]
+    )
+    assert "קרן פעילה" not in again
+    vague = asst._local_reply(ctx, "נו", None)
+    assert "קרן פעילה" not in vague
+    mgr = {
+        "role": "manager",
+        "investor_name": "מנהל מערכת",
+        "has_personal_book": False,
+        "has_active_plan": False,
+        "awaiting_count": 0,
+        "overdue_open_count": 0,
+        "pending_topup_count": 0,
+        "pending_quote_count": 0,
+        "awaiting_confirmations": [],
+        "tips": [],
+        "cta": {"href": "/quotes", "label": "לפתיחת הצעה חדשה"},
+    }
+    admin_hi = asst._local_reply(mgr, "היי מנהל מערכת", None)
+    assert "קרן" not in admin_hi
+    assert "₪0" not in admin_hi
+    admin_plain = asst._local_reply(mgr, "היי", None)
+    assert "קרן" not in admin_plain
+    assert "₪0" not in admin_plain
+    status = asst._local_reply(mgr, "מה המצב שלי?", None)
+    assert "קרן פעילה" not in status
+    assert "ממתינים לאישור" in status
 
 
 def test_local_reply_manager_ops_and_new_quote():

@@ -638,6 +638,7 @@ export const api = {
       cta?: { href: string; label: string } | null;
       role: string;
       tips: string[];
+      configured: boolean;
     }>("/api/v1/assistant/opening"),
   assistantEndSession: (body: {
     history: Array<{ role: "user" | "assistant"; content: string }>;

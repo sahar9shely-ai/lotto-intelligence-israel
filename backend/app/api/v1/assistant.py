@@ -40,6 +40,7 @@ class AssistantOpeningOut(BaseModel):
     cta: Optional[dict] = None
     role: str = "investor"
     tips: list[str] = Field(default_factory=list)
+    configured: bool = False
 
 
 class EndSessionRequest(BaseModel):

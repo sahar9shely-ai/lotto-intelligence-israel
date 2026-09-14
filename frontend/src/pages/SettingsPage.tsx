@@ -185,6 +185,12 @@ export function SettingsPage() {
           . העוזר לא חושף דמי ניהול ולא רואה משקיעים אחרים (למשקיע).
           ב־Render אפשר במקום זאת להגדיר GEMINI_API_KEY או OPENAI_API_KEY.
         </p>
+        {!data.assistant_api_key_set ? (
+          <p className="form-error" role="status">
+            אין מפתח מודל. בלי מפתח העוזר עונה מנתוני המערכת בלבד, בלי שיחה חכמה.
+            הדביקו מפתח Gemini כאן, או הוסיפו GEMINI_API_KEY (מומלץ) / OPENAI_API_KEY ב־Render.
+          </p>
+        ) : null}
         <form
           className="form"
           onSubmit={async (e) => {
