@@ -8,8 +8,6 @@ import { isAdminAccount } from "../utils/roles";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 
-const PRIMARY_PATHS = new Set(["/", "/investors", "/payments", "/activity"]);
-
 function DockGlyph({ path }: { path: string }) {
   const common: SVGProps<SVGSVGElement> = {
     viewBox: "0 0 24 24",
@@ -53,6 +51,14 @@ function DockGlyph({ path }: { path: string }) {
       <svg {...common}>
         <path d="M4 13h3l2-6 3 10 2-4h4" />
         <circle cx="19" cy="7" r="2.2" />
+      </svg>
+    );
+  }
+  if (path === "/documents") {
+    return (
+      <svg {...common}>
+        <rect x="5" y="3.5" width="14" height="17" rx="2" />
+        <path d="M9 8.5h6M9 12.5h6M9 16.5h4" />
       </svg>
     );
   }
@@ -129,14 +135,18 @@ export function AppShell() {
       managerOnly: false,
     },
     { to: "/payments", label: "תשלומים", dockLabel: "תשלומים", managerOnly: false },
+    { to: "/documents", label: "מסמכים", dockLabel: "מסמכים", managerOnly: false },
     { to: "/activity", label: "מעקב", dockLabel: "מעקב", managerOnly: true },
     { to: "/quotes", label: "הצעות", dockLabel: "הצעות", managerOnly: true },
     { to: "/users", label: "משתמשים", dockLabel: "משתמשים", managerOnly: true },
     { to: "/settings", label: "הגדרות", dockLabel: "הגדרות", managerOnly: true },
   ].filter((l) => !l.managerOnly || isManager);
 
-  const primaryLinks = links.filter((l) => PRIMARY_PATHS.has(l.to));
-  const moreLinks = links.filter((l) => !PRIMARY_PATHS.has(l.to));
+  const primaryPaths = isManager
+    ? new Set(["/", "/investors", "/payments", "/activity"])
+    : new Set(["/", "/investors", "/payments", "/documents"]);
+  const primaryLinks = links.filter((l) => primaryPaths.has(l.to));
+  const moreLinks = links.filter((l) => !primaryPaths.has(l.to));
   const displayName = user?.investor_name || user?.username || "";
   const isAdminAccountUser = isAdminAccount(user);
   const roleLabel = isAdminAccountUser ? "מנהל מערכת" : isManager ? "מנהל" : "תיק פרטי";

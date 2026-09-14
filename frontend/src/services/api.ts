@@ -19,6 +19,7 @@ import type {
   Settings,
   SiteStatus,
   TopupRequest,
+  DocumentVault,
 } from "../types/investments";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -549,6 +550,12 @@ export const api = {
       method: "POST",
     }),
   quotes: () => request<Quote[]>("/api/v1/investments/quotes"),
+  quote: (id: number) => request<Quote>(`/api/v1/investments/quotes/${id}`),
+  documents: (investor_id?: number) => {
+    const qs =
+      investor_id != null ? `?investor_id=${encodeURIComponent(String(investor_id))}` : "";
+    return request<DocumentVault>(`/api/v1/investments/documents${qs}`);
+  },
   createQuote: (body: {
     prospect_name: string;
     phone?: string;

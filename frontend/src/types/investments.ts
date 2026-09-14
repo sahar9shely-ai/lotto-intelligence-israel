@@ -25,6 +25,25 @@ export type Investor = {
   has_login?: boolean;
 };
 
+export type VaultDocumentKind = "contract" | "quote" | "monthly" | "yearly";
+
+export type VaultDocument = {
+  id: string;
+  kind: VaultDocumentKind;
+  title: string;
+  subtitle?: string | null;
+  issued_at?: string | null;
+  source_id?: number | null;
+  period?: string | null;
+  amount?: number | null;
+};
+
+export type DocumentVault = {
+  investor_id: number;
+  investor_name: string;
+  documents: VaultDocument[];
+};
+
 export type PlanType = "monthly" | "savings" | "hybrid";
 
 export type Plan = {

@@ -5,6 +5,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { ActivityPage } from "./pages/ActivityPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DocumentsPage } from "./pages/DocumentsPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { InvestorsPage } from "./pages/InvestorsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -26,6 +27,7 @@ export function App() {
             <Route index element={<DashboardPage />} />
             <Route path="investors" element={<InvestorsPage />} />
             <Route path="payments" element={<PaymentsPage />} />
+            <Route path="documents" element={<DocumentsPage />} />
             <Route element={<RequireManager />}>
               <Route path="activity" element={<ActivityPage />} />
               <Route path="quotes" element={<QuotesPage />} />

@@ -1,6 +1,6 @@
 import type { Dashboard, Payment } from "../types/investments";
 import { formatCalendarMonth, formatDate, formatMoney, statusLabel } from "./format";
-import { PDF_BASE_STYLES, renderHtmlToPdf } from "./pdfDocument";
+import { PDF_BASE_STYLES, renderHtmlToPdfBlob, savePdfBlob } from "./pdfDocument";
 
 function escapeHtml(value: string): string {
   return value
@@ -14,12 +14,12 @@ function monthKey(value?: string | null): string {
   return (value || "").slice(0, 7);
 }
 
-export async function downloadMonthlyReportPdf(options: {
+export async function monthlyReportPdfFile(options: {
   dashboard: Dashboard;
   payments: Payment[];
   investorName: string;
   monthDate?: Date;
-}): Promise<void> {
+}): Promise<File> {
   const { dashboard, payments, investorName } = options;
   const monthDate = options.monthDate ?? new Date();
   const year = monthDate.getFullYear();
@@ -138,9 +138,16 @@ export async function downloadMonthlyReportPdf(options: {
     </footer>
   </div>`;
 
-  await renderHtmlToPdf(
-    html,
-    PDF_BASE_STYLES,
-    `tazrim-monthly-${key}.pdf`,
-  );
+  const blob = await renderHtmlToPdfBlob(html, PDF_BASE_STYLES);
+  return new File([blob], `tazrim-monthly-${key}.pdf`, { type: "application/pdf" });
+}
+
+export async function downloadMonthlyReportPdf(options: {
+  dashboard: Dashboard;
+  payments: Payment[];
+  investorName: string;
+  monthDate?: Date;
+}): Promise<void> {
+  const file = await monthlyReportPdfFile(options);
+  savePdfBlob(file, file.name);
 }

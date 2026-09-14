@@ -122,6 +122,17 @@ export function savePdfBlob(blob: Blob, fileName: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
+export function openPdfBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    savePdfBlob(blob, fileName);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    return;
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 /** Shared base styles for תזרים PDF documents. */
 export const PDF_BASE_STYLES = `
   .pdf-root * { box-sizing: border-box; }

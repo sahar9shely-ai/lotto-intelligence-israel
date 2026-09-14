@@ -499,3 +499,20 @@ class TopupRequestOut(BaseModel):
             if data.get(key) is None:
                 data.pop(key, None)
         return data
+
+
+class VaultDocumentOut(BaseModel):
+    id: str
+    kind: Literal["contract", "quote", "monthly", "yearly"]
+    title: str
+    subtitle: Optional[str] = None
+    issued_at: Optional[datetime] = None
+    source_id: Optional[int] = None
+    period: Optional[str] = None
+    amount: Optional[float] = None
+
+
+class DocumentVaultOut(BaseModel):
+    investor_id: int
+    investor_name: str
+    documents: list[VaultDocumentOut]

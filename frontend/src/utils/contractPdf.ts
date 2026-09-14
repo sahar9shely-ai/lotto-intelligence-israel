@@ -1,6 +1,6 @@
 import type { TopupRequest } from "../types/investments";
 import { formatDate, formatMoney, formatPercent } from "./format";
-import { PDF_BASE_STYLES, renderHtmlToPdf } from "./pdfDocument";
+import { PDF_BASE_STYLES, renderHtmlToPdfBlob, savePdfBlob } from "./pdfDocument";
 import { planTypeLabel } from "./planTypes";
 
 function escapeHtml(value: string): string {
@@ -193,8 +193,15 @@ ${PDF_BASE_STYLES}
 .pdf-sign__meta { margin: 2px 0 0; font-size: 11px; color: #5a7369; }
 `;
 
-export async function downloadContractPdf(req: TopupRequest): Promise<void> {
+export async function contractPdfFile(req: TopupRequest): Promise<File> {
   const number = (req.contract_number || `TZ-${req.id}`).replace(/[\\/:*?"<>|]+/g, "-");
   const suffix = req.both_signed || req.status === "executed" || req.status === "approved" ? "חתום" : "טיוטה";
-  await renderHtmlToPdf(buildContractHtml(req), CONTRACT_STYLES, `חוזה-תזרים-${number}-${suffix}.pdf`);
+  const fileName = `חוזה-תזרים-${number}-${suffix}.pdf`;
+  const blob = await renderHtmlToPdfBlob(buildContractHtml(req), CONTRACT_STYLES);
+  return new File([blob], fileName, { type: "application/pdf" });
+}
+
+export async function downloadContractPdf(req: TopupRequest): Promise<void> {
+  const file = await contractPdfFile(req);
+  savePdfBlob(file, file.name);
 }
