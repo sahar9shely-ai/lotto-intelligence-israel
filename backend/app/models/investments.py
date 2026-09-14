@@ -107,6 +107,7 @@ class Payment(Base):
     manager_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="scheduled")
     paid_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    confirmation_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     plan: Mapped["InvestmentPlan"] = relationship(back_populates="payments")

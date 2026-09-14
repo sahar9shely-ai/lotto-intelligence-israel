@@ -4661,6 +4661,50 @@ a.urgent-card__row:focus-visible {
   word-break: break-word;
 }
 
+.nudge-sheet {
+  width: min(560px, 100%);
+}
+
+.nudge-sheet__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.nudge-sheet__row {
+  display: grid;
+  gap: 10px;
+  padding: 12px 12px 10px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--line));
+  background: color-mix(in srgb, var(--gold) 8%, #fff);
+}
+
+.nudge-sheet__row strong {
+  display: block;
+  font-size: 0.98rem;
+}
+
+.nudge-sheet__row .muted {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.82rem;
+}
+
+.nudge-sheet__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nudge-sheet__note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 .user-editor__summary {
   display: none;
 }

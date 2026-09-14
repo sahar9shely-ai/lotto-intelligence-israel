@@ -11,6 +11,7 @@ import type {
   Investor,
   ManagerIncomeBoard,
   Payment,
+  PaymentNudgeList,
   PaymentReport,
   Plan,
   PlanStatusReport,
@@ -541,6 +542,8 @@ export const api = {
     request<Payment>(`/api/v1/investments/payments/${id}/confirm`, {
       method: "POST",
     }),
+  paymentConfirmationNudges: () =>
+    request<PaymentNudgeList>("/api/v1/investments/payments/confirmation-nudges"),
   rejectPayment: (id: number) =>
     request<Payment>(`/api/v1/investments/payments/${id}/reject`, {
       method: "POST",

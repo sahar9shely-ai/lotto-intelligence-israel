@@ -1,5 +1,6 @@
 import { PersonalAssistant } from "./PersonalAssistant";
 import { NotificationCenter } from "./NotificationCenter";
+import { PaymentNudgeDialog } from "./PaymentNudgeDialog";
 import { useEffect, useState, type SVGProps } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -351,6 +352,7 @@ export function AppShell() {
       ) : null}
 
       <PersonalAssistant />
+      <PaymentNudgeDialog />
     </div>
   );
 }

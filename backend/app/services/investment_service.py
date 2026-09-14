@@ -17,6 +17,14 @@ from app.models.investments import (
     SavingsAction,
     utcnow,
 )
+from app.services.israel_business_days import (
+    add_israel_business_days,
+    as_israel_date,
+    confirmation_nudge_due,
+    israel_business_days_elapsed,
+    israel_today,
+    is_israel_business_day,
+)
 
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 # Sunday–Thursday (Python weekday: Mon=0 … Sun=6).
@@ -78,23 +86,6 @@ def _as_utc(moment: datetime) -> datetime:
     if moment.tzinfo is None:
         return moment.replace(tzinfo=timezone.utc)
     return moment.astimezone(timezone.utc)
-
-
-def is_israel_business_day(day: date) -> bool:
-    return day.weekday() in ISRAEL_BUSINESS_WEEKDAYS
-
-
-def add_israel_business_days(start: date, count: int) -> date:
-    """Advance `count` Israeli business days after `start` (start itself is not counted)."""
-    if count <= 0:
-        return start
-    day = start
-    remaining = count
-    while remaining:
-        day += timedelta(days=1)
-        if is_israel_business_day(day):
-            remaining -= 1
-    return day
 
 
 def cooling_off_deadline_utc(approved_at: datetime, *, business_days: int = TOPUP_COOLING_OFF_BUSINESS_DAYS) -> datetime:
@@ -1038,6 +1029,7 @@ def serialize_payment(payment: Payment) -> dict:
         "manager_amount": payment.manager_amount,
         "status": payment.status,
         "paid_at": payment.paid_at,
+        "confirmation_requested_at": payment.confirmation_requested_at,
         "notes": payment.notes,
     }
 
@@ -2290,6 +2282,7 @@ def request_payment_confirmation(
     if same_person:
         payment.status = "paid"
         payment.paid_at = date.today()
+        payment.confirmation_requested_at = None
         if commit:
             db.commit()
         return {
@@ -2301,6 +2294,8 @@ def request_payment_confirmation(
 
     payment.status = "awaiting_confirmation"
     payment.paid_at = None
+    if payment.confirmation_requested_at is None:
+        payment.confirmation_requested_at = utcnow()
     _notify_payment_confirmation_request(db, payment)
     if commit:
         db.commit()
@@ -2318,6 +2313,7 @@ def confirm_payment(db: Session, *, payment: Payment, actor) -> dict:
         raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "paid"
     payment.paid_at = date.today()
+    payment.confirmation_requested_at = None
     _notify_payment_confirmed(db, payment)
     db.commit()
     return {"status": "paid", "payment_id": payment.id}
@@ -2335,8 +2331,108 @@ def reject_payment_confirmation(db: Session, *, payment: Payment, actor) -> dict
         raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "scheduled"
     payment.paid_at = None
+    payment.confirmation_requested_at = None
     db.commit()
     return {"status": "scheduled", "payment_id": payment.id}
+
+
+def payment_focus_path(payment: Payment) -> str:
+    due = payment.due_date.isoformat() if payment.due_date else ""
+    params = f"investor_id={payment.investor_id}&payment_id={payment.id}"
+    if due:
+        params += f"&year={due[:4]}&month={due[:7]}"
+    return f"/payments?{params}"
+
+
+def serialize_payment_nudge(payment: Payment, *, today: Optional[date] = None) -> dict:
+    requested = payment.confirmation_requested_at or payment.due_date
+    start = as_israel_date(requested)
+    waiting = israel_business_days_elapsed(start, today) if start else 0
+    phone = payment.investor.phone if payment.investor else None
+    return {
+        "id": payment.id,
+        "plan_id": payment.plan_id,
+        "investor_id": payment.investor_id,
+        "investor_name": payment.investor.name if payment.investor else "",
+        "investor_phone": phone,
+        "due_date": payment.due_date,
+        "investor_amount": float(payment.investor_amount or 0),
+        "status": payment.status,
+        "confirmation_requested_at": payment.confirmation_requested_at,
+        "business_days_waiting": waiting,
+        "href": payment_focus_path(payment),
+        "has_phone": bool(phone and str(phone).strip()),
+    }
+
+
+def list_payment_confirmation_nudges(
+    db: Session,
+    *,
+    investor_id: Optional[int] = None,
+    today: Optional[date] = None,
+) -> list[dict]:
+    """Awaiting confirmations that waited 3 Israel business days (Sun–Thu)."""
+    today = israel_today(today)
+    query = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.status == "awaiting_confirmation")
+    )
+    if investor_id is not None:
+        query = query.filter(Payment.investor_id == investor_id)
+    rows: list[dict] = []
+    for payment in query.order_by(Payment.due_date.asc(), Payment.id.asc()).all():
+        requested = payment.confirmation_requested_at or payment.due_date
+        if not confirmation_nudge_due(requested, today=today):
+            continue
+        rows.append(serialize_payment_nudge(payment, today=today))
+    return rows
+
+
+def record_overdue_payment_nudge_events(db: Session, *, today: Optional[date] = None) -> int:
+    """One activity event per overdue confirmation, at most once per Israel calendar day."""
+    from app.models.auth import ActivityEvent
+    from app.services import activity_service as activity_svc
+
+    today = israel_today(today)
+    items = list_payment_confirmation_nudges(db, today=today)
+    if not items:
+        return 0
+    logged = 0
+    for item in items:
+        existing = (
+            db.query(ActivityEvent)
+            .filter(
+                ActivityEvent.kind == "payment_nudge",
+                ActivityEvent.entity_type == "payment",
+                ActivityEvent.entity_id == item["id"],
+            )
+            .order_by(ActivityEvent.created_at.desc())
+            .first()
+        )
+        if existing and as_israel_date(existing.created_at) == today:
+            continue
+        activity_svc.log_activity(
+            db,
+            kind="payment_nudge",
+            title=f"נודניק אישור תשלום · {item['investor_name']}",
+            body=(
+                f"עברו {item['business_days_waiting']} ימי עסקים בלי אישור "
+                f"לחודש {item['due_date']} בסך {item['investor_amount']:,.0f} ₪"
+            ),
+            severity="urgent",
+            investor_id=item["investor_id"],
+            investor_name=item["investor_name"],
+            entity_type="payment",
+            entity_id=item["id"],
+            href=item["href"],
+            meta={"business_days_waiting": item["business_days_waiting"]},
+            commit=False,
+        )
+        logged += 1
+    if logged:
+        db.commit()
+    return logged
 
 
 def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:

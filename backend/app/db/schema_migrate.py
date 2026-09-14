@@ -123,6 +123,25 @@ def ensure_schema(engine: Engine) -> None:
                 )
             )
 
+    if _table_exists(engine, "payments"):
+        cols = _table_columns(engine, "payments")
+        if "confirmation_requested_at" not in cols:
+            stamp_type = "DATETIME" if _dialect(engine) == "sqlite" else "TIMESTAMP"
+            with engine.begin() as conn:
+                _add_column(conn, "payments", f"confirmation_requested_at {stamp_type}")
+                # Existing awaiting rows: treat due_date as the request day so stuck
+                # confirmations surface in the nudge instead of waiting another 3 days.
+                conn.execute(
+                    text(
+                        """
+                        UPDATE payments
+                        SET confirmation_requested_at = due_date
+                        WHERE status = 'awaiting_confirmation'
+                          AND confirmation_requested_at IS NULL
+                        """
+                    )
+                )
+
     for table in ("investment_plans", "quotes"):
         if not _table_exists(engine, table):
             continue

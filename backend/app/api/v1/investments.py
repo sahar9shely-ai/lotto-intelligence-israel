@@ -17,6 +17,7 @@ from app.schemas.investments import (
     InvestorCreate,
     InvestorOut,
     InvestorUpdate,
+    PaymentNudgeListOut,
     PaymentOut,
     PaymentReportOut,
     PaymentUpdate,
@@ -69,6 +70,12 @@ def init_investment_db() -> None:
         svc.seed_defaults(db)
         svc.repair_reporting_year_plans(db)
         svc.sync_track_continuity(db)
+        try:
+            svc.record_overdue_payment_nudge_events(db)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "payment confirmation nudge scan failed on startup"
+            )
     finally:
         db.close()
 
@@ -1296,6 +1303,29 @@ def align_calendar_year(
     return svc.align_plans_to_calendar_year(db, year=year)
 
 
+@router.get("/payments/confirmation-nudges", response_model=PaymentNudgeListOut)
+def list_confirmation_nudges(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Awaiting-confirmation payments that waited 3 Israel business days (Sun–Thu)."""
+    scoped = None if is_manager(user) else user.investor_id
+    items = svc.list_payment_confirmation_nudges(db, investor_id=scoped)
+    try:
+        svc.record_overdue_payment_nudge_events(db)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("payment nudge activity scan failed")
+    from app.services.israel_business_days import NUDGE_AFTER_BUSINESS_DAYS
+
+    return {
+        "items": items,
+        "after_business_days": NUDGE_AFTER_BUSINESS_DAYS,
+        "calendar": "israel_sun_thu",
+    }
+
+
 @router.patch("/payments/{payment_id}", response_model=PaymentOut)
 def update_payment(
     payment_id: int,
@@ -1338,6 +1368,7 @@ def update_payment(
 
     if data.get("status") in {"scheduled", "skipped"}:
         data["paid_at"] = None
+        payment.confirmation_requested_at = None
     for key, value in data.items():
         setattr(payment, key, value)
     db.commit()

@@ -106,7 +106,29 @@ export type Payment = {
   manager_amount: number;
   status: string;
   paid_at?: string | null;
+  confirmation_requested_at?: string | null;
   notes?: string | null;
+};
+
+export type PaymentNudge = {
+  id: number;
+  plan_id: number;
+  investor_id: number;
+  investor_name: string;
+  investor_phone?: string | null;
+  due_date: string;
+  investor_amount: number;
+  status: string;
+  confirmation_requested_at?: string | null;
+  business_days_waiting: number;
+  href: string;
+  has_phone: boolean;
+};
+
+export type PaymentNudgeList = {
+  items: PaymentNudge[];
+  after_business_days: number;
+  calendar: string;
 };
 
 export type Quote = {
