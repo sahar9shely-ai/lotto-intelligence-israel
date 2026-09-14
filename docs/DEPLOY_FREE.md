@@ -38,7 +38,8 @@
 3. בחר את הריפו `lotto-intelligence-israel` (ענף `main` אחרי המיזוג, או הענף שלך)
 4. Render יזהה את `render.yaml`
 5. לפני Deploy הגדר משתני סביבה:
-   - `DATABASE_URL` = מחרוזת החיבור מ־Neon (הדבק כמו שהיא)
+   - `DATABASE_URL` = מחרוזת החיבור מ־Neon (הדבק כמו שהיא) — **חובה**, אחרת סיסמאות נמחקות
+   - `GEMINI_API_KEY` = מפתח Gemini לעוזר האישי (מומלץ). חלופה: `GOOGLE_API_KEY` או `OPENAI_API_KEY`
    - `APP_PUBLIC_URL` = אפשר להשאיר ריק קודם, ואז לעדכן לכתובת ש־Render נותן  
      למשל `https://tazrim.onrender.com`
 6. לחץ Deploy והמתן לסיום הבנייה
