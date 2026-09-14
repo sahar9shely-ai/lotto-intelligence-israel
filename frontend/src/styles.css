@@ -6626,6 +6626,10 @@ body {
     display: none;
   }
 
+  .chrome--quiet .notif__bell-label {
+    display: none;
+  }
+
   .page-intro,
   .page-intro--admin {
     padding: 2px 2px 0;
