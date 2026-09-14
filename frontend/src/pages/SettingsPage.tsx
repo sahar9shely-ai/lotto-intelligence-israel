@@ -8,6 +8,7 @@ import { api } from "../services/api";
 
 export function SettingsPage() {
   const { data, error, loading, reload } = useAsync(() => api.settings(), []);
+  const { data: siteStatus } = useAsync(() => api.siteStatus(), []);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const clearMessage = useCallback(() => setMessage(null), []);
@@ -81,6 +82,15 @@ export function SettingsPage() {
       </header>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
+
+      {siteStatus?.data_persistent === false ? (
+        <Panel title="שמירת נתונים בענן">
+          <p className="form-error">
+            Render שומר כרגע את המשתמשים ב־SQLite על דיסק זמני. שינוי סיסמה או שם משתמש
+            נעלם אחרי דיפלוי. ב־Render → Environment הדביקו DATABASE_URL מ־Neon.
+          </p>
+        </Panel>
+      ) : null}
 
       <Panel title="הסיסמה שלי">
         <p className="hint">

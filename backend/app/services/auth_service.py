@@ -130,7 +130,7 @@ def notify_manager_login(db: Session, user: User) -> LoginAlert:
     return alert
 
 
-def set_user_password(db: Session, user: User, new_password: str) -> User:
+def set_user_password(db: Session, user: User, new_password: str, *, commit: bool = True) -> User:
     if len(new_password) < 8:
         raise ValueError("הסיסמה חייבת להכיל לפחות 8 תווים")
     user.password_hash = hash_password(new_password)
@@ -149,8 +149,11 @@ def set_user_password(db: Session, user: User, new_password: str) -> User:
         },
         synchronize_session=False,
     )
-    db.commit()
-    db.refresh(user)
+    if commit:
+        db.commit()
+        db.refresh(user)
+    else:
+        db.flush()
     return user
 
 
@@ -593,6 +596,8 @@ def seed_users(db: Session) -> dict:
             user.role = "investor"
 
         # Backfill username for legacy rows migrated without one.
+        # Never overwrite a username the manager already set — that made cloud
+        # edits look like they "didn't save" after every Render boot/seed.
         if not getattr(user, "username", None):
             clash = (
                 db.query(User)
@@ -601,17 +606,9 @@ def seed_users(db: Session) -> dict:
             )
             user.username = desired_username if not clash else f"{desired_username}{user.id}"
             updated.append(user.username)
-        elif user.username != desired_username and investor.name in DEFAULT_USERNAMES:
-            clash = (
-                db.query(User)
-                .filter(User.username == desired_username, User.id != user.id)
-                .first()
-            )
-            if not clash:
-                user.username = desired_username
-                updated.append(user.username)
 
-        if desired_email and user.email != desired_email:
+        placeholder_email = not user.email or str(user.email).endswith("@local.tazrim")
+        if desired_email and placeholder_email and user.email != desired_email:
             clash = (
                 db.query(User)
                 .filter(User.email == desired_email, User.id != user.id)

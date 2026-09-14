@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class LoginRequest(BaseModel):
@@ -89,6 +89,16 @@ class UpdateUserRequest(BaseModel):
     role: Optional[str] = Field(default=None, pattern="^(manager|investor)$")
     is_active: Optional[bool] = None
     investor_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    new_password: Optional[str] = Field(default=None, min_length=8, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def username_chars(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        from app.services.auth_service import validate_username
+
+        return validate_username(value)
 
 
 class CreateAccessUserRequest(BaseModel):

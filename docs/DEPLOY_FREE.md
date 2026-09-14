@@ -9,7 +9,9 @@
 | האפליקציה | [Render](https://render.com) Free | ₪0 |
 | מסד הנתונים | [Neon](https://neon.tech) Free | ₪0 |
 
-> בלי Neon הנתונים נמחקים כש־Render נרדם. לכן חובה לחבר את שניהם.
+> בלי Neon הנתונים נמחקים כש־Render נרדם **או מתדיפלoy**. ב־Render Free אין דיסק קבוע:
+> SQLite בתוך הקונטיינר (`/data/investments.db`) נמחק בכל דיפלוי, ולכן סיסמה/שם משתמש
+> «לא נשמרים בענן». חובה להדביק `DATABASE_URL` מ־Neon.
 
 ## מגבלות (חינם)
 

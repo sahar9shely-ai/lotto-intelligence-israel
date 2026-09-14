@@ -154,6 +154,8 @@ export type SiteStatus = {
   site_updating: boolean;
   site_updating_message: string;
   public_url?: string | null;
+  data_store?: "sqlite" | "postgres" | string;
+  data_persistent?: boolean;
 };
 
 export type Dashboard = {

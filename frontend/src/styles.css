@@ -2734,6 +2734,11 @@ input[type="date"] {
   opacity: 0.92;
 }
 
+.site-update-banner--warn {
+  background: #5c3b12;
+  color: #fff7ea;
+}
+
 .auth-card__eyebrow {
   margin: 0 0 8px;
   color: var(--ink-soft);

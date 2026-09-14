@@ -51,10 +51,18 @@ InvestmentBase.metadata.create_all(bind=investment_engine)
 
 
 def init_investment_db() -> None:
-    from app.db.investment_session import InvestmentSessionLocal
+    import logging
+    import os
+
+    from app.db.investment_session import IS_SQLITE, InvestmentSessionLocal
     from app.db.schema_migrate import ensure_schema
 
     ensure_schema(investment_engine)
+    if IS_SQLITE and (os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID")):
+        logging.getLogger(__name__).warning(
+            "SQLite on Render is ephemeral — passwords and usernames vanish on every deploy. "
+            "Set DATABASE_URL to a Neon Postgres connection string."
+        )
 
     db = InvestmentSessionLocal()
     try:
@@ -109,6 +117,8 @@ def get_site_status(
     db: Session = Depends(get_investment_db),
 ):
     """Readable by every logged-in user — drives the global update banner."""
+    from app.db.investment_session import storage_status
+
     settings = svc.ensure_settings(db)
     public_url = None
     # Managers see the live tunnel URL so bookmarks stay current after free-tunnel rotates.
@@ -116,11 +126,14 @@ def get_site_status(
         getattr(getattr(user, "investor", None), "is_manager", False)
     ):
         public_url = _read_public_url()
+    store = storage_status()
     return {
         "site_updating": bool(getattr(settings, "site_updating", False)),
         "site_updating_message": getattr(settings, "site_updating_message", None)
         or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
         "public_url": public_url,
+        "data_store": store["data_store"],
+        "data_persistent": store["data_persistent"],
     }
 
 

@@ -199,6 +199,15 @@ export function AppShell() {
           <span>{siteStatus.site_updating_message}</span>
         </div>
       ) : null}
+      {isManager && siteStatus?.data_persistent === false ? (
+        <div className="site-update-banner site-update-banner--warn" role="status">
+          <strong>שמירה זמנית ב־Render</strong>
+          <span>
+            המשתמשים נשמרים כרגע ב־SQLite על דיסק זמני — סיסמה ושם משתמש נמחקים בכל דיפלוי.
+            חברו DATABASE_URL ל־Neon (Postgres) כדי שהשינויים יישארו.
+          </span>
+        </div>
+      ) : null}
 
       <div className="chrome chrome--quiet" role="banner">
         <div className="chrome__inner">

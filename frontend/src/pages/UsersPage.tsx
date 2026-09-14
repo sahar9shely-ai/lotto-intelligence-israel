@@ -50,7 +50,7 @@ function canSendAccess(user: AuthUser, passwordOverride?: string): boolean {
 export function UsersPage() {
   const { user: currentUser } = useAuth();
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const { data: users, error, loading, reload } = useAsync(() => api.users(), []);
+  const { data: users, error, loading, reload, setData } = useAsync(() => api.users(), []);
   const {
     data: resetRequests,
     reload: reloadRequests,
@@ -62,8 +62,22 @@ export function UsersPage() {
   const [fulfillTarget, setFulfillTarget] = useState<PasswordResetRequestItem | null>(null);
   const [fulfillPassword, setFulfillPassword] = useState("");
   const [savingId, setSavingId] = useState<number | "create" | "fulfill" | null>(null);
+  const [cardErrors, setCardErrors] = useState<Record<number, string>>({});
+  const [formRev, setFormRev] = useState<Record<number, number>>({});
   const clearMessage = useCallback(() => setMessage(null), []);
   const publicUrl = siteStatus?.public_url || window.location.origin;
+
+  function showSaveError(userId: number | null, text: string) {
+    setErrorMsg(text);
+    if (userId != null) {
+      setCardErrors((prev) => ({ ...prev, [userId]: text }));
+      window.setTimeout(() => {
+        document
+          .getElementById(`user-save-error-${userId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 0);
+    }
+  }
 
   useEffect(() => {
     if (!showCreate && !fulfillTarget) return;
@@ -92,40 +106,50 @@ export function UsersPage() {
     e.preventDefault();
     if (savingId) return;
     setErrorMsg(null);
+    setCardErrors((prev) => {
+      const next = { ...prev };
+      delete next[user.id];
+      return next;
+    });
     const form = e.currentTarget;
     const fd = new FormData(form);
     const sendWhatsApp = fd.get("send_whatsapp") === "on";
     const phone = String(fd.get("phone") || "").trim() || null;
+    const username = String(fd.get("username") || "").trim();
     const newPassword = readPassword(fd, "new_password").trim();
+    if (!/^[a-zA-Z0-9._-]{2,64}$/.test(username)) {
+      showSaveError(
+        user.id,
+        "שם משתמש חייב להכיל אותיות באנגלית / ספרות / . _ - (2–64 תווים), בלי רווחים",
+      );
+      return;
+    }
     if (newPassword && newPassword.length < 8) {
-      setErrorMsg("הסיסמה חייבת להכיל לפחות 8 תווים");
+      showSaveError(user.id, "הסיסמה חייבת להכיל לפחות 8 תווים");
       return;
     }
     setSavingId(user.id);
     try {
-      await api.updateUser(user.id, {
+      const saved = await api.updateUser(user.id, {
         investor_name: String(fd.get("investor_name") || "").trim(),
-        username: String(fd.get("username") || "").trim(),
+        username,
         email: String(fd.get("email") || "").trim() || null,
         phone,
         role: String(fd.get("role") || "investor"),
         is_active: String(fd.get("is_active") || "true") === "true",
+        ...(newPassword ? { new_password: newPassword } : {}),
       });
-      if (newPassword) {
-        await api.setUserPassword(user.id, newPassword);
-        const passwordInput = form.elements.namedItem("new_password");
-        if (passwordInput instanceof HTMLInputElement) passwordInput.value = "";
-      }
-      const updatedUser: AuthUser = {
-        ...user,
-        investor_name: String(fd.get("investor_name") || "").trim(),
-        username: String(fd.get("username") || "").trim(),
-        phone,
-        access_password: newPassword || user.access_password,
-        has_password: newPassword ? true : user.has_password,
-      };
+      setData((list) => (list ?? []).map((row) => (row.id === saved.id ? saved : row)));
+      setFormRev((prev) => ({ ...prev, [user.id]: (prev[user.id] || 0) + 1 }));
       if (sendWhatsApp) {
-        openAccessWhatsApp(updatedUser, newPassword || undefined);
+        openAccessWhatsApp(
+          {
+            ...saved,
+            access_password: newPassword || saved.access_password,
+            has_password: newPassword ? true : saved.has_password,
+          },
+          newPassword || undefined,
+        );
       }
       setMessage(
         newPassword
@@ -136,10 +160,9 @@ export function UsersPage() {
             ? "המשתמש עודכן ונפתחה הודעת וואטסאפ עם פרטי הכניסה."
             : "המשתמש עודכן.",
       );
-      reload();
       reloadRequests();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "עדכון נכשל");
+      showSaveError(user.id, err instanceof Error ? err.message : "עדכון נכשל");
     } finally {
       setSavingId(null);
     }
@@ -375,11 +398,21 @@ export function UsersPage() {
                 : "ממתין לסיסמה מהמנהל"}
             </span>
           </p>
+          {cardErrors[u.id] ? (
+            <p id={`user-save-error-${u.id}`} className="form-error" role="alert">
+              {cardErrors[u.id]}
+            </p>
+          ) : null}
           <details className="user-editor" {...(!u.has_password ? { open: true } : {})}>
             <summary className="user-editor__summary">
               <span>{u.has_password ? "עריכת פרטים וסיסמה" : "הגדרת סיסמה ופרטים"}</span>
             </summary>
-            <form className="form user-form" autoComplete="off" onSubmit={(e) => void saveUser(u, e)}>
+            <form
+              key={`${u.id}-${formRev[u.id] || 0}`}
+              className="form user-form"
+              autoComplete="off"
+              onSubmit={(e) => void saveUser(u, e)}
+            >
               <div className="form__grid">
                 <label>
                   שם
@@ -392,6 +425,10 @@ export function UsersPage() {
                     defaultValue={u.username}
                     required
                     dir="ltr"
+                    minLength={2}
+                    maxLength={64}
+                    pattern="[A-Za-z0-9._\-]+"
+                    title="אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון — בלי רווחים"
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-form-type="other"
@@ -416,7 +453,7 @@ export function UsersPage() {
                     inputMode="tel"
                     defaultValue={u.phone ?? ""}
                     placeholder="05X-XXX-XXXX"
-                    autoComplete="tel"
+                    autoComplete="off"
                   />
                 </label>
                 <label>

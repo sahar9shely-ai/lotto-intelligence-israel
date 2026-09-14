@@ -254,6 +254,88 @@ def test_manager_can_update_user_phone():
     assert res.json()["phone"] == "052-535-7071"
 
 
+def test_manager_updates_username_and_password_in_one_save():
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    almog = next(u for u in users if u["username"] == "almog")
+    res = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"username": "almog-new", "new_password": "AlmogSave99!"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["username"] == "almog-new"
+    assert res.json()["has_password"] is True
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "almog-new", "password": "AlmogSave99!"},
+    )
+    assert login.status_code == 200, login.text
+    revert = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"username": "almog"},
+    )
+    assert revert.status_code == 200
+
+
+def test_username_conflict_returns_hebrew_error():
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    almog = next(u for u in users if u["username"] == "almog")
+    res = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"username": "ofek"},
+    )
+    assert res.status_code == 400
+    assert "כבר בשימוש" in res.json()["detail"]
+
+
+def test_invalid_username_rejected_with_hebrew_message():
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    almog = next(u for u in users if u["username"] == "almog")
+    res = client.patch(
+        f"/api/v1/auth/users/{almog['id']}",
+        headers=headers,
+        json={"username": "user1 sahar"},
+    )
+    assert res.status_code in {400, 422}
+    text = res.text
+    assert "שם משתמש" in text or "רווח" in text or "אותיות" in text
+
+
+def test_custom_username_survives_reseed():
+    """Manager-set usernames must not be reset to demo defaults on Render boot."""
+    from app.models.auth import User
+
+    headers = _auth_headers("admin", "ManagerPass1!")
+    users = client.get("/api/v1/auth/users", headers=headers).json()
+    ofek = next(u for u in users if u["username"] == "ofek")
+    renamed = client.patch(
+        f"/api/v1/auth/users/{ofek['id']}",
+        headers=headers,
+        json={"username": "ofek-keep"},
+    )
+    assert renamed.status_code == 200, renamed.text
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        inv_svc.seed_defaults(db)
+        row = db.query(User).filter(User.id == ofek["id"]).one()
+        assert row.username == "ofek-keep"
+    finally:
+        db.close()
+        restore = client.patch(
+            f"/api/v1/auth/users/{ofek['id']}",
+            headers=headers,
+            json={"username": "ofek"},
+        )
+        assert restore.status_code == 200
+
+
 def test_delete_user_removes_investor_and_history():
     from datetime import date
 

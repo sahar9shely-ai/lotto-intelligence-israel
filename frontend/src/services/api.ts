@@ -38,6 +38,49 @@ function notifyAuthExpired() {
   window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  username: "שם משתמש",
+  email: "מייל",
+  phone: "טלפון",
+  new_password: "סיסמה",
+  investor_name: "שם",
+};
+
+function pydanticMessage(entry: Record<string, unknown>): string {
+  const loc = Array.isArray(entry.loc) ? entry.loc : [];
+  const field = String(loc[loc.length - 1] || "");
+  let msg = String(entry.msg || "");
+  msg = msg.replace(/^Value error,?\s*/i, "");
+  if (field === "username") {
+    return "שם משתמש חייב להכיל אותיות באנגלית / ספרות / . _ - (2–64 תווים), בלי רווחים";
+  }
+  if (field === "email") return "כתובת המייל לא תקינה";
+  if (field === "new_password") return "הסיסמה חייבת להכיל לפחות 8 תווים";
+  const label = FIELD_LABELS[field];
+  return label && msg ? `${label}: ${msg}` : msg || "בקשה נכשלה";
+}
+
+function formatApiError(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) =>
+        item && typeof item === "object"
+          ? pydanticMessage(item as Record<string, unknown>)
+          : String(item),
+      )
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (detail && typeof detail === "object") {
+    const rec = detail as Record<string, unknown>;
+    if (typeof rec.message === "string") return rec.message;
+    if (typeof rec.detail === "string") return rec.detail;
+    return JSON.stringify(detail);
+  }
+  return "בקשה נכשלה";
+}
+
 async function request<T>(path: string, init?: RequestInit, auth = true): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -67,20 +110,11 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
     let detail: unknown = response.statusText;
     try {
       const body = await response.json();
-      detail = body.detail ?? body;
+      detail = body.detail ?? body.error?.message ?? body.error?.details ?? body;
     } catch {
       /* ignore */
     }
-    let message = "בקשה נכשלה";
-    if (typeof detail === "string") {
-      message = detail;
-    } else if (detail && typeof detail === "object") {
-      // Preserve structured errors (e.g. first-login reset_link)
-      message = JSON.stringify(detail);
-    } else if (Array.isArray(detail)) {
-      message = detail.map((d) => d.msg || JSON.stringify(d)).join(", ");
-    }
-    throw new Error(message);
+    throw new Error(formatApiError(detail));
   }
 
   if (response.status === 204) return undefined as T;
@@ -135,6 +169,7 @@ export const api = {
       role: string;
       is_active: boolean;
       investor_name: string;
+      new_password: string;
     }>,
   ) =>
     request<AuthUser>(`/api/v1/auth/users/${id}`, {

@@ -1,6 +1,8 @@
 # Free forever stack for תזרים:
 # - Web service on Render Free (sleeps after ~15 min idle — first open may take ~1 min)
 # - Postgres data on Neon Free (persistent — survives sleep/redeploy)
+# SQLite inside the container is EPHEMERAL on Render Free (no disk). Without DATABASE_URL
+# every deploy wipes users/passwords and re-runs seed. Neon is required in production.
 #
 # Setup:
 # 1) Create a free Neon DB: https://console.neon.tech
