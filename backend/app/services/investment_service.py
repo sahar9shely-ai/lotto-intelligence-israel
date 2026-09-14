@@ -3274,6 +3274,7 @@ def list_document_vault(db: Session, *, investor: Investor) -> dict:
             }
         )
 
+    today = israel_today()
     payments = db.query(Payment).filter(Payment.investor_id == investor.id).all()
     month_keys: dict[str, datetime] = {}
     year_keys: dict[int, datetime] = {}
@@ -3295,6 +3296,8 @@ def list_document_vault(db: Session, *, investor: Investor) -> dict:
             if prev_year is None or year_dt > prev_year:
                 year_keys[stamp.year] = year_dt
 
+    current_month_key = f"{today.year:04d}-{today.month:02d}"
+
     for year in sorted(year_keys, reverse=True):
         documents.append(
             {
@@ -3310,6 +3313,8 @@ def list_document_vault(db: Session, *, investor: Investor) -> dict:
         )
 
     for key in sorted(month_keys, reverse=True):
+        if key > current_month_key:
+            continue
         year_s, month_s = key.split("-")
         year_i = int(year_s)
         month_i = int(month_s)
