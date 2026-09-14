@@ -1418,6 +1418,7 @@ export function PaymentsPage() {
 
       {closedSavingsPlans.length > 0 ? (
         <Panel
+          className="hide-on-phone"
           title="תיקי חיסכון סגורים"
         >
           <div className="closed-plans">
@@ -1451,6 +1452,7 @@ export function PaymentsPage() {
 
       {statusReportPlans.length > 0 ? (
         <Panel
+          className="hide-on-phone"
           title="דוח מצב · מתחילת מסלול עד סוף מסלול"
         >
           {statusReportPlans.map((p) => (
@@ -1496,7 +1498,7 @@ export function PaymentsPage() {
           isManager && !allYears && (yearly?.scheduled_count ?? 0) > 0 ? (
             <button
               type="button"
-              className="btn btn--small"
+              className="btn btn--small hide-on-phone"
               disabled={markBusy}
               onClick={markEntireYearPaid}
             >

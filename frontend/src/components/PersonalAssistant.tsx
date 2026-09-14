@@ -130,7 +130,7 @@ export function PersonalAssistant() {
         aria-controls="personal-assistant-panel"
         onClick={() => setOpen((v) => !v)}
       >
-        עוזר
+        עוזר<span className="hide-on-phone"> אישי</span>
       </button>
 
       {open ? (

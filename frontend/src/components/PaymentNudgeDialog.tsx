@@ -147,7 +147,7 @@ export function PaymentNudgeDialog() {
           </button>
         </header>
         <div className="modal__body">
-          <p className="confirm-sheet__message">
+          <p className="confirm-sheet__message hide-on-phone">
             {isManager
               ? "נשלחה בקשת אישור למשקיע ועדיין לא התקבלה. אפשר לשלוח תזכורת בוואטסאפ או לפתוח את התשלום."
               : "עברו 3 ימי עסקים מאז שנשלחה ההעברה. אפשר לאשר קבלה עכשיו."}
@@ -187,7 +187,7 @@ export function PaymentNudgeDialog() {
                       )}
                       <button
                         type="button"
-                        className="btn btn--small btn--ghost"
+                        className="btn btn--small btn--ghost hide-on-phone"
                         onClick={() => void copyMessage(row)}
                       >
                         העתק הודעה

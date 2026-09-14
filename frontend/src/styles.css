@@ -6947,7 +6947,7 @@ body {
   }
 
   .app {
-    padding: 18px 20px calc(84px + env(safe-area-inset-bottom, 0px));
+    padding: 18px 20px calc(108px + env(safe-area-inset-bottom, 0px));
   }
 
   .page {
@@ -7455,6 +7455,67 @@ body {
 
   .table-wrap:not(.table-wrap--desktop) {
     overflow-x: visible;
+  }
+
+  .urgent-ops:has(.urgent-card--overdue) .urgent-card--missing,
+  .page:has(.urgent-card--overdue) .panel:has(.manager-income),
+  .page:has(.urgent-card--missing) .panel:has(.manager-income) {
+    display: none;
+  }
+
+  .investor-card__grid {
+    display: none;
+  }
+
+  .notif__bell {
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+    font-size: 0;
+    box-shadow: none;
+    background: transparent;
+    border-color: transparent;
+    animation: none;
+  }
+
+  .notif__badge {
+    position: absolute;
+    top: -4px;
+    inset-inline-end: -4px;
+    min-width: 18px;
+    height: 18px;
+    font-size: 0.58rem;
+    padding: 0 4px;
+  }
+
+  .nudge-sheet {
+    padding: 14px 16px 10px;
+  }
+
+  .nudge-sheet .modal__head h2,
+  .nudge-sheet h2 {
+    font-size: 1.05rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+
+  .nudge-sheet__row {
+    padding: 10px 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .nudge-sheet__actions {
+    gap: 6px;
+  }
+
+  .nudge-sheet__actions .btn,
+  .nudge-sheet .modal__actions .btn,
+  .confirm-sheet .modal__actions .btn {
+    flex: 0 1 auto;
+    width: auto;
+    min-height: 38px;
   }
 }
 
