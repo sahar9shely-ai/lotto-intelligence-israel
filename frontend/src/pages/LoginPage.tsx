@@ -32,7 +32,7 @@ export function LoginPage() {
   if (loading) {
     return (
       <div className="auth-screen">
-        <div className="atmosphere" aria-hidden="true" />
+        <div className="atmosphere atmosphere--private" aria-hidden="true" />
         <div className="state state--loading">טוען...</div>
       </div>
     );
@@ -40,14 +40,13 @@ export function LoginPage() {
 
   return (
     <div className="auth-screen">
-      <div className="atmosphere" aria-hidden="true" />
+      <div className="atmosphere atmosphere--private" aria-hidden="true" />
       <div className="auth-card">
-        <p className="auth-card__eyebrow">התיק הפרטי שלך</p>
+        <p className="auth-card__eyebrow">התיק הפרטי</p>
         <h1 className="auth-card__brand">תזרים</h1>
         <p className="auth-card__welcome">
-          שלום. כאן תראה את הקרן, התשלום הבא ומה ששולם — בשקט ובבהירות.
+          שלום. כאן רואים את הקרן, התשלום הבא ומה ששולם — בשקט ובבהירות.
         </p>
-        <p className="muted">הזן את שם המשתמש והסיסמה שקיבלת.</p>
 
         <form className="form auth-card__form" onSubmit={onSubmit} autoComplete="on">
           <label>

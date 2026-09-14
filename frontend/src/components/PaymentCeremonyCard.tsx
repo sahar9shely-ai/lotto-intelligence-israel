@@ -16,13 +16,13 @@ export function PaymentCeremonyCard({
 
   return (
     <section className="payment-ceremony" aria-label="אישור העברה">
-      <p className="payment-ceremony__eyebrow">העברה ממתינה לאישורך</p>
+      <p className="payment-ceremony__eyebrow">אישור העברה</p>
       <ul className="payment-ceremony__list">
         {payments.map((p) => (
           <li key={p.id} className="payment-ceremony__item">
             <p className="payment-ceremony__month">{formatCalendarMonth(p.due_date)}</p>
             <p className="payment-ceremony__amount">{formatMoney(p.investor_amount, true)}</p>
-            <p className="payment-ceremony__date">{formatDate(p.due_date)}</p>
+            <p className="payment-ceremony__date">מועד {formatDate(p.due_date)}</p>
             <div className="payment-ceremony__actions">
               <button
                 type="button"
