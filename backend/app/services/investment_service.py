@@ -1214,31 +1214,38 @@ def quote_metrics(quote: Quote) -> dict:
     }
 
 
-def serialize_quote(quote: Quote) -> dict:
+def serialize_quote(
+    quote: Quote, *, hide_fees: bool = False, hide_secrets: bool = False
+) -> dict:
     kind, monthly_rate, savings_rate = normalize_plan_rates(
         getattr(quote, "plan_type", None) or "monthly",
         quote.monthly_rate_percent,
         getattr(quote, "savings_rate_percent", 0.0) or 0.0,
     )
-    return {
+    metrics = quote_metrics(quote)
+    payload = {
         "id": quote.id,
         "prospect_name": quote.prospect_name,
         "phone": quote.phone,
         "access_username": quote.access_username,
-        "access_password": quote.access_password,
+        "access_password": None if hide_secrets else quote.access_password,
         "start_date": quote.start_date,
         "principal": quote.principal,
         "plan_type": kind,
         "monthly_rate_percent": monthly_rate,
         "savings_rate_percent": savings_rate,
-        "manager_fee_percent": quote.manager_fee_percent,
+        "manager_fee_percent": 0.0 if hide_fees else quote.manager_fee_percent,
         "duration_months": quote.duration_months,
         "notes": quote.notes,
         "status": normalize_quote_status(quote.status),
         "converted_investor_id": quote.converted_investor_id,
         "created_at": quote.created_at,
-        **quote_metrics(quote),
+        **metrics,
     }
+    if hide_fees:
+        payload["monthly_manager_fee"] = 0.0
+        payload["total_manager_fee"] = 0.0
+    return payload
 
 
 def _payment_priority(status: str) -> int:
@@ -3147,3 +3154,205 @@ def reverse_topup_investment(
     loaded = _load_topup_request(db, request.id)
     assert loaded is not None
     return loaded
+
+
+VAULT_QUOTE_STATUSES = frozenset({"approved", "converted"})
+_HE_MONTHS = (
+    "",
+    "ינואר",
+    "פברואר",
+    "מרץ",
+    "אפריל",
+    "מאי",
+    "יוני",
+    "יולי",
+    "אוגוסט",
+    "ספטמבר",
+    "אוקטובר",
+    "נובמבר",
+    "דצמבר",
+)
+
+
+def phone_digits(value: Optional[str]) -> str:
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("972") and len(digits) >= 11:
+        digits = "0" + digits[3:]
+    return digits
+
+
+def _contract_fully_signed(request: InvestmentTopupRequest) -> bool:
+    return bool(
+        request.manager_signed_at
+        and request.manager_signature_png
+        and request.investor_signed_at
+        and request.investor_signature_png
+    )
+
+
+def quote_belongs_to_investor(
+    quote: Quote,
+    investor: Investor,
+    *,
+    username: Optional[str] = None,
+    investor_phone: Optional[str] = None,
+) -> bool:
+    if quote.converted_investor_id == investor.id:
+        return True
+    access = (quote.access_username or "").strip().lower()
+    if username and access and access == username.strip().lower():
+        return True
+    quote_phone = phone_digits(quote.phone)
+    expected = phone_digits(investor_phone) if investor_phone else ""
+    if not expected:
+        expected = phone_digits(getattr(investor, "phone", None))
+    if expected and quote_phone and quote_phone == expected:
+        return True
+    return False
+
+
+def list_document_vault(db: Session, *, investor: Investor) -> dict:
+    """Catalog of existing investor documents — contracts, offers, monthly/yearly reports."""
+    from app.models.auth import User
+
+    login = db.query(User).filter(User.investor_id == investor.id).first()
+    username = (login.username if login else "") or ""
+    digits = phone_digits(investor.phone)
+    documents: list[dict] = []
+
+    requests = (
+        db.query(InvestmentTopupRequest)
+        .options(joinedload(InvestmentTopupRequest.investor))
+        .filter(InvestmentTopupRequest.investor_id == investor.id)
+        .order_by(InvestmentTopupRequest.created_at.desc())
+        .all()
+    )
+    for req in requests:
+        if not _contract_fully_signed(req):
+            continue
+        number = req.contract_number or _contract_number_for(req)
+        issued = (
+            req.investor_signed_at
+            or req.executed_at
+            or req.approved_at
+            or req.created_at
+        )
+        documents.append(
+            {
+                "id": f"contract:{req.id}",
+                "kind": "contract",
+                "title": "חוזה חתום",
+                "subtitle": f"{number} · {float(req.amount or 0):,.0f} ₪",
+                "issued_at": issued,
+                "source_id": req.id,
+                "period": None,
+                "amount": float(req.amount or 0),
+            }
+        )
+
+    quotes = db.query(Quote).order_by(Quote.created_at.desc()).all()
+    for quote in quotes:
+        status = normalize_quote_status(quote.status)
+        if status not in VAULT_QUOTE_STATUSES:
+            continue
+        if not quote_belongs_to_investor(
+            quote, investor, username=username, investor_phone=digits
+        ):
+            continue
+        documents.append(
+            {
+                "id": f"quote:{quote.id}",
+                "kind": "quote",
+                "title": "הצעת השקעה",
+                "subtitle": f"{float(quote.principal or 0):,.0f} ₪ · {quote.duration_months} חודשים",
+                "issued_at": quote.created_at,
+                "source_id": quote.id,
+                "period": None,
+                "amount": float(quote.principal or 0),
+            }
+        )
+
+    today = israel_today()
+    payments = db.query(Payment).filter(Payment.investor_id == investor.id).all()
+    month_keys: dict[str, datetime] = {}
+    year_keys: dict[int, datetime] = {}
+    for payment in payments:
+        stamps: list[date] = []
+        if payment.due_date:
+            stamps.append(payment.due_date)
+        if payment.paid_at:
+            paid = payment.paid_at
+            stamps.append(paid.date() if isinstance(paid, datetime) else paid)
+        for stamp in stamps:
+            month_key = f"{stamp.year:04d}-{stamp.month:02d}"
+            month_dt = datetime(stamp.year, stamp.month, 1)
+            prev_month = month_keys.get(month_key)
+            if prev_month is None or month_dt > prev_month:
+                month_keys[month_key] = month_dt
+            year_dt = datetime(stamp.year, 12, 31)
+            prev_year = year_keys.get(stamp.year)
+            if prev_year is None or year_dt > prev_year:
+                year_keys[stamp.year] = year_dt
+
+    current_month_key = f"{today.year:04d}-{today.month:02d}"
+
+    for year in sorted(year_keys, reverse=True):
+        documents.append(
+            {
+                "id": f"yearly:{year}",
+                "kind": "yearly",
+                "title": f"דוח שנתי · {year}",
+                "subtitle": "סיכום העברות לשנה הקלנדרית",
+                "issued_at": year_keys[year],
+                "source_id": None,
+                "period": str(year),
+                "amount": None,
+            }
+        )
+
+    for key in sorted(month_keys, reverse=True):
+        if key > current_month_key:
+            continue
+        year_s, month_s = key.split("-")
+        year_i = int(year_s)
+        month_i = int(month_s)
+        month_name = _HE_MONTHS[month_i] if 1 <= month_i <= 12 else key
+        documents.append(
+            {
+                "id": f"monthly:{key}",
+                "kind": "monthly",
+                "title": f"דוח חודשי · {month_name} {year_i}",
+                "subtitle": "קרן, החזר והעברות לחודש זה",
+                "issued_at": month_keys[key],
+                "source_id": None,
+                "period": key,
+                "amount": None,
+            }
+        )
+
+    grouped: list[dict] = []
+    for kind in ("contract", "quote", "yearly", "monthly"):
+        bucket = [row for row in documents if row["kind"] == kind]
+
+        def _stamp(row: dict) -> datetime:
+            value = row.get("issued_at")
+            if value is None:
+                return datetime.min
+            if isinstance(value, datetime):
+                if value.tzinfo is not None:
+                    return value.astimezone(timezone.utc).replace(tzinfo=None)
+                return value
+            if isinstance(value, date):
+                return datetime(value.year, value.month, value.day)
+            return datetime.min
+
+        bucket.sort(key=_stamp, reverse=True)
+        grouped.extend(bucket)
+
+    return {
+        "investor_id": investor.id,
+        "investor_name": investor.name,
+        "documents": grouped,
+    }

@@ -14,6 +14,7 @@ from app.models.auth import User
 from app.models.investments import Investor, InvestmentPlan, InvestmentTopupRequest, Payment, Quote
 from app.schemas.investments import (
     DashboardOut,
+    DocumentVaultOut,
     InvestorCreate,
     InvestorOut,
     InvestorUpdate,
@@ -108,6 +109,22 @@ def dashboard(
     else:
         scoped = user.investor_id
     return svc.get_dashboard(db, investor_id=scoped)
+
+
+@router.get("/documents", response_model=DocumentVaultOut)
+def list_documents(
+    investor_id: int | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    """Per-investor document vault: signed contracts, offers, monthly/yearly reports."""
+    scoped = _scope_investor_id(user, investor_id)
+    if scoped is None:
+        raise HTTPException(status_code=400, detail="בחרו משקיע כדי לפתוח את כספת המסמכים")
+    investor = db.query(Investor).filter(Investor.id == scoped).first()
+    if not investor:
+        raise HTTPException(status_code=404, detail="המשקיע לא נמצא")
+    return svc.list_document_vault(db, investor=investor)
 
 
 @router.get("/settings", response_model=SettingsOut)
@@ -1474,6 +1491,28 @@ def list_quotes(
 ):
     quotes = db.query(Quote).order_by(Quote.created_at.desc()).all()
     return [svc.serialize_quote(q) for q in quotes]
+
+
+@router.get("/quotes/{quote_id}", response_model=QuoteOut)
+def get_quote(
+    quote_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="ההצעה לא נמצאה")
+    if is_manager(user):
+        return svc.serialize_quote(quote)
+    investor = db.query(Investor).filter(Investor.id == user.investor_id).first()
+    if not investor or not svc.quote_belongs_to_investor(
+        quote,
+        investor,
+        username=user.username,
+        investor_phone=getattr(investor, "phone", None),
+    ):
+        raise HTTPException(status_code=403, detail="אין גישה להצעה הזו")
+    return svc.serialize_quote(quote, hide_fees=True, hide_secrets=True)
 
 
 def _quote_access_username(value: Optional[str]) -> Optional[str]:

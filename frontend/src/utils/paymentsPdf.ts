@@ -1,6 +1,6 @@
 import type { Payment, PaymentTotals } from "../types/investments";
 import { formatCalendarMonth, formatDate, formatMoney, statusLabel } from "./format";
-import { PDF_BASE_STYLES, renderHtmlToPdf } from "./pdfDocument";
+import { PDF_BASE_STYLES, renderHtmlToPdfBlob, savePdfBlob } from "./pdfDocument";
 
 function escapeHtml(value: string): string {
   return value
@@ -18,9 +18,9 @@ export type YearlyPaymentsPdfOptions = {
   lifetime?: PaymentTotals | null;
 };
 
-export async function downloadYearlyPaymentsPdf(
+export async function yearlyPaymentsPdfFile(
   options: YearlyPaymentsPdfOptions,
-): Promise<void> {
+): Promise<File> {
   const { year, payments, isManager, investorFilterName, lifetime } = options;
   const sorted = [...payments].sort((a, b) => {
     if (a.due_date === b.due_date) return a.id - b.id;
@@ -187,5 +187,13 @@ export async function downloadYearlyPaymentsPdf(
     </footer>
   </div>`;
 
-  await renderHtmlToPdf(html, PDF_BASE_STYLES, `תזרים-תשלומים-${year}.pdf`);
+  const blob = await renderHtmlToPdfBlob(html, PDF_BASE_STYLES);
+  return new File([blob], `תזרים-תשלומים-${year}.pdf`, { type: "application/pdf" });
+}
+
+export async function downloadYearlyPaymentsPdf(
+  options: YearlyPaymentsPdfOptions,
+): Promise<void> {
+  const file = await yearlyPaymentsPdfFile(options);
+  savePdfBlob(file, file.name);
 }

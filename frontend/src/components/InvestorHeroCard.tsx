@@ -63,6 +63,9 @@ export function InvestorHeroCard({
             {monthlyBusy ? "מכינים דוח..." : "דוח חודשי"}
           </button>
         ) : null}
+        <Link className="btn btn--ghost hide-on-phone" to="/documents">
+          כספת מסמכים
+        </Link>
         <Link className="btn btn--ghost hide-on-phone" to="/payments">
           לתשלומים
         </Link>
