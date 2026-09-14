@@ -82,42 +82,24 @@ export function PaymentNudgeDialog() {
     setDismissed(sig);
   }
 
+  function sharePayload(row: PaymentNudge) {
+    return {
+      investorName: row.investor_name,
+      phone: row.investor_phone,
+      dueDate: row.due_date,
+      amount: row.investor_amount,
+      href: row.href,
+      businessDaysWaiting: row.business_days_waiting,
+    };
+  }
+
   function openPayment(row: PaymentNudge) {
     dismiss();
     navigate(row.href);
   }
 
-  function sendWhatsApp(row: PaymentNudge) {
-    const url = whatsAppPaymentNudgeUrl(
-      {
-        investorName: row.investor_name,
-        phone: row.investor_phone,
-        dueDate: row.due_date,
-        amount: row.investor_amount,
-        href: row.href,
-        businessDaysWaiting: row.business_days_waiting,
-      },
-      publicUrl,
-    );
-    if (!url) {
-      void copyMessage(row, "אין מספר וואטסאפ — ההודעה הועתקה");
-      return;
-    }
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-
   async function copyMessage(row: PaymentNudge, ok = "ההודעה הועתקה") {
-    const text = buildPaymentNudgeWhatsAppMessage(
-      {
-        investorName: row.investor_name,
-        phone: row.investor_phone,
-        dueDate: row.due_date,
-        amount: row.investor_amount,
-        href: row.href,
-        businessDaysWaiting: row.business_days_waiting,
-      },
-      publicUrl,
-    );
+    const text = buildPaymentNudgeWhatsAppMessage(sharePayload(row), publicUrl);
     try {
       await navigator.clipboard.writeText(text);
       setCopyNote(ok);
@@ -171,7 +153,9 @@ export function PaymentNudgeDialog() {
               : "עברו 3 ימי עסקים מאז שנשלחה ההעברה. אפשר לאשר קבלה עכשיו."}
           </p>
           <ul className="nudge-sheet__list">
-            {items.map((row) => (
+            {items.map((row) => {
+              const waUrl = whatsAppPaymentNudgeUrl(sharePayload(row), publicUrl);
+              return (
               <li key={row.id} className="nudge-sheet__row">
                 <div>
                   <strong>{isManager ? row.investor_name : formatCalendarMonth(row.due_date)}</strong>
@@ -183,13 +167,24 @@ export function PaymentNudgeDialog() {
                 <div className="nudge-sheet__actions">
                   {isManager ? (
                     <>
-                      <button
-                        type="button"
-                        className="btn btn--small btn--gold"
-                        onClick={() => sendWhatsApp(row)}
-                      >
-                        שלח תזכורת בוואטסאפ
-                      </button>
+                      {waUrl ? (
+                        <a
+                          className="btn btn--small btn--gold"
+                          href={waUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          שלח תזכורת בוואטסאפ
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn--small btn--gold"
+                          onClick={() => void copyMessage(row, "אין מספר וואטסאפ — ההודעה הועתקה")}
+                        >
+                          שלח תזכורת בוואטסאפ
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn--small btn--ghost"
@@ -217,7 +212,8 @@ export function PaymentNudgeDialog() {
                   </button>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
           {copyNote ? <p className="nudge-sheet__note">{copyNote}</p> : null}
         </div>

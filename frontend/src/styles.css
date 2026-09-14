@@ -4699,6 +4699,10 @@ a.urgent-card__row:focus-visible {
   gap: 8px;
 }
 
+.nudge-sheet__actions a.btn {
+  text-decoration: none;
+}
+
 .nudge-sheet__note {
   margin: 0;
   font-size: 0.85rem;
