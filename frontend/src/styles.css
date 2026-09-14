@@ -4632,6 +4632,11 @@ input[type="date"] {
   font-weight: 650;
 }
 
+.user-card-anchor.is-target .panel.user-card {
+  outline: 2px solid color-mix(in srgb, var(--admin) 55%, var(--line));
+  outline-offset: 3px;
+}
+
 .user-form__password {
   grid-column: 1 / -1;
 }

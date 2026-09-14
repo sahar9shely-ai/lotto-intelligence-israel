@@ -64,8 +64,24 @@ export function UsersPage() {
   const [savingId, setSavingId] = useState<number | "create" | "fulfill" | null>(null);
   const [cardErrors, setCardErrors] = useState<Record<number, string>>({});
   const [formRev, setFormRev] = useState<Record<number, number>>({});
+  const [focusPasswordUserId, setFocusPasswordUserId] = useState<number | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
   const publicUrl = siteStatus?.public_url || window.location.origin;
+
+  function jumpToUserPassword(userId: number) {
+    setFocusPasswordUserId(userId);
+    window.requestAnimationFrame(() => {
+      const card = document.getElementById(`user-card-${userId}`);
+      const details = card?.querySelector("details.user-editor");
+      if (details instanceof HTMLDetailsElement) details.open = true;
+      const input = document.getElementById(`new-password-${userId}`);
+      const target = input ?? card;
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (input instanceof HTMLInputElement) {
+        window.setTimeout(() => input.focus(), 280);
+      }
+    });
+  }
 
   function showSaveError(userId: number | null, text: string) {
     setErrorMsg(text);
@@ -364,15 +380,23 @@ export function UsersPage() {
           <ul className="list">
             {pendingUsers.map((u) => (
               <li key={u.id} className="list__row">
-                <div>
+                <button
+                  type="button"
+                  className="list__pick"
+                  onClick={() => jumpToUserPassword(u.id)}
+                >
                   <strong>
                     {u.investor_name} · {u.username}
                   </strong>
-                  <span className="muted">הגדר סיסמה בטופס למטה</span>
-                </div>
-                <span className="badge badge--scheduled">
-                  {u.role === "manager" ? "מנהל" : "משקיע"}
-                </span>
+                  <span className="muted">לחצו להגדרת סיסמה</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--small btn--admin"
+                  onClick={() => jumpToUserPassword(u.id)}
+                >
+                  הגדר סיסמה
+                </button>
               </li>
             ))}
           </ul>
@@ -380,8 +404,12 @@ export function UsersPage() {
       ) : null}
 
       {(users ?? []).map((u) => (
-        <Panel
+        <div
           key={u.id}
+          id={`user-card-${u.id}`}
+          className={`user-card-anchor${focusPasswordUserId === u.id ? " is-target" : ""}`}
+        >
+        <Panel
           className="user-card"
           title={u.investor_name}
         >
@@ -515,6 +543,7 @@ export function UsersPage() {
             </form>
           </details>
         </Panel>
+        </div>
       ))}
 
       {showCreate ? (
