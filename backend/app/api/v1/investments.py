@@ -186,7 +186,9 @@ def update_settings(
 
 
 def _serialize_settings(settings) -> dict:
-    key = (getattr(settings, "assistant_api_key", None) or "").strip()
+    from app.services.assistant_service import _llm_credentials
+
+    provider, key = _llm_credentials(settings)
     return {
         "default_monthly_rate_percent": settings.default_monthly_rate_percent,
         "default_manager_fee_percent": settings.default_manager_fee_percent,
@@ -197,7 +199,7 @@ def _serialize_settings(settings) -> dict:
         "site_updating_message": getattr(settings, "site_updating_message", None)
         or "האתר בעדכון כרגע — ייתכנו שינויים זמניים בתצוגה.",
         "slack_webhook_url": getattr(settings, "slack_webhook_url", None) or None,
-        "assistant_provider": getattr(settings, "assistant_provider", None) or "gemini",
+        "assistant_provider": provider or "gemini",
         "assistant_api_key_set": bool(key),
         "assistant_api_key_hint": (f"…{key[-4:]}" if len(key) >= 4 else None) if key else None,
     }

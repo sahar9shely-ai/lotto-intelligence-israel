@@ -1,21 +1,23 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../services/api";
 import { downloadAssistantPdf } from "../utils/assistantPdf";
 
 type Msg = { role: "user" | "assistant"; content: string };
+type Suggestion = { label: string; message: string };
+type Cta = { href: string; label: string };
+
+const FALLBACK_GREETING = "שלום. אפשר לשאול על התיק, התשלום הבא, או על הוספת השקעה.";
 
 export function PersonalAssistant() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: "assistant",
-      content: "היי, מה שלומך? 😊\nאני כאן לעזור לך בכל שאלה על התיק.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [cta, setCta] = useState<Cta | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -24,19 +26,49 @@ export function PersonalAssistant() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, open]);
 
+  useEffect(() => {
+    if (!open || !user) return;
+    let cancelled = false;
+    api
+      .assistantOpening()
+      .then((opening) => {
+        if (cancelled) return;
+        setMessages([{ role: "assistant", content: opening.greeting }]);
+        setSuggestions(opening.suggestions || []);
+        setCta(opening.cta || null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMessages([{ role: "assistant", content: FALLBACK_GREETING }]);
+        setSuggestions([
+          { label: "מה המצב שלי", message: "מה המצב שלי?" },
+          { label: "הוספת השקעה", message: "איך מוסיפים השקעה או מבקשים תוספת?" },
+        ]);
+        setCta(
+          user.is_manager
+            ? { href: "/quotes", label: "לפתיחת הצעה חדשה" }
+            : { href: "/investors?action=topup", label: "לבקש תוספת או מסלול" },
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, user]);
+
   if (!user) return null;
 
-  async function send(e?: FormEvent) {
-    e?.preventDefault();
-    const text = input.trim();
-    if (!text || busy) return;
+  async function sendText(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
     setInput("");
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setBusy(true);
     try {
-      const res = await api.assistantChat({ message: text, history });
+      const res = await api.assistantChat({ message: trimmed, history });
       setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
+      if (res.cta?.href && res.cta.label) setCta(res.cta);
+      if (res.suggestions?.length) setSuggestions(res.suggestions);
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -48,6 +80,11 @@ export function PersonalAssistant() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function send(e?: FormEvent) {
+    e?.preventDefault();
+    await sendText(input);
   }
 
   async function closeAndNotify() {
@@ -148,11 +185,33 @@ export function PersonalAssistant() {
             <div ref={bottomRef} />
           </div>
 
+          {suggestions.length > 0 ? (
+            <div className="assistant-chips" role="group" aria-label="שאלות מוצעות">
+              {suggestions.map((chip) => (
+                <button
+                  key={chip.label}
+                  type="button"
+                  className="assistant-chip"
+                  disabled={busy}
+                  onClick={() => void sendText(chip.message)}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {cta?.href ? (
+            <Link className="assistant-cta" to={cta.href} onClick={() => setOpen(false)}>
+              {cta.label}
+            </Link>
+          ) : null}
+
           <form className="assistant-panel__form" onSubmit={send}>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="כתבו כאן…"
+              placeholder="שאלה על התיק או על תוספת…"
               disabled={busy}
               aria-label="הודעה לעוזר האישי"
             />

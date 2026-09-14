@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import date, datetime, timezone
 from typing import Any, Optional
@@ -11,7 +12,14 @@ import httpx
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.auth import User
-from app.models.investments import AppSettings, InvestmentPlan, Investor, Payment
+from app.models.investments import (
+    AppSettings,
+    InvestmentPlan,
+    InvestmentTopupRequest,
+    Investor,
+    Payment,
+    Quote,
+)
 from app.services import investment_service as inv_svc
 
 
@@ -26,6 +34,30 @@ FORBIDDEN_REPLY = (
     "על נושאים אחרים כדאי לפנות ישירות למנהל."
 )
 
+HE_MONTHS = (
+    "",
+    "ינואר",
+    "פברואר",
+    "מרץ",
+    "אפריל",
+    "מאי",
+    "יוני",
+    "יולי",
+    "אוגוסט",
+    "ספטמבר",
+    "אוקטובר",
+    "נובמבר",
+    "דצמבר",
+)
+
+EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "]+"
+)
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -37,8 +69,77 @@ def _settings(db: Session) -> AppSettings:
 
 def assistant_configured(db: Session) -> bool:
     settings = _settings(db)
-    key = (getattr(settings, "assistant_api_key", None) or "").strip()
+    _, key = _llm_credentials(settings)
     return bool(key)
+
+
+def _llm_credentials(settings: AppSettings) -> tuple[str, str]:
+    """Prefer the saved settings key; otherwise GEMINI_API_KEY / OPENAI_API_KEY on the host."""
+    stored_key = (getattr(settings, "assistant_api_key", None) or "").strip()
+    stored_provider = (getattr(settings, "assistant_provider", None) or "").strip().lower()
+    env_openai = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    env_gemini = (
+        os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
+    ).strip()
+    if stored_key:
+        return (stored_provider or "gemini"), stored_key
+    if stored_provider == "openai" and env_openai:
+        return "openai", env_openai
+    if stored_provider in {"", "gemini"} and env_gemini:
+        return "gemini", env_gemini
+    if env_gemini:
+        return "gemini", env_gemini
+    if env_openai:
+        return "openai", env_openai
+    return (stored_provider or "gemini"), ""
+
+
+def _user_is_manager(user: User) -> bool:
+    if getattr(user, "role", None) == "manager":
+        return True
+    inv = getattr(user, "investor", None)
+    return bool(inv and getattr(inv, "is_manager", False))
+
+
+def _he_month(day: date | None) -> str:
+    if not day:
+        return ""
+    return HE_MONTHS[day.month]
+
+
+def _money(value: Any) -> str:
+    return f"₪{float(value or 0):,.0f}"
+
+
+def _payment_brief(payment: Payment, *, include_name: bool = False) -> dict[str, Any]:
+    due = payment.due_date
+    brief = {
+        "id": payment.id,
+        "due_date": due.isoformat() if due else None,
+        "month_label": _he_month(due),
+        "amount": float(payment.investor_amount or 0),
+        "status": payment.status,
+    }
+    if include_name:
+        brief["investor_name"] = payment.investor.name if payment.investor else ""
+        brief["investor_id"] = payment.investor_id
+    return brief
+
+
+def _investor_cta() -> dict[str, str]:
+    return {
+        "href": "/investors?action=topup",
+        "label": "לבקש תוספת או מסלול",
+        "intent": "topup",
+    }
+
+
+def _manager_cta() -> dict[str, str]:
+    return {
+        "href": "/quotes",
+        "label": "לפתיחת הצעה חדשה",
+        "intent": "quote",
+    }
 
 
 def build_investor_context(db: Session, *, investor_id: int) -> dict[str, Any]:
@@ -95,7 +196,49 @@ def build_investor_context(db: Session, *, investor_id: int) -> dict[str, Any]:
         .filter(Payment.investor_id == investor_id, Payment.status == "paid")
         .all()
     )
+    open_pays = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(
+            Payment.investor_id == investor_id,
+            Payment.status.in_(("scheduled", "awaiting_confirmation")),
+        )
+        .order_by(Payment.due_date.asc(), Payment.id.asc())
+        .all()
+    )
+    open_pays.sort(
+        key=lambda p: (0 if p.status == "awaiting_confirmation" else 1, p.due_date, p.id)
+    )
+    awaiting = [p for p in open_pays if p.status == "awaiting_confirmation"]
+    month_key = today.strftime("%Y-%m")
+    this_month = [
+        p for p in open_pays if p.due_date and p.due_date.strftime("%Y-%m") == month_key
+    ]
+    next_pay = open_pays[0] if open_pays else None
+    has_active = any(p.get("status") == "active" for p in plans_out)
+
+    tips: list[str] = []
+    if awaiting:
+        tips.append(
+            "יש תשלום שממתין לאישור קבלה. אם ההעברה הגיעה — אפשר לאשר במסך תשלומים."
+        )
+    elif this_month:
+        tips.append(
+            f"לחודש {_he_month(today)} מתוכננת העברה. שווה לעקוב שהסכום הגיע."
+        )
+    if not has_active:
+        tips.append("אין מסלול פעיל כרגע. אפשר לבקש מסלול חדש בעמוד המשקיעים.")
+    elif today.day <= 7:
+        tips.append(
+            "תחילת חודש היא זמן טוב לוודא שההעברה יצאה, ואם מתאים — לשקול תוספת לקרן."
+        )
+    else:
+        tips.append(
+            "אם מתאים להרחיב את הקרן, אפשר לבקש תוספת או מסלול נוסף — בלי התחייבות מראש."
+        )
+
     return {
+        "role": "investor",
         "investor_name": investor.name,
         "active_principal": summary["active_principal"],
         "monthly_cash": summary["monthly_cash"],
@@ -107,13 +250,19 @@ def build_investor_context(db: Session, *, investor_id: int) -> dict[str, Any]:
         "projected_savings_balance": summary["projected_savings_balance"],
         "months_in_program": summary["months_in_program"],
         "lifetime_cash_paid": round(sum(p.investor_amount for p in paid), 2),
+        "next_payment": _payment_brief(next_pay) if next_pay else None,
+        "awaiting_confirmations": [_payment_brief(p) for p in awaiting[:6]],
+        "this_month_open": [_payment_brief(p) for p in this_month[:4]],
+        "has_active_plan": has_active,
+        "tips": tips[:2],
+        "cta": _investor_cta(),
         "plans": plans_out,
-        # Explicit denial list for the model
         "privacy": {
             "may_discuss_other_investors": False,
             "may_discuss_managers": False,
             "may_discuss_fees": False,
             "may_change_system": False,
+            "may_suggest_topup": True,
         },
     }
 
@@ -170,6 +319,133 @@ def what_if_add_principal(context: dict[str, Any], extra: float) -> dict[str, An
     }
 
 
+def build_manager_context(db: Session, *, user: User) -> dict[str, Any]:
+    """Operational snapshot for the manager — no fee figures, no gossip."""
+    today = date.today()
+    name = user.investor.name if getattr(user, "investor", None) else user.username
+    own_id = user.investor_id
+    own = build_investor_context(db, investor_id=own_id) if own_id else {}
+
+    awaiting = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.status == "awaiting_confirmation")
+        .order_by(Payment.due_date.asc())
+        .limit(8)
+        .all()
+    )
+    awaiting_count = (
+        db.query(Payment).filter(Payment.status == "awaiting_confirmation").count()
+    )
+    overdue = (
+        db.query(Payment)
+        .filter(
+            Payment.status.in_(("scheduled", "awaiting_confirmation")),
+            Payment.due_date < today,
+        )
+        .count()
+    )
+    pending_topups = (
+        db.query(InvestmentTopupRequest)
+        .filter(InvestmentTopupRequest.status.in_(("pending", "contract")))
+        .count()
+    )
+    pending_quotes = (
+        db.query(Quote).filter(Quote.status.in_(("pending", "approved"))).count()
+    )
+
+    tips: list[str] = []
+    if awaiting:
+        tips.append("יש אישורי קבלה שממתינים אצל משקיעים. אפשר לשלוח תזכורת או לפתוח את התשלום.")
+    if overdue:
+        tips.append("יש העברות שעבר מועדן. כדאי לטפל בהן מלוח «דחוף עכשיו» או מתשלומים.")
+    if pending_topups:
+        tips.append("יש בקשות מסלול פתוחות בעמוד המשקיעים.")
+    if pending_quotes:
+        tips.append("יש הצעות ממתינות. אפשר להשלים אותן בעמוד ההצעות.")
+    if not tips:
+        tips.append("אפשר לפתוח הצעה חדשה כשמתאים להרחיב תיק — בלי לחץ, לפי שיחה עם הלקוח.")
+
+    return {
+        "role": "manager",
+        "investor_name": name,
+        "active_principal": own.get("active_principal", 0),
+        "monthly_cash": own.get("monthly_cash", 0),
+        "monthly_savings": own.get("monthly_savings", 0),
+        "monthly_total": own.get("monthly_total", 0),
+        "current_savings_balance": own.get("current_savings_balance", 0),
+        "lifetime_cash_paid": own.get("lifetime_cash_paid", 0),
+        "plans": own.get("plans") or [],
+        "has_active_plan": own.get("has_active_plan", False),
+        "next_payment": own.get("next_payment"),
+        "awaiting_confirmations": [_payment_brief(p, include_name=True) for p in awaiting],
+        "awaiting_count": awaiting_count,
+        "overdue_open_count": overdue,
+        "pending_topup_count": pending_topups,
+        "pending_quote_count": pending_quotes,
+        "tips": tips[:2],
+        "cta": _manager_cta(),
+        "privacy": {
+            "may_discuss_other_investors": True,
+            "may_discuss_managers": False,
+            "may_discuss_fees": False,
+            "may_change_system": False,
+            "may_suggest_topup": True,
+        },
+    }
+
+
+def build_assistant_context(db: Session, *, user: User) -> dict[str, Any]:
+    if _user_is_manager(user):
+        return build_manager_context(db, user=user)
+    if not user.investor_id:
+        raise PermissionError("אין תיק מקושר למשתמש")
+    return build_investor_context(db, investor_id=user.investor_id)
+
+
+def _suggestions_for(context: dict[str, Any]) -> list[dict[str, str]]:
+    if context.get("role") == "manager":
+        return [
+            {"label": "מה דורש תשומת לב", "message": "מה המצב בלוח עכשיו?"},
+            {"label": "מי ממתין לאישור", "message": "מי ממתין לאישור תשלום?"},
+            {"label": "הצעה חדשה", "message": "איך פותחים הצעה או מסלול חדש?"},
+        ]
+    chips = [
+        {"label": "מה המצב שלי", "message": "מה המצב שלי?"},
+        {"label": "התשלום הבא", "message": "מתי התשלום הבא?"},
+        {"label": "כמה שולם", "message": "כמה שולם לי עד עכשיו?"},
+        {"label": "הוספת השקעה", "message": "איך מוסיפים השקעה או מבקשים תוספת?"},
+    ]
+    if context.get("awaiting_confirmations"):
+        chips.insert(1, {"label": "אישור ממתין", "message": "יש לי אישור תשלום ממתין?"})
+    return chips[:4]
+
+
+def opening_state(db: Session, *, user: User) -> dict[str, Any]:
+    context = build_assistant_context(db, user=user)
+    name = context.get("investor_name") or ""
+    tip = (context.get("tips") or [""])[0]
+    if context.get("role") == "manager":
+        greeting = (
+            f"שלום {name}.\n"
+            f"{tip}\n"
+            "אפשר לשאול על ממתינים לאישור, העברות שעבר מועדן, או לפתוח הצעה חדשה."
+        )
+    else:
+        greeting = (
+            f"שלום {name}.\n"
+            f"{tip}\n"
+            "אפשר לשאול על התיק, התשלום הבא, או על הוספת השקעה."
+        )
+    return {
+        "greeting": scrub_assistant_text(greeting).strip(),
+        "suggestions": _suggestions_for(context),
+        "cta": context.get("cta"),
+        "role": context.get("role"),
+        "tips": context.get("tips") or [],
+    }
+
+
 def scrub_assistant_text(text: str) -> str:
     """Hard safety net: never leak fee talk even if the model slips."""
     if not text:
@@ -177,30 +453,51 @@ def scrub_assistant_text(text: str) -> str:
     if FEE_PATTERNS.search(text):
         # Replace whole reply if fee content appears.
         return FORBIDDEN_REPLY
-    # Soft redactionsact common fee words if somehow embedded.
+    # Soft-redact common fee words if somehow embedded.
     cleaned = re.sub(
         r"(דמי\s*ניהול|עמלת?\s*ניהול|עמלת?\s*מנהל)[^.!\n]*[.!]?",
         "",
         text,
         flags=re.IGNORECASE,
     )
+    cleaned = EMOJI_RE.sub("", cleaned)
     return cleaned.strip() or FORBIDDEN_REPLY
 
 
-def system_prompt(investor_name: str) -> str:
-    return f"""אתה עוזר אישי של המשקיע {investor_name} במערכת «תזרים».
-דבר בעברית ברורה, חמה ומקצועית, בלשון זכר. אל תציג את עצמך כבינה מלאכותית או כבוט — אתה «עוזר אישי».
+def system_prompt(investor_name: str, *, role: str = "investor") -> str:
+    if role == "manager":
+        audience = (
+            f"אתה העוזר האישי השקט של המנהל {investor_name} במערכת «תזרים». "
+            "עזור בניהול תפעולי: אישורי תשלום ממתינים, העברות שעבר מועדן, בקשות מסלול והצעות. "
+            "מותר להזכיר שמות משקיעים רק בהקשר תפעולי קצר (מי ממתין לאישור, מי ביקש תוספת)."
+        )
+        cta_line = (
+            "כשמתאים, הצע בעדינות לפתוח הצעה חדשה או לטפל בבקשת מסלול — "
+            "בלי לחץ ובלי הבטחות. הפנה ל«הצעות» או ל«משקיעים»."
+        )
+    else:
+        audience = (
+            f"אתה העוזר האישי השקט של המשקיע {investor_name} במערכת «תזרים». "
+            "מדברים רק על התיק של {investor_name}."
+        )
+        cta_line = (
+            "כשמתאים לשיחה (שואלים על עוד כסף, מסלול חדש, תוספת, או אחרי סיכום רגוע), "
+            "אפשר להציע בעדינות לבקש תוספת / מסלול נוסף בעמוד המשקיעים. "
+            "בלי לחץ, בלי «חייבים», בלי הבטחת תשואה."
+        )
+    return f"""{audience}
+סגנון: private-banking lite. עברית קצרה, מדויקת, בלשון פנייה מכבדת. בלי אימוג׳י. בלי סיסמאות שיווקיות.
 
 כללי חובה:
-1. מדברים רק על התיק של {investor_name}. אסור מידע על משקיעים אחרים או על מנהלים.
-2. אסור בכלל להזכיר דמי ניהול, עמלות, כמה המנהל לוקח, או אחוזי עמלה.
-3. אסור לבצע או להציע שינויים במערכת. רק הסברים וחישובים.
-4. אם שואלים על עמלה/דמי ניהול — סרב בנימוס והפנה למנהל בלי מספרים.
-5. אם מבקשים «מה אם אוסיף X» — השתמש בנתוני החישוב שסופקו (what_if) והסבר במזומן ובחיסכון בנפרד.
-6. אם מבקשים סיכום להורדה — ציין שניתן להפיק PDF ואסוף את עיקרי הדברים.
-7. אל תמציא מספרים. השתמש רק בנתונים שסופקו בהקשר.
-
-סגנון: קצר, ברור, עם מספרים ב־₪ כשיש. הפרד תמיד בין החזר חודשי (מזומן) לבין צבירת חיסכון."""
+1. אל תמציא מספרים. השתמש רק בנתונים שסופקו בהקשר.
+2. אסור להזכיר דמי ניהול, עמלות, או כמה המנהל לוקח.
+3. אסור לבצע שינויים במערכת. מותר להסביר ולהפנות למסך הקיים.
+4. אם שואלים על עמלה — סרב בנימוס והפנה למנהל בלי מספרים.
+5. אם מבקשים «מה אם אוסיף X» — השתמש ב־what_if שסופק והפרד מזומן מחיסכון.
+6. {cta_line}
+7. הפרד תמיד בין החזר חודשי (מזומן) לבין צבירת חיסכון.
+8. טיפ אחד לכל היותר, ורק אם הוא נובע מהמצב בהקשר (אישור ממתין, חודש חדש, מסלול לא פעיל).
+9. אם כבר נמסר סיכום תיק בהיסטוריה — אל תחזור עליו. ענה רק לשאלה החדשה."""
 
 
 # Prefer free-tier-friendly models first; fall back if a model is quota-blocked.
@@ -348,6 +645,35 @@ def asks_about_others(text: str) -> bool:
     )
 
 
+def _intent(message: str) -> str:
+    t = message.strip()
+    if re.search(r"מה\s+המצב\s+בלוח|תשומת\s+לב|מה\s+דורש", t):
+        return "ops"
+    if wants_pdf(t) or re.search(
+        r"סיכום|מה\s+המצב|התיק\s+שלי|תסביר|מה\s+יש\s+לי", t
+    ):
+        return "status"
+    if re.search(r"תשלום\s+הבא|מתי\s+(ה)?(תשלום|ההעברה)|ההעברה\s+הבאה", t):
+        return "next_payment"
+    if re.search(r"כמה\s+שולם|שולם\s+לי|קיבלתי\s+עד", t):
+        return "paid"
+    if re.search(r"אישור|ממתין\s+לאישור", t):
+        return "awaiting"
+    if re.search(r"הוס[יףפ]|תוספת|מסלול\s+חדש|עוד\s+כסף|להשקיע|הצעה\s+חדשה", t):
+        return "add_capital"
+    if re.search(r"טיפ", t):
+        return "tip"
+    return "default"
+
+
+def _wants_capital_cta(message: str, context: dict[str, Any]) -> bool:
+    if _intent(message) in {"add_capital", "status", "ops", "default", "tip"}:
+        return True
+    if not context.get("has_active_plan"):
+        return True
+    return False
+
+
 def chat(
     db: Session,
     *,
@@ -364,27 +690,34 @@ def chat(
     if not investor_id:
         raise PermissionError("אין תיק מקושר למשתמש")
 
+    manager = _user_is_manager(user)
+
     if asks_about_fees(message):
         return {
             "reply": FORBIDDEN_REPLY,
             "pdf_suggested": False,
             "what_if": None,
             "configured": True,
+            "cta": _manager_cta() if manager else _investor_cta(),
+            "suggestions": [],
         }
 
-    if asks_about_others(message) and not re.search(
-        r"התיק\s+שלי|שלי\s+|אצלי|עבורי", message
+    if (
+        not manager
+        and asks_about_others(message)
+        and not re.search(r"התיק\s+שלי|שלי\s+|אצלי|עבורי", message)
+        and re.search(r"של\s+(בר|אופק|אלמוג|שושי)|משקיע(ים)?\s+אחר", message)
     ):
-        # Allow "שלי" questions; block asking about named others.
-        if re.search(r"של\s+(בר|אופק|אלמוג|שושי)|משקיע(ים)?\s+אחר", message):
-            return {
-                "reply": "אני יכול לעזור רק לגבי התיק שלך — לא לגבי משקיעים אחרים.",
-                "pdf_suggested": False,
-                "what_if": None,
-                "configured": True,
-            }
+        return {
+            "reply": "אני יכול לעזור רק לגבי התיק שלך — לא לגבי משקיעים אחרים.",
+            "pdf_suggested": False,
+            "what_if": None,
+            "configured": True,
+            "cta": _investor_cta(),
+            "suggestions": [],
+        }
 
-    context = build_investor_context(db, investor_id=investor_id)
+    context = build_assistant_context(db, user=user)
     what_if = None
     amount = detect_what_if_amount(message)
     if amount is not None:
@@ -392,22 +725,23 @@ def chat(
         context = {**context, "what_if_calculation": what_if}
 
     settings = _settings(db)
-    api_key = (getattr(settings, "assistant_api_key", None) or "").strip()
-    provider = (getattr(settings, "assistant_provider", None) or "gemini").strip().lower()
+    provider, api_key = _llm_credentials(settings)
+    attach_cta = _wants_capital_cta(message, context)
 
     if not api_key:
-        # Deterministic fallback from live numbers (no canned FAQ).
-        reply = _local_reply(context, message, what_if)
+        reply = _local_reply(context, message, what_if, history=history)
         return {
             "reply": scrub_assistant_text(reply),
             "pdf_suggested": wants_pdf(message),
             "what_if": what_if,
             "configured": False,
+            "cta": context.get("cta") if attach_cta else None,
+            "suggestions": _suggestions_for(context),
         }
 
     msgs = [{"role": h["role"], "content": h["content"]} for h in history]
     msgs.append({"role": "user", "content": message})
-    system = system_prompt(context["investor_name"])
+    system = system_prompt(context["investor_name"], role=context.get("role") or "investor")
 
     try:
         if provider == "openai":
@@ -415,8 +749,7 @@ def chat(
         else:
             raw = _call_gemini(api_key, system, msgs, context)
     except Exception as exc:
-        # Fall back to calculation-aware local reply — keep the note short.
-        raw = _local_reply(context, message, what_if)
+        raw = _local_reply(context, message, what_if, history=history)
         note = str(exc).strip() or "המודל לא היה זמין כרגע."
         if len(note) > 160 or "{" in note:
             note = "המודל לא היה זמין כרגע. נסה שוב בעוד רגע."
@@ -427,51 +760,158 @@ def chat(
         "pdf_suggested": wants_pdf(message),
         "what_if": what_if,
         "configured": True,
+        "cta": context.get("cta") if attach_cta else None,
+        "suggestions": _suggestions_for(context),
     }
 
 
-def _local_reply(context: dict, message: str, what_if: Optional[dict]) -> str:
-    """Live-data reply when LLM key is missing — numbers only from this portfolio."""
-    name = context["investor_name"]
+def _history_has_markers(history: list | None, markers: tuple[str, ...]) -> bool:
+    if not history:
+        return False
+    for item in reversed(history[-8:]):
+        if item.get("role") != "assistant":
+            continue
+        content = item.get("content") or ""
+        if any(marker in content for marker in markers):
+            return True
+    return False
+
+
+def _local_reply(
+    context: dict,
+    message: str,
+    what_if: Optional[dict],
+    history: list | None = None,
+) -> str:
+    """Live-data reply when LLM key is missing — numbers only from this context."""
+    name = context.get("investor_name") or ""
+    role = context.get("role") or "investor"
+    cta = context.get("cta") or {}
+    tips = context.get("tips") or []
+    next_pay = context.get("next_payment")
+    awaiting = context.get("awaiting_confirmations") or []
+
     if what_if and what_if.get("ok"):
         return (
-            f"{name}, לפי החישוב על התיק שלך:\n"
-            f"· קרן היום: ₪{context['active_principal']:,.2f}\n"
-            f"· אחרי תוספת ₪{what_if['extra']:,.2f}: קרן ₪{what_if['principal_after']:,.2f}\n"
-            f"· החזר חודשי (מזומן): ₪{what_if['monthly_cash_now']:,.2f} → ₪{what_if['monthly_cash_after']:,.2f}\n"
-            f"· צבירת חיסכון חודשית: ₪{what_if['monthly_savings_now']:,.2f} → ₪{what_if['monthly_savings_after']:,.2f}\n"
-            f"· סה״כ חודשי אחרי התוספת: ₪{what_if['monthly_total_after']:,.2f}\n"
-            f"החישוב הוא הערכה לפי האחוזים במסלול שלך — לא שיניתי כלום במערכת."
+            f"{name}, לפי החישוב על התיק:\n"
+            f"קרן היום {_money(context.get('active_principal'))} · "
+            f"אחרי תוספת {_money(what_if['extra'])} תהיה {_money(what_if['principal_after'])}.\n"
+            f"החזר חודשי במזומן: {_money(what_if['monthly_cash_now'])} → {_money(what_if['monthly_cash_after'])}.\n"
+            f"צבירת חיסכון חודשית: {_money(what_if['monthly_savings_now'])} → {_money(what_if['monthly_savings_after'])}.\n"
+            "זו הערכה לפי התנאים הנוכחיים — לא שיניתי כלום במערכת. "
+            f"אם מתאים, אפשר {cta.get('label', 'לבקש תוספת')}."
+        )
+    if what_if and not what_if.get("ok"):
+        return (
+            f"{what_if.get('detail') or 'אין מסלול פעיל לחישוב.'} "
+            f"אפשר {cta.get('label', 'לפתוח מסלול')} כשיתאים."
         )
 
-    if wants_pdf(message) or re.search(r"סיכום|מה\s+יש\s+לי|התיק\s+שלי|תסביר", message):
-        plans = context.get("plans") or []
-        active = [p for p in plans if p.get("status") == "active"]
-        lines = [
-            f"היי {name}, זה הסיכום של התיק שלך:",
-            f"· קרן פעילה: ₪{context['active_principal']:,.2f}",
-            f"· החזר חודשי (מזומן): ₪{context['monthly_cash']:,.2f}",
-            f"· צבירת חיסכון חודשית: ₪{context['monthly_savings']:,.2f}",
-            f"· יתרת חיסכון עד עכשיו: ₪{context['current_savings_balance']:,.2f}",
-            f"· שולם במזומן עד היום: ₪{context['lifetime_cash_paid']:,.2f}",
-        ]
-        for p in active:
-            lines.append(
-                f"· מסלול #{p['plan_id']} ({p['plan_type']}): קרן ₪{p['principal']:,.2f}, "
-                f"מזומן {p['cash_rate_percent']}% / חיסכון {p['savings_rate_percent']}%, "
-                f"התקדמות {p['months_elapsed']}/{p['duration_months']}"
+    intent = _intent(message)
+    if role != "manager" and intent == "ops":
+        intent = "status"
+
+    if role == "manager" and intent in {"ops", "default", "awaiting", "tip"}:
+        if intent in {"ops", "default"} and _history_has_markers(
+            history, ("זה מה שעומד עכשיו", "ממתינים לאישור:")
+        ):
+            return (
+                "המצב בלוח כבר מופיע למעלה. אפשר לפרט מי ממתין לאישור, "
+                "או לפתוח הצעה חדשה כשיתאים."
             )
-        lines.append("אם תרצה, אפשר גם להוריד את זה כ־PDF או לחשב «מה אם אוסיף סכום».")
+        lines = [
+            f"{name}, זה מה שעומד עכשיו:",
+            f"ממתינים לאישור: {int(context.get('awaiting_count') or 0)}.",
+            f"העברות שעבר מועדן: {int(context.get('overdue_open_count') or 0)}.",
+            f"בקשות מסלול פתוחות: {int(context.get('pending_topup_count') or 0)}.",
+            f"הצעות ממתינות: {int(context.get('pending_quote_count') or 0)}.",
+        ]
+        for row in awaiting[:3]:
+            who = row.get("investor_name") or "משקיע"
+            lines.append(
+                f"{who} · {row.get('month_label') or ''} · {_money(row.get('amount'))}."
+            )
+        if tips:
+            lines.append(tips[0])
         return "\n".join(lines)
 
-    return (
-        f"היי {name}. אני העוזר האישי שלך לתיק.\n"
-        f"כרגע: קרן ₪{context['active_principal']:,.2f}, "
-        f"מזומן חודשי ₪{context['monthly_cash']:,.2f}, "
-        f"חיסכון חודשי ₪{context['monthly_savings']:,.2f}, "
-        f"יתרת חיסכון ₪{context['current_savings_balance']:,.2f}.\n"
-        "אפשר לשאול אותי על התיק, לבקש סיכום/PDF, או לחשב מה קורה אם מוסיפים סכום."
-    )
+    if role == "manager" and intent == "add_capital":
+        return (
+            "אפשר לפתוח הצעה חדשה בעמוד ההצעות, או לטפל בבקשת מסלול בעמוד המשקיעים. "
+            "בלי לחץ — לפי השיחה עם הלקוח."
+        )
+
+    if intent == "next_payment":
+        if not next_pay:
+            return f"{name}, אין כרגע תשלום פתוח בלוח. אם מתאים להרחיב את הקרן — אפשר {cta.get('label', 'לבקש מסלול')}."
+        status = "ממתין לאישור קבלה" if next_pay.get("status") == "awaiting_confirmation" else "מתוכנן"
+        return (
+            f"התשלום הבא: {next_pay.get('month_label') or next_pay.get('due_date')} "
+            f"· {_money(next_pay.get('amount'))} · {status}."
+        )
+
+    if intent == "paid":
+        return (
+            f"עד עכשיו שולם במזומן {_money(context.get('lifetime_cash_paid'))}. "
+            f"החזר חודשי נוכחי {_money(context.get('monthly_cash'))}, "
+            f"וצבירת חיסכון חודשית {_money(context.get('monthly_savings'))}."
+        )
+
+    if intent == "awaiting":
+        if not awaiting:
+            return "אין כרגע תשלום שממתין לאישור קבלה."
+        row = awaiting[0]
+        return (
+            f"יש אישור ממתין ל{row.get('month_label') or 'חודש זה'} "
+            f"בסך {_money(row.get('amount'))}. "
+            "אם ההעברה הגיעה — אפשר לאשר במסך תשלומים."
+        )
+
+    if intent == "add_capital":
+        return (
+            "אפשר לבקש תוספת לקרן או מסלול נוסף בעמוד המשקיעים. "
+            "זו בקשה בלבד — בלי התחייבות ובלי לשנות את המסלול הקיים עד שיאושר. "
+            "אפשר גם לשאול «מה אם אוסיף 10000» כדי לראות הערכה לפי האחוזים החוזיים במסלול. "
+            f"{cta.get('label', 'לבקש תוספת או מסלול')}."
+        )
+
+    if intent == "tip":
+        return tips[0] if tips else "אם מתאים, אפשר לעבור על התשלום הבא או לשקול תוספת לקרן."
+
+    # status / default — never dump the same snapshot twice in a row.
+    if intent == "default" and _history_has_markers(
+        history, ("זה המצב בתיק", "קרן פעילה")
+    ):
+        return (
+            "הסיכום כבר למעלה. אפשר לפרט: תשלום הבא, כמה שולם, "
+            "אישור ממתין, או הוספת השקעה."
+        )
+    if intent == "status" and _history_has_markers(history, ("זה המצב בתיק",)):
+        return (
+            "התיק כפי שסוכם למעלה. אם מתאים — אפשר לבקש תוספת, "
+            "או לשאול מתי התשלום הבא."
+        )
+
+    lines = [
+        f"{name}, זה המצב בתיק:",
+        f"קרן פעילה {_money(context.get('active_principal'))}.",
+        f"החזר חודשי במזומן {_money(context.get('monthly_cash'))}.",
+        f"צבירת חיסכון חודשית {_money(context.get('monthly_savings'))}.",
+        f"יתרת חיסכון {_money(context.get('current_savings_balance'))}.",
+        f"שולם במזומן עד היום {_money(context.get('lifetime_cash_paid'))}.",
+    ]
+    if next_pay:
+        lines.append(
+            f"התשלום הבא: {next_pay.get('month_label') or next_pay.get('due_date')} "
+            f"· {_money(next_pay.get('amount'))}."
+        )
+    if awaiting:
+        lines.append("יש תשלום שממתין לאישור קבלה.")
+    if tips:
+        lines.append(tips[0])
+    if intent == "status":
+        lines.append("אפשר גם להוריד סיכום ב־PDF, או לבקש תוספת אם מתאים.")
+    return "\n".join(lines)
 
 
 def summarize_conversation(

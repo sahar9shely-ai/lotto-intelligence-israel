@@ -625,10 +625,20 @@ export const api = {
       pdf_suggested: boolean;
       what_if?: Record<string, unknown> | null;
       configured: boolean;
+      cta?: { href: string; label: string } | null;
+      suggestions?: Array<{ label: string; message: string }>;
     }>("/api/v1/assistant/chat", {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  assistantOpening: () =>
+    request<{
+      greeting: string;
+      suggestions: Array<{ label: string; message: string }>;
+      cta?: { href: string; label: string } | null;
+      role: string;
+      tips: string[];
+    }>("/api/v1/assistant/opening"),
   assistantEndSession: (body: {
     history: Array<{ role: "user" | "assistant"; content: string }>;
   }) =>

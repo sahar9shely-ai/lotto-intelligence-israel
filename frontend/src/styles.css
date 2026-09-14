@@ -4059,6 +4059,48 @@ input[type="date"] {
   min-height: 44px;
 }
 
+.assistant-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.2rem 0 0.15rem;
+  padding: 0 16px 4px;
+}
+
+.assistant-chip {
+  background: color-mix(in srgb, var(--gold) 10%, var(--foam));
+  border: 1px solid color-mix(in srgb, var(--gold) 28%, var(--line));
+  border-radius: 999px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.28rem 0.7rem;
+}
+
+.assistant-chip:hover {
+  background: color-mix(in srgb, var(--gold) 18%, var(--foam));
+}
+
+.assistant-cta {
+  display: inline-block;
+  align-self: flex-start;
+  margin: 4px 16px 8px;
+  background: var(--gold-soft);
+  border: 1px solid rgba(196, 154, 60, 0.35);
+  border-radius: 10px;
+  color: var(--gold-strong);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.45rem 0.85rem;
+  text-decoration: none;
+}
+
+.assistant-cta:hover {
+  filter: brightness(1.04);
+}
+
 @media (max-width: 720px) {
   .assistant-fab {
     inset-inline-start: 12px;

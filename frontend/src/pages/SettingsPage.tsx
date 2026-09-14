@@ -182,7 +182,8 @@ export function SettingsPage() {
           >
             Google AI Studio
           </a>
-          . העוזר לא חושף דמי ניהול ולא רואה משקיעים אחרים.
+          . העוזר לא חושף דמי ניהול ולא רואה משקיעים אחרים (למשקיע).
+          ב־Render אפשר במקום זאת להגדיר GEMINI_API_KEY או OPENAI_API_KEY.
         </p>
         <form
           className="form"

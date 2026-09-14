@@ -57,6 +57,9 @@ def test_assistant_context_has_no_fees():
         assert "דמי" not in blob
         assert ctx["investor_name"] == "בר"
         assert ctx["privacy"]["may_discuss_fees"] is False
+        assert ctx["cta"]["href"] == "/investors?action=topup"
+        assert ctx["tips"]
+        assert "😊" not in str(ctx)
     finally:
         db.close()
 
@@ -148,3 +151,159 @@ def test_assistant_chat_endpoint_own_portfolio():
     reply = res.json()["reply"]
     assert "₪" in reply or "קרן" in reply
     assert "דמי ניהול" not in reply
+
+
+def _investor_ctx(**overrides):
+    ctx = {
+        "role": "investor",
+        "investor_name": "בר",
+        "active_principal": 43000,
+        "monthly_cash": 380,
+        "monthly_savings": 110,
+        "current_savings_balance": 500,
+        "lifetime_cash_paid": 1200,
+        "next_payment": {
+            "due_date": "2026-09-01",
+            "month_label": "ספטמבר",
+            "amount": 380,
+            "status": "scheduled",
+        },
+        "awaiting_confirmations": [],
+        "tips": ["יש תשלום שממתין לאישור קבלה."],
+        "cta": {
+            "href": "/investors?action=topup",
+            "label": "לבקש תוספת או מסלול",
+        },
+        "has_active_plan": True,
+    }
+    ctx.update(overrides)
+    return ctx
+
+
+def test_local_replies_status_next_payment_paid_and_topup():
+    ctx = _investor_ctx()
+    status = asst._local_reply(ctx, "מה המצב שלי?", None)
+    assert "קרן פעילה" in status
+    assert "😊" not in status
+    nxt = asst._local_reply(ctx, "מתי התשלום הבא?", None)
+    assert "ספטמבר" in nxt
+    paid = asst._local_reply(ctx, "כמה שולם לי עד עכשיו?", None)
+    assert "1,200" in paid
+    add = asst._local_reply(ctx, "איך מוסיפים השקעה או מבקשים תוספת?", None)
+    assert "תוספת" in add
+    assert "חייבים" not in add
+    wait = asst._local_reply(
+        _investor_ctx(
+            awaiting_confirmations=[
+                {"month_label": "אוגוסט", "amount": 380, "status": "awaiting_confirmation"}
+            ]
+        ),
+        "יש לי אישור תשלום ממתין?",
+        None,
+    )
+    assert "אישור ממתין" in wait
+
+
+def test_local_reply_manager_ops_and_new_quote():
+    ctx = {
+        "role": "manager",
+        "investor_name": "מנהל מערכת",
+        "awaiting_count": 2,
+        "overdue_open_count": 1,
+        "pending_topup_count": 0,
+        "pending_quote_count": 1,
+        "awaiting_confirmations": [
+            {"investor_name": "אופק", "month_label": "אוגוסט", "amount": 500}
+        ],
+        "tips": ["יש אישורי קבלה שממתינים אצל משקיעים."],
+        "cta": {"href": "/quotes", "label": "לפתיחת הצעה חדשה"},
+        "has_active_plan": False,
+    }
+    ops = asst._local_reply(ctx, "מה המצב בלוח עכשיו?", None)
+    assert "ממתינים לאישור: 2" in ops
+    assert "אופק" in ops
+    assert "😊" not in ops
+    quote = asst._local_reply(ctx, "איך פותחים הצעה או מסלול חדש?", None)
+    assert "הצעה" in quote
+
+
+def test_local_reply_does_not_repeat_status_block():
+    ctx = _investor_ctx()
+    first = asst._local_reply(ctx, "מה המצב שלי?", None)
+    second = asst._local_reply(
+        ctx, "אוקיי", None, history=[{"role": "assistant", "content": first}]
+    )
+    assert "קרן פעילה" not in second
+    third = asst._local_reply(
+        ctx,
+        "מתי התשלום הבא?",
+        None,
+        history=[{"role": "assistant", "content": first}],
+    )
+    assert "ספטמבר" in third
+    mgr = {
+        "role": "manager",
+        "investor_name": "מנהל מערכת",
+        "awaiting_count": 1,
+        "overdue_open_count": 0,
+        "pending_topup_count": 0,
+        "pending_quote_count": 0,
+        "awaiting_confirmations": [],
+        "tips": [],
+        "cta": {"href": "/quotes", "label": "לפתיחת הצעה חדשה"},
+    }
+    ops = asst._local_reply(mgr, "מה המצב בלוח עכשיו?", None)
+    again = asst._local_reply(
+        mgr, "תודה", None, history=[{"role": "assistant", "content": ops}]
+    )
+    assert "זה מה שעומד עכשיו" not in again
+
+
+def test_llm_credentials_use_env_when_settings_empty(monkeypatch):
+    class Settings:
+        assistant_api_key = None
+        assistant_provider = "gemini"
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    provider, key = asst._llm_credentials(Settings())
+    assert provider == "openai"
+    assert key == "sk-test"
+
+
+def test_scrub_strips_emoji():
+    assert "😊" not in asst.scrub_assistant_text("שלום 😊 הקרן שלך תקינה.")
+    assert "😀" not in asst.scrub_assistant_text("שלום 😀")
+
+
+def test_opening_endpoint_investor_has_cta_no_emoji():
+    headers = _headers("bar", "Password1!")
+    res = client.get("/api/v1/assistant/opening", headers=headers)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["role"] == "investor"
+    assert "😊" not in body["greeting"]
+    assert body["cta"]["href"] == "/investors?action=topup"
+    labels = [s["label"] for s in body["suggestions"]]
+    assert "מה המצב שלי" in labels
+    assert "הוספת השקעה" in labels
+
+
+def test_opening_endpoint_manager_points_to_quotes():
+    headers = _headers()
+    res = client.get("/api/v1/assistant/opening", headers=headers)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["role"] == "manager"
+    assert "😊" not in body["greeting"]
+    assert body["cta"]["href"] == "/quotes"
+    chat = client.post(
+        "/api/v1/assistant/chat",
+        headers=headers,
+        json={"message": "איך פותחים הצעה חדשה?", "history": []},
+    )
+    assert chat.status_code == 200, chat.text
+    payload = chat.json()
+    assert payload["cta"]["href"] == "/quotes"
+    assert "דמי ניהול" not in payload["reply"]

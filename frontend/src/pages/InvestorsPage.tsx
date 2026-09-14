@@ -1,5 +1,5 @@
-import { FormEvent, useCallback, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { RevealSecret } from "../components/RevealSecret";
 import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
@@ -38,6 +38,7 @@ function totalMonthlyOf(inv: Investor) {
 export function InvestorsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
+  const [searchParams] = useSearchParams();
   const { data: investors, error, loading, reload } = useAsync(() => api.investors(), []);
   const { data: settings } = useAsync(
     () => (isManager ? api.settings() : Promise.resolve(null)),
@@ -61,6 +62,12 @@ export function InvestorsPage() {
   const [showTopupCreate, setShowTopupCreate] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "topup" && !isManager) {
+      setShowTopupCreate(true);
+    }
+  }, [searchParams, isManager]);
 
   const refreshAll = useCallback(() => {
     reload();
