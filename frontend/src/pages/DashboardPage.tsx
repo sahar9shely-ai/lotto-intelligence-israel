@@ -258,24 +258,36 @@ export function DashboardPage() {
           <em>{data.active_plans} מסלולים פעילים</em>
         </div>
         <div className="money-ledger__item">
-          <span>החזר חודשי (מזומן)</span>
+          <span className="ledger-label">
+            <span className="ledger-label__full">החזר חודשי (מזומן)</span>
+            <span className="ledger-label__short">החזר חודשי</span>
+          </span>
           <strong>{formatMoney(cash)}</strong>
           <em>משולם כל חודש</em>
         </div>
         <div className="money-ledger__item">
-          <span>צבירת חיסכון חודשית</span>
+          <span className="ledger-label">
+            <span className="ledger-label__full">צבירת חיסכון חודשית</span>
+            <span className="ledger-label__short">חיסכון חודשי</span>
+          </span>
           <strong>{formatMoney(savings)}</strong>
           <em>לא מזומן — נצבר בנפרד</em>
         </div>
         <div className="money-ledger__item">
-          <span>יתרת חיסכון כעת</span>
+          <span className="ledger-label">
+            <span className="ledger-label__full">יתרת חיסכון כעת</span>
+            <span className="ledger-label__short">יתרת חיסכון</span>
+          </span>
           <strong>{formatMoney(savingsBalance)}</strong>
           {(data.projected_savings_total ?? 0) > 0 ? (
             <em>צפי לסיום {formatMoney(data.projected_savings_total ?? 0)}</em>
           ) : null}
         </div>
         <div className="money-ledger__item money-ledger__item--total">
-          <span>סה״כ חודשי (מזומן + חיסכון)</span>
+          <span className="ledger-label">
+            <span className="ledger-label__full">סה״כ חודשי (מזומן + חיסכון)</span>
+            <span className="ledger-label__short">סה״כ חודשי</span>
+          </span>
           <strong>{formatMoney(data.monthly_investor_total ?? cash + savings)}</strong>
           <em>
             מזומן {formatMoney(cash)} + חיסכון {formatMoney(savings)}
