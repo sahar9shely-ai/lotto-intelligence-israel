@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { RequireAuth, RequireManager } from "./components/RequireAuth";
+import { WelcomeSplash } from "./components/WelcomeSplash";
 import { AuthProvider } from "./context/AuthContext";
 import { ActivityPage } from "./pages/ActivityPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
@@ -17,6 +18,7 @@ import { UsersPage } from "./pages/UsersPage";
 export function App() {
   return (
     <AuthProvider>
+      <WelcomeSplash />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />

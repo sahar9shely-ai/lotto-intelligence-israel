@@ -1,9 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img">
-  <title>תזרים</title>
-  <rect width="512" height="512" rx="108" fill="#082421"/>
-  <circle cx="256" cy="256" r="178" fill="#F6F3EA"/>
-  <g transform="translate(96 96) scale(1.25)">
-    <!-- Forest-green C-ring (left + top), open before 1 o'clock -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img">
+  <title>?????</title>
+  <!-- Forest-green C-ring (left + top), open before 1 o'clock -->
   <path fill="#245C43" d="M 61.51 213.11 A 108 108 0 1 1 231.82 98.23 L 210.67 104.30 A 86 86 0 1 0 75.05 195.77 Z"/>
   <!-- Muted-gold right ring, with a quiet gap from the green arc -->
   <path fill="#C6A44E" d="M 194.49 42.89 A 108 108 0 0 1 200.27 208.26 L 185.55 191.91 A 86 86 0 0 0 180.95 60.23 Z"/>
@@ -23,5 +20,4 @@
     C 104 176 86 186 75.05 195.77
     Z"/>
   <circle fill="#C6A44E" cx="124" cy="172" r="11"/>
-  </g>
 </svg>

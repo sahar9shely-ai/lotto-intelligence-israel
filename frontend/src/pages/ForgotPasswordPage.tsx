@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { AuthBrand } from "../components/BrandMark";
 import { api } from "../services/api";
 
 export function ForgotPasswordPage() {
@@ -54,7 +55,7 @@ export function ForgotPasswordPage() {
     <div className="auth-screen">
       <div className="atmosphere atmosphere--private" aria-hidden="true" />
       <div className="auth-card">
-        <h1 className="auth-card__brand">תזרים</h1>
+        <AuthBrand />
 
         <form className="form" onSubmit={onSubmit} autoComplete="off">
           <label>
