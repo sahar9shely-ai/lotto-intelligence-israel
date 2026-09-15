@@ -544,3 +544,206 @@ def test_investor_context_includes_own_documents():
         assert "open_payments" in ctx
     finally:
         db.close()
+
+
+PRODUCTION_QUESTION = "רציתי לדעת כמה בר מוסרי השקיע עד היום"
+
+
+def _ensure_named_plan(db, name: str, principal: float = 51200) -> tuple:
+    from datetime import date as date_cls
+
+    investor = db.query(Investor).filter(Investor.name == name).first()
+    if investor is None:
+        investor = Investor(name=name, is_manager=False)
+        db.add(investor)
+        db.commit()
+        db.refresh(investor)
+    active = [p for p in (investor.plans or []) if p.status == "active"]
+    if not active:
+        plan = InvestmentPlan(
+            investor_id=investor.id,
+            principal=principal,
+            plan_type="hybrid",
+            monthly_rate_percent=8.8372,
+            savings_rate_percent=2.5581,
+            manager_fee_percent=0,
+            start_date=date_cls(2026, 1, 1),
+            duration_months=12,
+            status="active",
+            notes="בדיקת עוזר — שם מלא כמו בפרודקשן",
+        )
+        db.add(plan)
+        db.commit()
+        investor = (
+            db.query(Investor)
+            .options(joinedload(Investor.plans).joinedload(InvestmentPlan.payments))
+            .filter(Investor.name == name)
+            .first()
+        )
+        active = [p for p in (investor.plans or []) if p.status == "active"]
+    return investor, float(sum(p.principal for p in active))
+
+
+def test_extract_name_query_production_phrasing():
+    from app.services import assistant_retrieval as retr
+
+    assert retr.extract_name_query(PRODUCTION_QUESTION) == "בר מוסרי"
+    assert retr.extract_name_query("רציתי לדעת כמה בר מוסרי השקיעה עד היום") == "בר מוסרי"
+    assert "רציתי" not in retr.extract_name_query(PRODUCTION_QUESTION)
+    assert "לדעת" not in retr.extract_name_query(PRODUCTION_QUESTION)
+
+
+def test_roster_resolves_production_full_name():
+    from app.services import assistant_retrieval as retr
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        investor, principal = _ensure_named_plan(db, "בר מוסרי", 51200)
+        assert principal == 51200
+        hits = retr.find_investors_in_message(db, PRODUCTION_QUESTION)
+        assert hits, "dashboard-chip roster must match the production question"
+        assert hits[0][0].name == "בר מוסרי"
+        retrieved = retr.retrieve_named_investors(
+            db, message=PRODUCTION_QUESTION, build_portfolio=asst.build_investor_context
+        )
+        rows = retrieved.get("retrieved_investors") or []
+        assert rows
+        assert rows[0]["matched_as"] == "בר מוסרי"
+        assert float(rows[0]["active_principal"]) == 51200
+        assert "בר מוסרי" in (retrieved.get("investor_chip_names") or [])
+    finally:
+        db.close()
+
+
+def test_manager_chat_production_bar_mosri_returns_live_principal(monkeypatch):
+    monkeypatch.setattr(asst, "_llm_credentials", lambda _settings: ("gemini", ""))
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        _inv, principal = _ensure_named_plan(db, "בר מוסרי", 51200)
+        assert principal > 0
+    finally:
+        db.close()
+
+    headers = _headers()
+    res = client.post(
+        "/api/v1/assistant/chat",
+        headers=headers,
+        json={"message": PRODUCTION_QUESTION, "history": []},
+    )
+    assert res.status_code == 200, res.text
+    reply = res.json()["reply"]
+    assert "אין נתונים" not in reply
+    assert "לא רואה" not in reply
+    assert "איני רואה" not in reply
+    assert "ברשימה" not in reply
+    assert "בר מוסרי" in reply
+    formatted = f"{principal:,.0f}"
+    assert formatted in reply or str(int(principal)) in reply
+    assert "קרן" in reply
+
+
+def test_manager_chat_skips_llm_when_chip_name_resolved(monkeypatch):
+    monkeypatch.setattr(asst, "_llm_credentials", lambda _settings: ("gemini", "fake-key"))
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("LLM must not run after a dashboard-chip name is resolved")
+
+    monkeypatch.setattr(asst, "_call_gemini", _boom)
+    monkeypatch.setattr(asst, "_call_openai", _boom)
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        _inv, principal = _ensure_named_plan(db, "בר מוסרי", 51200)
+    finally:
+        db.close()
+
+    headers = _headers()
+    res = client.post(
+        "/api/v1/assistant/chat",
+        headers=headers,
+        json={"message": PRODUCTION_QUESTION, "history": []},
+    )
+    assert res.status_code == 200, res.text
+    reply = res.json()["reply"]
+    assert "קרן" in reply
+    assert "בר מוסרי" in reply
+    assert f"{principal:,.0f}" in reply or str(int(principal)) in reply
+    assert "לא רואה" not in reply
+    assert "ברשימה" not in reply
+
+
+def test_enforce_grounded_reply_replaces_missing_hallucination():
+    ctx = {
+        "name_query": "בר מוסרי",
+        "retrieved_investors": [
+            {
+                "name": "בר מוסרי",
+                "matched_as": "בר מוסרי",
+                "active_principal": 51200,
+                "monthly_cash": 400,
+                "monthly_savings": 120,
+                "current_savings_balance": 800,
+                "portfolio": {
+                    "active_principal": 51200,
+                    "monthly_cash": 400,
+                    "monthly_savings": 120,
+                    "current_savings_balance": 800,
+                    "has_active_plan": True,
+                },
+            }
+        ],
+    }
+    hallucinated = (
+        "איני רואה את בר מוסרי ברשימת המשקיעים הפעילים במערכת כעת. "
+        "ניתן לעיין ברשימת המשקיעים המלאה במסך «משקיעים»."
+    )
+    reply = asst._enforce_grounded_name_reply(hallucinated, ctx, None)
+    assert "לא רואה" not in reply
+    assert "איני רואה" not in reply
+    assert "קרן" in reply
+    assert "51,200" in reply or "51200" in reply
+
+
+def test_lookup_investor_tool_accepts_full_question_as_name():
+    from app.services import assistant_retrieval as retr
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        _inv, principal = _ensure_named_plan(db, "בר מוסרי", 51200)
+        admin = db.query(User).filter(User.username == "admin").first()
+        result = retr.execute_tool(
+            db,
+            user=admin,
+            role="manager",
+            name="lookup_investor",
+            arguments={"name": PRODUCTION_QUESTION},
+            build_portfolio=asst.build_investor_context,
+        )
+        assert result.get("found") is True
+        hit = result["investors"][0]
+        assert hit["matched_as"] == "בר מוסרי"
+        assert float(hit["active_principal"]) == float(principal)
+    finally:
+        db.close()
+
+
+def test_manager_context_chip_names_match_book_investors():
+    from app.services import assistant_retrieval as retr
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        _ensure_named_plan(db, "בר מוסרי", 51200)
+        admin = db.query(User).filter(User.username == "admin").first()
+        ctx = asst.build_manager_context(db, user=admin)
+        chips = set(ctx.get("investor_chip_names") or [])
+        roster = {row.name for row in retr.list_book_investors(db)}
+        assert chips == roster
+        assert "בר מוסרי" in chips
+        assert "מנהל מערכת" not in chips
+    finally:
+        db.close()

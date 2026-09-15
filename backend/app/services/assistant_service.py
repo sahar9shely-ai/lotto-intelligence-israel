@@ -395,6 +395,8 @@ def build_manager_context(db: Session, *, user: User) -> dict[str, Any]:
         "users_without_password_count": int(
             snapshot.get("users_without_password_count") or 0
         ),
+        "investor_chip_names": snapshot.get("investor_chip_names")
+        or [row.get("name") for row in (snapshot.get("investors") or []) if row.get("name")],
         "tips": tips[:2],
         "cta": _manager_cta(),
         "privacy": {
@@ -496,11 +498,13 @@ def system_prompt(
             "מעטפת מנהל המערכת אינה תיק השקעה — אסור לדווח עליה «קרן 0» או סיכום תיק ריק. "
             "אם has_personal_book=false אל תסכם תיק אישי. "
             "מותר להזכיר שמות משקיעים. "
+            "investor_chip_names הוא אותו רוסטר כמו שבבי המשקיעים בלוח. "
             "שמות מלאים («בר מוסרי», «אופק אלזם») מתייחסים למשקיע גם לפי שם פרטי בלבד. "
-            "פעלים מגדריים («השקיעה»/«השקיע») לא משנים את החיפוש. "
+            "פעלים מגדריים («השקיעה»/«השקיע») ומליצות («רציתי לדעת כמה… עד היום») לא משנים את החיפוש. "
             "אם retrieved_investors לא ריק — זו התשובה המחייבת; ציין את הקרן וההחזר משם. "
-            "אסור להגיד «אין נתונים» אם המשקיע מופיע ב-investors או ב-retrieved_investors. "
-            "אם באמת לא נמצא אחרי חיפוש — אמור במפורש שלא נמצא משקיע בשם הזה. "
+            "אסור להגיד «אין נתונים», «לא רואה ברשימה», «איני רואה» או «לא נמצא» "
+            "אם השם מופיע ב-investor_chip_names או ב-retrieved_investors. "
+            "אם באמת לא נמצא אחרי חיפוש מול אותה רשימה — אמור במפורש שלא נמצא משקיע בשם הזה. "
             "כשחסר פירוט, קרא לכלי lookup_investor / system_overview / list_payments."
         )
         cta_line = (
@@ -795,6 +799,34 @@ def wants_pdf(text: str) -> bool:
     )
 
 
+_MISSING_INVESTOR_RE = re.compile(
+    r"(לא|אינ[יה]ן?)\s+רואה|"
+    r"לא\s+נמצא|"
+    r"אין\s+(?:אות[והםן]\s+)?ברשימ|"
+    r"לא\s+מופיע|"
+    r"אין\s+נתונים|"
+    r"לא\s+קיים|"
+    r"אין\s+משקיע|"
+    r"אינ[והן]\s+ברשימ|"
+    r"לא\s+מצאתי|"
+    r"לא\s+זיהיתי|"
+    r"לא\s+מוכר|"
+    r"רשימת\s+המשקיעים\s+הפעילים",
+)
+
+
+def _enforce_grounded_name_reply(
+    raw: str, context: dict[str, Any], history: list | None
+) -> str:
+    """Never let the model claim a chip-list investor is missing."""
+    hits = context.get("retrieved_investors") or []
+    if not hits:
+        return raw
+    if _MISSING_INVESTOR_RE.search(raw or ""):
+        return _format_retrieved_investors(context, history)
+    return raw
+
+
 def asks_about_fees(text: str) -> bool:
     return bool(FEE_PATTERNS.search(text))
 
@@ -954,6 +986,22 @@ def chat(
     attach_cta = _wants_capital_cta(message, context)
     role = context.get("role") or "investor"
 
+    def _pack(reply: str, *, configured: bool, what_if_payload=what_if) -> dict[str, Any]:
+        return {
+            "reply": scrub_assistant_text(reply),
+            "pdf_suggested": wants_pdf(message),
+            "what_if": what_if_payload,
+            "configured": configured,
+            "cta": context.get("cta") if attach_cta else None,
+            "suggestions": _suggestions_for(context),
+        }
+
+    named_hits = context.get("retrieved_investors") or []
+    if manager and named_hits and what_if is None:
+        # Deterministic numbers from the same roster the dashboard chips use.
+        # Gemini must not get a chance to invent «לא רואה ברשימה».
+        return _pack(_format_retrieved_investors(context, history), configured=bool(api_key))
+
     def tool_runner(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return retr.execute_tool(
             db,
@@ -966,14 +1014,7 @@ def chat(
 
     if not api_key:
         reply = _local_reply(context, message, what_if, history=history)
-        return {
-            "reply": scrub_assistant_text(reply),
-            "pdf_suggested": wants_pdf(message),
-            "what_if": what_if,
-            "configured": False,
-            "cta": context.get("cta") if attach_cta else None,
-            "suggestions": _suggestions_for(context),
-        }
+        return _pack(reply, configured=False)
 
     msgs = [{"role": h["role"], "content": h["content"]} for h in history]
     msgs.append({"role": "user", "content": message})
@@ -1009,14 +1050,8 @@ def chat(
             note = "המודל לא היה זמין כרגע. נסה שוב בעוד רגע."
         raw += f"\n\n({note})"
 
-    return {
-        "reply": scrub_assistant_text(raw),
-        "pdf_suggested": wants_pdf(message),
-        "what_if": what_if,
-        "configured": True,
-        "cta": context.get("cta") if attach_cta else None,
-        "suggestions": _suggestions_for(context),
-    }
+    raw = _enforce_grounded_name_reply(raw, context, history)
+    return _pack(raw, configured=True)
 
 
 def _history_has_markers(history: list | None, markers: tuple[str, ...]) -> bool:

@@ -166,6 +166,42 @@ _QUERY_STOP = frozenset(
         "פעיל",
         "פעילה",
         "פעילים",
+        "אני",
+        "אנחנו",
+        "אשמח",
+        "בדיוק",
+        "היה",
+        "היתה",
+        "הייתה",
+        "היו",
+        "כבר",
+        "לדעת",
+        "דעת",
+        "לוודא",
+        "מעוניין",
+        "מעוניינת",
+        "נשמח",
+        "רוצה",
+        "רוצים",
+        "רצה",
+        "רצית",
+        "רציתי",
+        "שאלה",
+        "שואל",
+        "שואלת",
+        "תוכל",
+        "תוכלי",
+        "אוכל",
+        "אוכלת",
+        "תעדכן",
+        "סקרן",
+        "סקרנית",
+        "בערך",
+        "יכול",
+        "יכולה",
+        "יודע",
+        "יודעת",
+        "תגידי",
     }
 )
 
@@ -179,6 +215,8 @@ _GENDERED_VERB_RE = re.compile(
 _PREFIXES = ("ל",)
 
 _HE_WORD_RE = re.compile(r"[A-Za-z0-9\u0590-\u05FF״\"']{2,}")
+# Hebrew points / teamim — production names and typed questions can differ by nikud.
+_NIKUD_RE = re.compile(r"[\u0591-\u05C7]")
 
 
 def json_safe(value: Any) -> Any:
@@ -206,44 +244,69 @@ def _strip_prefix(token: str) -> str:
     return token
 
 
-def extract_name_query(message: str) -> str:
-    """Pull a likely person name out of a Hebrew question, ignoring verbs/gender."""
+def normalize_he(text: str) -> str:
+    """Strip nikud, maqaf and extra spaces so UI labels match typed questions."""
+    cleaned = _NIKUD_RE.sub("", text or "")
+    cleaned = cleaned.replace("\u05be", " ").replace("-", " ").replace("–", " ").replace("—", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
+    return cleaned
+
+
+def tokenize_he(message: str, *, drop_stop: bool = False) -> list[str]:
     text = _GENDERED_VERB_RE.sub(" ", message or "")
-    text = re.sub(r"[?!,.:;()\[\]{}]+", " ", text)
+    text = normalize_he(text)
+    text = re.sub(r"[?!,.:;()\[\]{}«»\"']+", " ", text)
     tokens: list[str] = []
     for raw in _HE_WORD_RE.findall(text):
         token = raw.strip("\"'«»״")
-        if not token or token in _QUERY_STOP or token.isdigit():
+        if not token or token.isdigit():
+            continue
+        if drop_stop and token in _QUERY_STOP:
             continue
         token = _strip_prefix(token)
-        if not token or token in _QUERY_STOP or token.isdigit():
+        if not token or token.isdigit():
+            continue
+        if drop_stop and token in _QUERY_STOP:
             continue
         tokens.append(token)
-    # Drop leftover short noise.
+    return tokens
+
+
+def extract_name_query(message: str) -> str:
+    """Pull a likely person name out of a Hebrew question, ignoring verbs/gender."""
+    tokens = tokenize_he(message, drop_stop=True)
     tokens = [t for t in tokens if t not in _QUERY_STOP]
     return " ".join(tokens).strip()
 
 
 def _name_tokens(name: str) -> list[str]:
-    return [t for t in re.split(r"\s+", (name or "").strip()) if t]
+    return [t for t in re.split(r"\s+", normalize_he(name)) if t]
+
+
+def _consecutive_phrase(needle: list[str], haystack: list[str]) -> bool:
+    n = len(needle)
+    if n == 0 or n > len(haystack):
+        return False
+    for i in range(len(haystack) - n + 1):
+        if haystack[i : i + n] == needle:
+            return True
+    return False
 
 
 def score_name_match(query: str, investor_name: str, username: str = "") -> int:
-    q = (query or "").strip()
-    name = (investor_name or "").strip()
+    q = normalize_he(query)
+    name = normalize_he(investor_name)
     if not q or not name:
         return 0
-    q_l = q.lower()
-    n_l = name.lower()
-    u_l = (username or "").strip().lower()
-    if q_l == n_l or (u_l and q_l == u_l):
+    u_l = normalize_he(username)
+    if q == name or (u_l and q == u_l):
         return 100
-    if n_l.startswith(q_l) or q_l.startswith(n_l):
+    if name.startswith(q) or q.startswith(name):
         return 92
-    if n_l in q_l or q_l in n_l:
+    if name in q or q in name:
         return 88
-    q_tokens = [t.lower() for t in _name_tokens(q)]
-    n_tokens = [t.lower() for t in _name_tokens(name)]
+    q_tokens = _name_tokens(q)
+    n_tokens = _name_tokens(name)
     if not q_tokens or not n_tokens:
         return 0
     if n_tokens[0] == q_tokens[0]:
@@ -251,12 +314,51 @@ def score_name_match(query: str, investor_name: str, username: str = "") -> int:
     overlap = set(q_tokens) & set(n_tokens)
     if overlap:
         return 70 + min(14, 4 * len(overlap))
-    if u_l and (q_l in u_l or u_l in q_l):
+    if u_l and (q in u_l or u_l in q):
         return 65
     return 0
 
 
+def score_roster_hit(message: str, investor_name: str, username: str = "") -> int:
+    """Score a dashboard-chip name against the full question (not leftover tokens)."""
+    msg_tokens = tokenize_he(message, drop_stop=False)
+    name_tokens = _name_tokens(investor_name)
+    if not name_tokens:
+        return 0
+    if _consecutive_phrase(name_tokens, msg_tokens):
+        return 100 + len(name_tokens) * 4
+    msg_set = set(msg_tokens)
+    if len(name_tokens) >= 2 and all(token in msg_set for token in name_tokens):
+        return 96 + len(name_tokens)
+    if len(name_tokens) == 1 and name_tokens[0] in msg_set:
+        return 90
+    if name_tokens[0] in msg_set:
+        return 84
+    if len(name_tokens) >= 2 and name_tokens[-1] in msg_set and len(name_tokens[-1]) >= 2:
+        return 80
+    u_tokens = _name_tokens(username)
+    if u_tokens and _consecutive_phrase(u_tokens, msg_tokens):
+        return 75
+    leftover = extract_name_query(message)
+    return score_name_match(leftover, investor_name, username)
+
+
+def _drop_shorter_name_prefixes(
+    scored: list[tuple[Investor, int]],
+) -> list[tuple[Investor, int]]:
+    """If «בר מוסרי» hit, drop the leftover first-name row «בר»."""
+    norms = [normalize_he(inv.name) for inv, _ in scored]
+    kept: list[tuple[Investor, int]] = []
+    for investor, score in scored:
+        name = normalize_he(investor.name)
+        if any(other != name and other.startswith(name + " ") for other in norms):
+            continue
+        kept.append((investor, score))
+    return kept
+
+
 def list_book_investors(db: Session) -> list[Investor]:
+    """Same population as dashboard investor chips (`api.investors` minus admin shell)."""
     rows = (
         db.query(Investor)
         .options(
@@ -269,11 +371,12 @@ def list_book_investors(db: Session) -> list[Investor]:
     return [row for row in rows if not inv_svc.is_admin_shell(row)]
 
 
-def find_investors_by_query(
-    db: Session, query: str, *, limit: int = 5
+def find_investors_in_message(
+    db: Session, message: str, *, limit: int = 5
 ) -> list[tuple[Investor, int]]:
-    needle = (query or "").strip()
-    if not needle:
+    """Resolve names by scanning the question against the dashboard chip list."""
+    text = (message or "").strip()
+    if not text:
         return []
     scored: list[tuple[Investor, int]] = []
     for investor in list_book_investors(db):
@@ -281,12 +384,37 @@ def find_investors_by_query(
         user = getattr(investor, "user", None)
         if user is not None:
             username = getattr(user, "username", "") or ""
-        score = score_name_match(needle, investor.name, username)
+        score = score_roster_hit(text, investor.name, username)
         if score <= 0:
             continue
         scored.append((investor, score))
     scored.sort(key=lambda item: (-item[1], item[0].name))
-    return scored[:limit]
+    return _drop_shorter_name_prefixes(scored)[:limit]
+
+
+def find_investors_by_query(
+    db: Session, query: str, *, limit: int = 5
+) -> list[tuple[Investor, int]]:
+    needle = (query or "").strip()
+    if not needle:
+        return []
+    # Tool args often still contain verbs («בר מוסרי השקיע עד היום»).
+    hits = find_investors_in_message(db, needle, limit=limit)
+    if hits:
+        return hits
+    cleaned = extract_name_query(needle) or needle
+    scored: list[tuple[Investor, int]] = []
+    for investor in list_book_investors(db):
+        username = ""
+        user = getattr(investor, "user", None)
+        if user is not None:
+            username = getattr(user, "username", "") or ""
+        score = score_name_match(cleaned, investor.name, username)
+        if score <= 0:
+            continue
+        scored.append((investor, score))
+    scored.sort(key=lambda item: (-item[1], item[0].name))
+    return _drop_shorter_name_prefixes(scored)[:limit]
 
 
 def investor_public_brief(investor: Investor, today: Optional[date] = None) -> dict[str, Any]:
@@ -514,6 +642,7 @@ def system_snapshot(db: Session) -> dict[str, Any]:
                 "this_month_to_pay": ops["this_month_to_pay"],
                 "this_month_to_pay_count": ops["this_month_to_pay_count"],
             },
+            "investor_chip_names": [row["name"] for row in investors],
             "investors": investors,
             "missing_this_month": ops["missing_this_month"],
             "overdue": ops["overdue"],
@@ -583,13 +712,24 @@ def retrieve_named_investors(
     build_portfolio,
     limit: int = 3,
 ) -> dict[str, Any]:
-    """Resolve «בר מוסרי השקיעה» → live investor row + portfolio numbers."""
-    name_query = extract_name_query(message)
-    if not name_query:
-        return {}
-    matches = find_investors_by_query(db, name_query, limit=limit)
-    if not matches and not looks_like_person_lookup(message, name_query):
-        return {}
+    """Resolve «רציתי לדעת כמה בר מוסרי השקיע» against dashboard chip names."""
+    roster = list_book_investors(db)
+    roster_names = [row.name for row in roster]
+    matches = find_investors_in_message(db, message, limit=limit)
+    leftover = extract_name_query(message)
+    if not matches and leftover:
+        matches = find_investors_by_query(db, leftover, limit=limit)
+    if not matches:
+        if not leftover or not looks_like_person_lookup(message, leftover):
+            return {}
+        return json_safe(
+            {
+                "name_query": leftover,
+                "retrieved_investors": [],
+                "retrieval_note": f"לא נמצא משקיע בשם «{leftover}» במערכת.",
+                "investor_chip_names": roster_names,
+            }
+        )
     retrieved = []
     for investor, score in matches:
         brief = investor_public_brief(investor)
@@ -598,7 +738,7 @@ def retrieve_named_investors(
             {
                 "matched_as": investor.name,
                 "match_score": score,
-                "query": name_query,
+                "query": leftover or investor.name,
                 **brief,
                 "portfolio": {
                     "active_principal": portfolio.get("active_principal"),
@@ -614,21 +754,20 @@ def retrieve_named_investors(
                 },
             }
         )
+    first = retrieved[0]
+    name_query = first["matched_as"]
     note = None
-    if retrieved:
-        first = retrieved[0]
-        if first["matched_as"] != name_query:
-            note = (
-                f"השם «{name_query}» זוהה כמשקיע «{first['matched_as']}» "
-                "(חיפוש חלקי / שם פרטי, כולל לשון נקבה כמו «השקיעה»)."
-            )
-    else:
-        note = f"לא נמצא משקיע בשם «{name_query}» במערכת."
+    if leftover and normalize_he(first["matched_as"]) != normalize_he(leftover):
+        note = (
+            f"השם «{leftover}» זוהה כמשקיע «{first['matched_as']}» "
+            "(חיפוש מול רשימת השבבים בלוח, כולל שם פרטי / «השקיע»)."
+        )
     return json_safe(
         {
             "name_query": name_query,
             "retrieved_investors": retrieved,
             "retrieval_note": note,
+            "investor_chip_names": roster_names,
         }
     )
 
@@ -797,7 +936,9 @@ def execute_tool(
         query = str(args.get("name") or "").strip()
         if not query:
             return {"error": "חסר שם לחיפוש"}
-        matches = find_investors_by_query(db, query, limit=5)
+        matches = find_investors_in_message(db, query, limit=5)
+        if not matches:
+            matches = find_investors_by_query(db, extract_name_query(query) or query, limit=5)
         if not matches:
             return {"found": False, "query": query, "error": f"לא נמצא משקיע בשם «{query}»"}
         rows = []
