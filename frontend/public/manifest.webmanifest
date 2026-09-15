@@ -14,19 +14,25 @@
   "categories": ["finance", "business"],
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "/icon-192-logo-a.png?v=20260915-logo-a",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/icon-192-maskable-logo-a.png?v=20260915-logo-a",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512-logo-a.png?v=20260915-logo-a",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/icon-512-maskable-logo-a.png?v=20260915-logo-a",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
