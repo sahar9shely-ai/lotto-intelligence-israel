@@ -4127,7 +4127,7 @@ input[type="date"] {
 @media (max-width: 720px) {
   .assistant-fab {
     inset-inline-start: 12px;
-    bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(168px + env(safe-area-inset-bottom, 0px));
     padding: 12px 16px;
     font-size: 0.9rem;
   }
@@ -4136,7 +4136,7 @@ input[type="date"] {
     inset-inline-start: 12px;
     inset-inline-end: 12px;
     width: auto;
-    bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(222px + env(safe-area-inset-bottom, 0px));
     max-height: min(60vh, 480px);
     border-radius: 20px;
   }
@@ -6175,12 +6175,12 @@ a.urgent-card__row:focus-visible {
 
   .assistant-fab {
     inset-inline-start: 16px;
-    bottom: calc(126px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(168px + env(safe-area-inset-bottom, 0px));
     z-index: 46;
   }
 
   .assistant-panel {
-    bottom: calc(180px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(222px + env(safe-area-inset-bottom, 0px));
   }
 
   .step-window__cta .btn,
@@ -7467,7 +7467,7 @@ body {
 
   .assistant-fab {
     inset-inline-start: 18px;
-    bottom: calc(126px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(168px + env(safe-area-inset-bottom, 0px));
     padding: 8px 14px;
     min-height: 40px;
     font-size: 0.78rem;
@@ -7486,7 +7486,7 @@ body {
   .assistant-panel {
     inset-inline: 14px;
     width: auto;
-    bottom: calc(180px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(222px + env(safe-area-inset-bottom, 0px));
     max-height: min(58vh, 440px);
     border-radius: 18px;
     border: 1px solid var(--line);
@@ -7504,7 +7504,7 @@ body {
   }
 
   .toast {
-    bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(140px + env(safe-area-inset-bottom, 0px));
   }
 
   .table-wrap:not(.table-wrap--desktop) {
@@ -8303,16 +8303,16 @@ body {
   }
 
   .toast {
-    bottom: calc(124px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(140px + env(safe-area-inset-bottom, 0px));
   }
 
   .assistant-fab {
-    inset-inline-start: 16px;
-    bottom: calc(126px + env(safe-area-inset-bottom, 0px));
+    inset-inline-start: 14px;
+    bottom: calc(168px + env(safe-area-inset-bottom, 0px));
   }
 
   .assistant-panel {
-    bottom: calc(180px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(222px + env(safe-area-inset-bottom, 0px));
   }
 }
 
