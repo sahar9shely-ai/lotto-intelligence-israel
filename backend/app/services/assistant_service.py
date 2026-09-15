@@ -1031,6 +1031,9 @@ def _history_has_markers(history: list | None, markers: tuple[str, ...]) -> bool
     return False
 
 
+CONTRACT_DISCLAIMER = "המספרים לפי תנאי המסלול החוזי — לא ייעוץ השקעות."
+
+
 def _format_retrieved_investors(context: dict, history: list | None) -> str:
     hits = context.get("retrieved_investors") or []
     query = context.get("name_query") or ""
@@ -1273,7 +1276,7 @@ def _local_reply(
     if role == "manager" and intent == "default":
         return (
             "אפשר לפרט: מי ממתין לאישור, מה דורש תשומת לב בלוח, "
-            "סה״כ קרן, או לפתוח הצעה חדשה."
+            "או לפתוח הצעה חדשה."
         )
 
     if intent == "documents":
