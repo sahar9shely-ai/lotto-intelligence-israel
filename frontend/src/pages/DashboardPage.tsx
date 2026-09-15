@@ -133,7 +133,7 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="page">
+    <div className={`page${!isManager ? " page--investor-home" : ""}`}>
       <Toast message={dashMessage} onClear={() => setDashMessage(null)} />
       {isManager ? (
         <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
@@ -156,14 +156,16 @@ export function DashboardPage() {
           </div>
         </header>
       ) : (
-        <InvestorHeroCard
-          greeting={user?.investor_name || user?.username || ""}
-          principal={data.total_principal}
-          nextPayment={nextPayment}
-          paidThisYear={data.ytd_investor_paid}
-          onDownloadMonthly={() => void downloadMonthly()}
-          monthlyBusy={monthlyBusy}
-        />
+        <div className="investor-home-stage">
+          <InvestorHeroCard
+            greeting={user?.investor_name || user?.username || ""}
+            principal={data.total_principal}
+            nextPayment={nextPayment}
+            paidThisYear={data.ytd_investor_paid}
+            onDownloadMonthly={() => void downloadMonthly()}
+            monthlyBusy={monthlyBusy}
+          />
+        </div>
       )}
 
       {!isManager ? (
@@ -256,24 +258,36 @@ export function DashboardPage() {
           <em>{data.active_plans} מסלולים פעילים</em>
         </div>
         <div className="money-ledger__item">
-          <span>החזר חודשי (מזומן)</span>
+          <span className="ledger-label">
+            <span className="ledger-label__full">החזר חודשי (מזומן)</span>
+            <span className="ledger-label__short">החזר חודשי</span>
+          </span>
           <strong>{formatMoney(cash)}</strong>
           <em>משולם כל חודש</em>
         </div>
         <div className="money-ledger__item">
-          <span>צבירת חיסכון חודשית</span>
+          <span className="ledger-label">
+            <span className="ledger-label__full">צבירת חיסכון חודשית</span>
+            <span className="ledger-label__short">חיסכון חודשי</span>
+          </span>
           <strong>{formatMoney(savings)}</strong>
           <em>לא מזומן — נצבר בנפרד</em>
         </div>
         <div className="money-ledger__item">
-          <span>יתרת חיסכון כעת</span>
+          <span className="ledger-label">
+            <span className="ledger-label__full">יתרת חיסכון כעת</span>
+            <span className="ledger-label__short">יתרת חיסכון</span>
+          </span>
           <strong>{formatMoney(savingsBalance)}</strong>
           {(data.projected_savings_total ?? 0) > 0 ? (
             <em>צפי לסיום {formatMoney(data.projected_savings_total ?? 0)}</em>
           ) : null}
         </div>
         <div className="money-ledger__item money-ledger__item--total">
-          <span>סה״כ חודשי (מזומן + חיסכון)</span>
+          <span className="ledger-label">
+            <span className="ledger-label__full">סה״כ חודשי (מזומן + חיסכון)</span>
+            <span className="ledger-label__short">סה״כ חודשי</span>
+          </span>
           <strong>{formatMoney(data.monthly_investor_total ?? cash + savings)}</strong>
           <em>
             מזומן {formatMoney(cash)} + חיסכון {formatMoney(savings)}
@@ -458,7 +472,7 @@ export function DashboardPage() {
             )}
           </Panel>
         ) : (
-          <Panel title="הסיכום שלך" delay={80}>
+          <Panel className="home-card home-card--summary" title="הסיכום שלך" delay={80}>
             <ul className="list">
               {data.investors_summary.map((inv) => (
                 <li key={inv.id} className="list__row">
@@ -467,7 +481,7 @@ export function DashboardPage() {
                     <span className="muted">{inv.months_in_program} חודשים בתוכנית</span>
                   </div>
                   <div className="list__meta">
-                    <span>{formatMoney(inv.active_principal)}</span>
+                    <span className="investor-summary__principal">{formatMoney(inv.active_principal)}</span>
                     <span className="muted">
                       מזומן {formatMoney(inv.monthly_cash ?? inv.monthly_payout)}
                       {(inv.monthly_savings ?? 0) > 0
@@ -482,6 +496,7 @@ export function DashboardPage() {
         )}
 
         <Panel
+          className="home-card home-card--upcoming"
           title="תשלומים קרובים"
           action={
             <Link className="text-link" to="/payments">
@@ -518,6 +533,7 @@ export function DashboardPage() {
 
       {!isAdmin ? (
       <Panel
+        className="home-card home-card--yearly"
         title="סיכום שנתי וסה״כ"
         delay={200}
       >
