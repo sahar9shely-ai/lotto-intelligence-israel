@@ -11,8 +11,8 @@ import { api } from "../services/api";
 function DockGlyph({ path }: { path: string }) {
   const common: SVGProps<SVGSVGElement> = {
     viewBox: "0 0 24 24",
-    width: 22,
-    height: 22,
+    width: 24,
+    height: 24,
     fill: "none",
     stroke: "currentColor",
     strokeWidth: 1.8,
@@ -302,31 +302,34 @@ export function AppShell() {
       </div>
 
       <nav className="dock" aria-label="ניווט ראשי בטלפון">
-        {primaryLinks.map((link) => (
-          <NavLink
-            key={`dock-${link.to}`}
-            to={link.to}
-            end={link.end}
-            className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
-            onClick={() => setMoreOpen(false)}
+        <div className="dock__bar">
+          {primaryLinks.map((link) => (
+            <NavLink
+              key={`dock-${link.to}`}
+              to={link.to}
+              end={link.end}
+              className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
+              onClick={() => setMoreOpen(false)}
+            >
+              <DockGlyph path={link.to} />
+              <span>{link.dockLabel}</span>
+            </NavLink>
+          ))}
+          <button
+            type="button"
+            className={moreOpen ? "dock__link is-active" : "dock__link"}
+            aria-expanded={moreOpen}
+            aria-controls="more-sheet"
+            onClick={() => setMoreOpen((v) => !v)}
           >
-            <DockGlyph path={link.to} />
-            <span>{link.dockLabel}</span>
-          </NavLink>
-        ))}
-        <button
-          type="button"
-          className={moreOpen ? "dock__link is-active" : "dock__link"}
-          aria-expanded={moreOpen}
-          onClick={() => setMoreOpen((v) => !v)}
-        >
-          <DockGlyph path="more" />
-          <span>עוד</span>
-        </button>
+            <DockGlyph path="more" />
+            <span>עוד</span>
+          </button>
+        </div>
       </nav>
 
       {moreOpen ? (
-        <div className="more-sheet" role="dialog" aria-label="עוד פעולות">
+        <div className="more-sheet" id="more-sheet" role="dialog" aria-label="עוד פעולות">
           <button
             type="button"
             className="more-sheet__backdrop"
