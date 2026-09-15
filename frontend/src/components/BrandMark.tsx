@@ -1,4 +1,4 @@
-const MARK_SRC = "/assets/tazrim-mark.png";
+const MARK_SRC = "/assets/tazrim-mark.png?v=logo-a";
 
 export function BrandMark({
   className,
