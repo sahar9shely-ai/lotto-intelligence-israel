@@ -104,6 +104,17 @@ function DockGlyph({ path }: { path: string }) {
   );
 }
 
+function HomeOrbGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width={28} height={28} aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M11.18 3.42a1.35 1.35 0 0 1 1.64 0l7.35 5.72c.48.37.56 1.06.19 1.54-.37.48-1.06.56-1.54.19l-.42-.33v8.66c0 1.02-.83 1.85-1.85 1.85h-3.2v-5.2h-3.7v5.2H6.45c-1.02 0-1.85-.83-1.85-1.85V10.54l-.42.33c-.48.37-1.17.29-1.54-.19-.37-.48-.29-1.17.19-1.54l7.35-5.72Z"
+      />
+    </svg>
+  );
+}
+
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -147,6 +158,9 @@ export function AppShell() {
     : new Set(["/", "/investors", "/payments", "/documents"]);
   const primaryLinks = links.filter((l) => primaryPaths.has(l.to));
   const moreLinks = links.filter((l) => !primaryPaths.has(l.to));
+  const dockSideLinks = primaryLinks.filter((l) => l.to !== "/");
+  const dockLeading = dockSideLinks.slice(0, 2);
+  const dockTrailing = dockSideLinks.slice(2);
   const displayName = user?.investor_name || user?.username || "";
   const isAdminAccountUser = isAdminAccount(user);
   const roleLabel = isAdminAccountUser ? "מנהל מערכת" : isManager ? "מנהל" : "תיק פרטי";
@@ -303,11 +317,22 @@ export function AppShell() {
 
       <nav className="dock" aria-label="ניווט ראשי בטלפון">
         <div className="dock__bar">
-          {primaryLinks.map((link) => (
+          {dockLeading.map((link) => (
             <NavLink
               key={`dock-${link.to}`}
               to={link.to}
-              end={link.end}
+              className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
+              onClick={() => setMoreOpen(false)}
+            >
+              <DockGlyph path={link.to} />
+              <span>{link.dockLabel}</span>
+            </NavLink>
+          ))}
+          <span className="dock__home-slot" aria-hidden="true" />
+          {dockTrailing.map((link) => (
+            <NavLink
+              key={`dock-${link.to}`}
+              to={link.to}
               className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
               onClick={() => setMoreOpen(false)}
             >
@@ -325,6 +350,16 @@ export function AppShell() {
             <DockGlyph path="more" />
             <span>עוד</span>
           </button>
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) => (isActive ? "dock__home is-active" : "dock__home")}
+            aria-label="לוח"
+            title="לוח"
+            onClick={() => setMoreOpen(false)}
+          >
+            <HomeOrbGlyph />
+          </NavLink>
         </div>
       </nav>
 
