@@ -133,7 +133,7 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="page">
+    <div className={`page${!isManager ? " page--investor-home" : ""}`}>
       <Toast message={dashMessage} onClear={() => setDashMessage(null)} />
       {isManager ? (
         <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
@@ -156,14 +156,16 @@ export function DashboardPage() {
           </div>
         </header>
       ) : (
-        <InvestorHeroCard
-          greeting={user?.investor_name || user?.username || ""}
-          principal={data.total_principal}
-          nextPayment={nextPayment}
-          paidThisYear={data.ytd_investor_paid}
-          onDownloadMonthly={() => void downloadMonthly()}
-          monthlyBusy={monthlyBusy}
-        />
+        <div className="investor-home-stage">
+          <InvestorHeroCard
+            greeting={user?.investor_name || user?.username || ""}
+            principal={data.total_principal}
+            nextPayment={nextPayment}
+            paidThisYear={data.ytd_investor_paid}
+            onDownloadMonthly={() => void downloadMonthly()}
+            monthlyBusy={monthlyBusy}
+          />
+        </div>
       )}
 
       {!isManager ? (
@@ -458,7 +460,7 @@ export function DashboardPage() {
             )}
           </Panel>
         ) : (
-          <Panel title="הסיכום שלך" delay={80}>
+          <Panel className="home-card home-card--summary" title="הסיכום שלך" delay={80}>
             <ul className="list">
               {data.investors_summary.map((inv) => (
                 <li key={inv.id} className="list__row">
@@ -467,7 +469,7 @@ export function DashboardPage() {
                     <span className="muted">{inv.months_in_program} חודשים בתוכנית</span>
                   </div>
                   <div className="list__meta">
-                    <span>{formatMoney(inv.active_principal)}</span>
+                    <span className="investor-summary__principal">{formatMoney(inv.active_principal)}</span>
                     <span className="muted">
                       מזומן {formatMoney(inv.monthly_cash ?? inv.monthly_payout)}
                       {(inv.monthly_savings ?? 0) > 0
@@ -482,6 +484,7 @@ export function DashboardPage() {
         )}
 
         <Panel
+          className="home-card home-card--upcoming"
           title="תשלומים קרובים"
           action={
             <Link className="text-link" to="/payments">
@@ -518,6 +521,7 @@ export function DashboardPage() {
 
       {!isAdmin ? (
       <Panel
+        className="home-card home-card--yearly"
         title="סיכום שנתי וסה״כ"
         delay={200}
       >
