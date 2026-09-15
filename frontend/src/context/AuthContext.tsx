@@ -9,6 +9,7 @@ import {
 } from "react";
 import { AUTH_EXPIRED_EVENT, api, getToken, setToken } from "../services/api";
 import type { AuthUser } from "../types/auth";
+import { resetWelcomeSeen } from "../utils/welcomeSplash";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -50,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(null);
       setUser(null);
       setLoading(false);
+      resetWelcomeSeen();
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
@@ -64,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
+    resetWelcomeSeen();
   }, []);
 
   const value = useMemo(

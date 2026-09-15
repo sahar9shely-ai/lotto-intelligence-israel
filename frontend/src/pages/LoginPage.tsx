@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { AuthBrand } from "../components/BrandMark";
 import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../context/AuthContext";
 
@@ -42,7 +43,7 @@ export function LoginPage() {
     <div className="auth-screen">
       <div className="atmosphere atmosphere--private" aria-hidden="true" />
       <div className="auth-card">
-        <h1 className="auth-card__brand">תזרים</h1>
+        <AuthBrand kicker="התיק שלך" />
 
         <form className="form auth-card__form" onSubmit={onSubmit} autoComplete="on">
           <label>
