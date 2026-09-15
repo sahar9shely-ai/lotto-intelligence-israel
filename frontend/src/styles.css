@@ -7969,6 +7969,7 @@ body {
     background: #fff;
     border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
     box-shadow: 0 16px 40px rgba(8, 36, 33, 0.14);
+    overflow: hidden;
   }
 
   .page--investor-home:has(.payment-ceremony) .money-ledger--with-hero,
@@ -7986,10 +7987,21 @@ body {
     background: transparent;
     box-shadow: none;
     color: inherit;
+    grid-column: auto;
+    order: 0;
   }
 
   .page--investor-home .money-ledger--with-hero .money-ledger__item--accent {
     display: none;
+  }
+
+  .page--investor-home .money-ledger--with-hero .money-ledger__item--total {
+    grid-column: auto;
+    order: 0;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    padding: 12px 12px 10px;
   }
 
   .page--investor-home .money-ledger--with-hero .money-ledger__item span,
@@ -8058,6 +8070,8 @@ body {
     margin-bottom: 8px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--line);
+    flex-wrap: nowrap;
+    align-items: center;
   }
 
   .page--investor-home .home-card .panel__title {
@@ -8067,6 +8081,7 @@ body {
     letter-spacing: -0.02em;
     text-transform: none;
     color: var(--ink);
+    white-space: nowrap;
   }
 
   .page--investor-home .home-card .list__row {
