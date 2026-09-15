@@ -7687,6 +7687,7 @@ body {
   width: 118px;
   height: 118px;
   display: block;
+  object-fit: contain;
 }
 
 .welcome-splash__kicker {
@@ -7755,6 +7756,7 @@ body {
   width: 72px;
   height: 72px;
   display: block;
+  object-fit: contain;
 }
 
 .auth-card__kicker {
