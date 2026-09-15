@@ -365,3 +365,182 @@ def test_opening_endpoint_manager_points_to_quotes():
     payload = chat.json()
     assert payload["cta"]["href"] == "/quotes"
     assert "דמי ניהול" not in payload["reply"]
+
+
+def _ensure_bar_plan(db, principal: float = 43000) -> tuple:
+    from datetime import date as date_cls
+
+    bar = db.query(Investor).filter(Investor.name == "בר").first()
+    assert bar is not None
+    active = [p for p in (bar.plans or []) if p.status == "active"]
+    if not active:
+        plan = InvestmentPlan(
+            investor_id=bar.id,
+            principal=principal,
+            plan_type="hybrid",
+            monthly_rate_percent=8.8372,
+            savings_rate_percent=2.5581,
+            manager_fee_percent=0,
+            start_date=date_cls(2026, 1, 1),
+            duration_months=12,
+            status="active",
+            notes="בדיקת עוזר — בר מוסרי",
+        )
+        db.add(plan)
+        db.commit()
+        bar = (
+            db.query(Investor)
+            .options(joinedload(Investor.plans).joinedload(InvestmentPlan.payments))
+            .filter(Investor.name == "בר")
+            .first()
+        )
+        active = [p for p in (bar.plans or []) if p.status == "active"]
+    return bar, float(sum(p.principal for p in active))
+
+
+def test_extract_name_query_strips_gendered_verbs():
+    from app.services import assistant_retrieval as retr
+
+    assert retr.extract_name_query("כמה כסף בר מוסרי השקיעה") == "בר מוסרי"
+    assert retr.extract_name_query("כמה כסף בר מוסרי השקיע") == "בר מוסרי"
+    assert retr.extract_name_query("כמה יש לאופק") == "אופק"
+    assert retr.extract_name_query("תן לי סיכום של התיק שלי") == ""
+    assert retr.extract_name_query("היי") == ""
+    assert retr.extract_name_query("מה המצב בלוח עכשיו?") == ""
+
+
+def test_score_name_match_full_and_first_name():
+    from app.services import assistant_retrieval as retr
+
+    assert retr.score_name_match("בר מוסרי", "בר") >= 84
+    assert retr.score_name_match("בר", "בר מוסרי") >= 84
+    assert retr.score_name_match("אופק", "אופק אלזם") >= 84
+    assert retr.score_name_match("בר מוסרי", "אופק") == 0
+
+
+def test_manager_context_lists_investors_not_admin_shell():
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        admin = db.query(User).filter(User.username == "admin").first()
+        assert admin is not None
+        ctx = asst.build_manager_context(db, user=admin)
+        names = {row["name"] for row in ctx["investors"]}
+        assert "בר" in names
+        assert "אופק" in names
+        assert "מנהל מערכת" not in names
+        assert "totals" in ctx
+        assert "active_principal" in ctx["totals"] or "total_principal" in ctx["totals"]
+        blob = str(ctx)
+        assert "manager_fee" not in blob
+        assert ctx["privacy"]["may_discuss_other_investors"] is True
+    finally:
+        db.close()
+
+
+def test_find_bar_mosri_by_full_name():
+    from app.services import assistant_retrieval as retr
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        hits = retr.find_investors_by_query(db, "בר מוסרי")
+        assert hits
+        assert hits[0][0].name == "בר"
+        hits2 = retr.find_investors_by_query(db, "אופק")
+        assert hits2
+        assert hits2[0][0].name == "אופק"
+    finally:
+        db.close()
+
+
+def test_manager_chat_bar_mosri_returns_live_principal(monkeypatch):
+    monkeypatch.setattr(asst, "_llm_credentials", lambda _settings: ("gemini", ""))
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        _bar, principal = _ensure_bar_plan(db)
+        assert principal > 0
+    finally:
+        db.close()
+
+    headers = _headers()
+    res = client.post(
+        "/api/v1/assistant/chat",
+        headers=headers,
+        json={"message": "כמה כסף בר מוסרי השקיעה", "history": []},
+    )
+    assert res.status_code == 200, res.text
+    reply = res.json()["reply"]
+    assert "אין נתונים" not in reply
+    assert "בר" in reply
+    formatted = f"{principal:,.0f}"
+    assert formatted in reply or str(int(principal)) in reply
+    assert "קרן" in reply
+
+
+def test_manager_chat_system_totals(monkeypatch):
+    monkeypatch.setattr(asst, "_llm_credentials", lambda _settings: ("gemini", ""))
+    headers = _headers()
+    res = client.post(
+        "/api/v1/assistant/chat",
+        headers=headers,
+        json={"message": "כמה קרן יש במערכת?", "history": []},
+    )
+    assert res.status_code == 200, res.text
+    reply = res.json()["reply"]
+    assert "קרן" in reply
+    assert "₪" in reply
+
+
+def test_investor_still_blocked_from_other_books(monkeypatch):
+    monkeypatch.setattr(asst, "_llm_credentials", lambda _settings: ("gemini", ""))
+    headers = _headers("bar", "Password1!")
+    res = client.post(
+        "/api/v1/assistant/chat",
+        headers=headers,
+        json={"message": "כמה כסף יש לאופק בתיק", "history": []},
+    )
+    if res.status_code != 200:
+        return
+    reply = res.json()["reply"]
+    assert "רק לגבי התיק שלך" in reply
+    assert "קרן פעילה" not in reply or "אופק" not in reply
+
+
+def test_lookup_investor_tool_returns_principal():
+    from app.services import assistant_retrieval as retr
+
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        bar, principal = _ensure_bar_plan(db)
+        admin = db.query(User).filter(User.username == "admin").first()
+        result = retr.execute_tool(
+            db,
+            user=admin,
+            role="manager",
+            name="lookup_investor",
+            arguments={"name": "בר מוסרי"},
+            build_portfolio=asst.build_investor_context,
+        )
+        assert result.get("found") is True
+        hit = result["investors"][0]
+        assert hit["matched_as"] == "בר"
+        assert float(hit["active_principal"]) == float(principal)
+        assert "manager_fee" not in str(result)
+    finally:
+        db.close()
+
+
+def test_investor_context_includes_own_documents():
+    db = InvestmentSessionLocal()
+    try:
+        inv_svc.seed_defaults(db)
+        bar = db.query(Investor).filter(Investor.name == "בר").first()
+        ctx = asst.build_investor_context(db, investor_id=bar.id)
+        assert "documents" in ctx
+        assert ctx["privacy"]["may_discuss_other_investors"] is False
+        assert "open_payments" in ctx
+    finally:
+        db.close()

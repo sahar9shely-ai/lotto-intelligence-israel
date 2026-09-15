@@ -225,7 +225,11 @@ export function PersonalAssistant() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="שאלה על התיק או על תוספת…"
+              placeholder={
+                user.is_manager
+                  ? "שאלה על משקיע, קרן, תשלומים או הצעות…"
+                  : "שאלה על התיק או על תוספת…"
+              }
               disabled={busy}
               aria-label="הודעה לעוזר האישי"
             />

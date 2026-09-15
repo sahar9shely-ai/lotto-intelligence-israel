@@ -1,4 +1,4 @@
-"""Personal assistant — read-only, investor-scoped, AI-backed Q&A."""
+"""Personal assistant — read-only, AI-backed Q&A over live system data."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import os
 import re
 from datetime import date, datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 from sqlalchemy.orm import Session, joinedload
@@ -15,11 +15,10 @@ from app.models.auth import User
 from app.models.investments import (
     AppSettings,
     InvestmentPlan,
-    InvestmentTopupRequest,
     Investor,
     Payment,
-    Quote,
 )
+from app.services import assistant_retrieval as retr
 from app.services import investment_service as inv_svc
 
 
@@ -237,9 +236,13 @@ def build_investor_context(db: Session, *, investor_id: int) -> dict[str, Any]:
             "אם מתאים להרחיב את הקרן, אפשר לבקש תוספת או מסלול נוסף — בלי התחייבות מראש."
         )
 
+    payments_live = retr.payments_for_investor(db, investor_id=investor_id)
+    documents = retr.documents_brief(db, investor=investor)
+
     return {
         "role": "investor",
         "investor_name": investor.name,
+        "investor_id": investor.id,
         "active_principal": summary["active_principal"],
         "monthly_cash": summary["monthly_cash"],
         "monthly_savings": summary["monthly_savings"],
@@ -253,6 +256,9 @@ def build_investor_context(db: Session, *, investor_id: int) -> dict[str, Any]:
         "next_payment": _payment_brief(next_pay) if next_pay else None,
         "awaiting_confirmations": [_payment_brief(p) for p in awaiting[:6]],
         "this_month_open": [_payment_brief(p) for p in this_month[:4]],
+        "open_payments": payments_live.get("open") or [],
+        "recent_paid_payments": payments_live.get("recent_paid") or [],
+        "documents": documents,
         "has_active_plan": has_active,
         "tips": tips[:2],
         "cta": _investor_cta(),
@@ -333,39 +339,16 @@ def what_if_add_principal(
 
 
 def build_manager_context(db: Session, *, user: User) -> dict[str, Any]:
-    """Operational snapshot for the manager — no fee figures, no gossip."""
-    today = date.today()
+    """Full live snapshot for the manager — every book investor, no admin shell, no fees."""
     name = user.investor.name if getattr(user, "investor", None) else user.username
     own_id = user.investor_id
     own = build_investor_context(db, investor_id=own_id) if own_id else {}
+    snapshot = retr.system_snapshot(db)
 
-    awaiting = (
-        db.query(Payment)
-        .options(joinedload(Payment.investor))
-        .filter(Payment.status == "awaiting_confirmation")
-        .order_by(Payment.due_date.asc())
-        .limit(8)
-        .all()
-    )
-    awaiting_count = (
-        db.query(Payment).filter(Payment.status == "awaiting_confirmation").count()
-    )
-    overdue = (
-        db.query(Payment)
-        .filter(
-            Payment.status.in_(("scheduled", "awaiting_confirmation")),
-            Payment.due_date < today,
-        )
-        .count()
-    )
-    pending_topups = (
-        db.query(InvestmentTopupRequest)
-        .filter(InvestmentTopupRequest.status.in_(("pending", "contract")))
-        .count()
-    )
-    pending_quotes = (
-        db.query(Quote).filter(Quote.status.in_(("pending", "approved"))).count()
-    )
+    awaiting = snapshot.get("awaiting_confirmations") or []
+    overdue = int(snapshot.get("overdue_open_count") or 0)
+    pending_topups = int(snapshot.get("pending_topup_count") or 0)
+    pending_quotes = int(snapshot.get("pending_quote_count") or 0)
 
     tips: list[str] = []
     if awaiting:
@@ -377,7 +360,7 @@ def build_manager_context(db: Session, *, user: User) -> dict[str, Any]:
     if pending_quotes:
         tips.append("יש הצעות ממתינות. אפשר להשלים אותן בעמוד ההצעות.")
     if not tips:
-        tips.append("אפשר לפתוח הצעה חדשה כשמתאים להרחיב תיק — בלי לחץ, לפי שיחה עם הלקוח.")
+        tips.append("אפשר לשאול על כל משקיע לפי שם, על סה״כ קרן, או לפתוח הצעה חדשה.")
 
     has_personal = bool(
         own.get("has_active_plan") and float(own.get("active_principal") or 0) > 0
@@ -396,11 +379,22 @@ def build_manager_context(db: Session, *, user: User) -> dict[str, Any]:
         "lifetime_cash_paid": own.get("lifetime_cash_paid") if has_personal else None,
         "plans": own.get("plans") if has_personal else [],
         "next_payment": own.get("next_payment") if has_personal else None,
-        "awaiting_confirmations": [_payment_brief(p, include_name=True) for p in awaiting],
-        "awaiting_count": awaiting_count,
+        "totals": snapshot.get("totals") or {},
+        "investors": snapshot.get("investors") or [],
+        "missing_this_month": snapshot.get("missing_this_month") or [],
+        "overdue": snapshot.get("overdue") or [],
+        "awaiting_confirmations": awaiting,
+        "awaiting_count": int(snapshot.get("awaiting_count") or 0),
         "overdue_open_count": overdue,
         "pending_topup_count": pending_topups,
+        "pending_topups": snapshot.get("pending_topups") or [],
+        "quotes": snapshot.get("quotes") or {},
         "pending_quote_count": pending_quotes,
+        "users_without_password": snapshot.get("users_without_password") or [],
+        "users_must_reset_password": snapshot.get("users_must_reset_password") or [],
+        "users_without_password_count": int(
+            snapshot.get("users_without_password_count") or 0
+        ),
         "tips": tips[:2],
         "cta": _manager_cta(),
         "privacy": {
@@ -426,7 +420,8 @@ def _suggestions_for(context: dict[str, Any]) -> list[dict[str, str]]:
         return [
             {"label": "מה דורש תשומת לב", "message": "מה המצב בלוח עכשיו?"},
             {"label": "מי ממתין לאישור", "message": "מי ממתין לאישור תשלום?"},
-            {"label": "הצעה חדשה", "message": "איך פותחים הצעה או מסלול חדש?"},
+            {"label": "סה״כ קרן", "message": "כמה קרן יש במערכת?"},
+            {"label": "מי חסר החודש", "message": "מי חסר החודש?"},
         ]
     chips = [
         {"label": "מה המצב שלי", "message": "מה המצב שלי?"},
@@ -448,7 +443,8 @@ def opening_state(db: Session, *, user: User) -> dict[str, Any]:
         greeting = (
             f"שלום {name}.\n"
             f"{tip}\n"
-            "אפשר לשאול על ממתינים לאישור, העברות שעבר מועדן, או לפתוח הצעה חדשה."
+            "אפשר לשאול על כל משקיע לפי שם, סה״כ קרן, מי ממתין לאישור, "
+            "מי חסר החודש, או לפתוח הצעה חדשה."
         )
         if not configured:
             greeting += (
@@ -493,11 +489,19 @@ def system_prompt(
 ) -> str:
     if role == "manager":
         audience = (
-            f"אתה יועץ תפעולי שקט למנהל {investor_name} במערכת «תזרים». "
-            "עזור בניהול: אישורי תשלום ממתינים, העברות שעבר מועדן, בקשות מסלול והצעות. "
-            "מותר להזכיר שמות משקיעים רק בהקשר תפעולי קצר. "
-            "אם אין תיק אישי פעיל (has_personal_book=false) — אסור לדווח «קרן 0» או סיכום תיק ריק. "
-            "מעטפת מנהל המערכת אינה תיק השקעה."
+            f"אתה עוזר מערכת מלא למנהל {investor_name} ב«תזרים». "
+            "ענה על כל שאלה תפעולית מתוך הנתונים החיים: כל המשקיעים (חוץ ממעטפת מנהל המערכת), "
+            "קרנות, מסלולים, תשלומים, ממתינים לאישור, מי חסר החודש, כמה לשלם החודש, "
+            "הצעות, יתרות, משתמשים בלי סיסמה. "
+            "מעטפת מנהל המערכת אינה תיק השקעה — אסור לדווח עליה «קרן 0» או סיכום תיק ריק. "
+            "אם has_personal_book=false אל תסכם תיק אישי. "
+            "מותר להזכיר שמות משקיעים. "
+            "שמות מלאים («בר מוסרי», «אופק אלזם») מתייחסים למשקיע גם לפי שם פרטי בלבד. "
+            "פעלים מגדריים («השקיעה»/«השקיע») לא משנים את החיפוש. "
+            "אם retrieved_investors לא ריק — זו התשובה המחייבת; ציין את הקרן וההחזר משם. "
+            "אסור להגיד «אין נתונים» אם המשקיע מופיע ב-investors או ב-retrieved_investors. "
+            "אם באמת לא נמצא אחרי חיפוש — אמור במפורש שלא נמצא משקיע בשם הזה. "
+            "כשחסר פירוט, קרא לכלי lookup_investor / system_overview / list_payments."
         )
         cta_line = (
             "כשמתאים, הצע בעדינות לפתוח הצעה חדשה או לטפל בבקשת מסלול — "
@@ -506,7 +510,8 @@ def system_prompt(
     else:
         audience = (
             f"אתה יועץ שיחה שקט למשקיע {investor_name} במערכת «תזרים». "
-            "מדברים רק על התיק של {investor_name}. "
+            "מדברים רק על התיק של {investor_name}: קרן, החזר, תשלומים ומסמכים שלה/שלו. "
+            "אסור לענות על משקיעים אחרים. "
             "הסבר מצב, תן טיפ פרקטי, וכשמתאים הצע בעדינות תוספת לקרן עם פוטנציאל גדילה "
             "לפי האחוזים החוזיים בלבד (what_if)."
         )
@@ -519,14 +524,14 @@ def system_prompt(
     if context is not None:
         ctx_block = (
             "\n\nהקשר עדכני (JSON פנימי — לא להעתיק כתבנית, לא לחזור עליו בכל תשובה):\n"
-            + json.dumps(context, ensure_ascii=False)
+            + json.dumps(retr.json_safe(context), ensure_ascii=False, default=str)
         )
     return f"""{audience}
 סגנון: private-banking lite. עברית קצרה, מדויקת, בלשון פנייה מכבדת. בלי אימוג׳י. בלי סיסמאות שיווקיות.
 ענה רק לשאלה האחרונה של המשתמש. אם זו ברכה («היי»/«שלום») — שלום קצר בלי מספרים.
 
 כללי חובה:
-1. אל תמציא מספרים. השתמש רק בנתונים שסופקו בהקשר.
+1. אל תמציא מספרים. השתמש רק בנתונים שסופקו בהקשר או שהוחזרו מהכלים.
 2. אסור להזכיר דמי ניהול, עמלות, או כמה המנהל לוקח.
 3. אסור לבצע שינויים במערכת. מותר להסביר ולהפנות למסך הקיים.
 4. אם שואלים על עמלה — סרב בנימוס והפנה למנהל בלי מספרים.
@@ -560,7 +565,37 @@ def _friendly_model_error(status_code: int, body: str) -> str:
     return "המודל לא היה זמין כרגע. נסה שוב בעוד רגע."
 
 
-def _call_gemini(api_key: str, system: str, messages: list[dict], context: dict) -> str:
+ToolRunner = Callable[[str, dict[str, Any]], dict[str, Any]]
+
+
+def _gemini_parts(data: dict) -> list[dict]:
+    try:
+        return list(data["candidates"][0]["content"]["parts"])
+    except (KeyError, IndexError, TypeError):
+        return []
+
+
+def _split_gemini_parts(parts: list[dict]) -> tuple[str, list[dict]]:
+    texts: list[str] = []
+    calls: list[dict] = []
+    for part in parts:
+        call = part.get("functionCall")
+        if call:
+            calls.append(call)
+        elif part.get("text"):
+            texts.append(str(part["text"]))
+    return "\n".join(texts).strip(), calls
+
+
+def _call_gemini(
+    api_key: str,
+    system: str,
+    messages: list[dict],
+    context: dict,
+    *,
+    tools: Optional[list[dict]] = None,
+    tool_runner: Optional[ToolRunner] = None,
+) -> str:
     del context  # already folded into the system prompt
     contents = []
     for m in messages[-16:]:
@@ -569,11 +604,6 @@ def _call_gemini(api_key: str, system: str, messages: list[dict], context: dict)
     if not contents:
         contents = [{"role": "user", "parts": [{"text": "שלום"}]}]
 
-    payload = {
-        "system_instruction": {"parts": [{"text": system}]},
-        "contents": contents,
-        "generationConfig": {"temperature": 0.35, "maxOutputTokens": 1024},
-    }
     last_error: Optional[Exception] = None
     with httpx.Client(timeout=45.0) as client:
         for model in _GEMINI_MODELS:
@@ -581,49 +611,137 @@ def _call_gemini(api_key: str, system: str, messages: list[dict], context: dict)
                 "https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{model}:generateContent?key={api_key}"
             )
-            res = client.post(url, json=payload)
-            if res.status_code >= 400:
-                last_error = RuntimeError(
-                    _friendly_model_error(res.status_code, res.text)
-                )
-                # Quota / not-found → try next model; auth errors stop immediately.
-                if res.status_code in {401, 403}:
-                    raise last_error
-                continue
-            data = res.json()
-            try:
-                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            except (KeyError, IndexError, TypeError) as exc:
-                raise RuntimeError("תשובת המודל לא תקינה") from exc
+            local_contents = [dict(c) for c in contents]
+            used_tools = bool(tools and tool_runner)
+            for _round in range(4):
+                payload: dict[str, Any] = {
+                    "system_instruction": {"parts": [{"text": system}]},
+                    "contents": local_contents,
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048},
+                }
+                if used_tools:
+                    payload["tools"] = [{"functionDeclarations": tools}]
+                res = client.post(url, json=payload)
+                if res.status_code >= 400:
+                    last_error = RuntimeError(
+                        _friendly_model_error(res.status_code, res.text)
+                    )
+                    if used_tools and res.status_code in {400, 404}:
+                        used_tools = False
+                        continue
+                    if res.status_code in {401, 403}:
+                        raise last_error
+                    break
+                data = res.json()
+                parts = _gemini_parts(data)
+                if not parts:
+                    last_error = RuntimeError("תשובת המודל לא תקינה")
+                    break
+                text, calls = _split_gemini_parts(parts)
+                if calls and tool_runner and used_tools:
+                    local_contents.append({"role": "model", "parts": parts})
+                    fr_parts = []
+                    for call in calls:
+                        result = tool_runner(
+                            str(call.get("name") or ""),
+                            dict(call.get("args") or {}),
+                        )
+                        safe = retr.json_safe(result)
+                        if not isinstance(safe, dict):
+                            safe = {"result": safe}
+                        fr_parts.append(
+                            {
+                                "functionResponse": {
+                                    "name": str(call.get("name") or ""),
+                                    "response": safe,
+                                }
+                            }
+                        )
+                    local_contents.append({"role": "user", "parts": fr_parts})
+                    continue
+                if text:
+                    return text
+                last_error = RuntimeError("תשובת המודל לא תקינה")
+                break
     if last_error:
         raise last_error
     raise RuntimeError("המודל לא היה זמין כרגע. נסה שוב בעוד רגע.")
 
 
-def _call_openai(api_key: str, system: str, messages: list[dict], context: dict) -> str:
-    del context  # already folded into the system prompt
-    payload = {
-        "model": "gpt-4o-mini",
-        "temperature": 0.35,
-        "messages": [
-            {"role": "system", "content": system},
-            *[
-                {"role": m["role"], "content": m["content"]}
-                for m in messages[-16:]
-                if m["role"] in {"user", "assistant"}
-            ],
+def _call_openai(
+    api_key: str,
+    system: str,
+    messages: list[dict],
+    context: dict,
+    *,
+    tools: Optional[list[dict]] = None,
+    tool_runner: Optional[ToolRunner] = None,
+) -> str:
+    del context
+    chat_messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system},
+        *[
+            {"role": m["role"], "content": m["content"]}
+            for m in messages[-16:]
+            if m["role"] in {"user", "assistant"}
         ],
-    }
+    ]
+    used_tools = bool(tools and tool_runner)
+    last_error: Optional[Exception] = None
     with httpx.Client(timeout=45.0) as client:
-        res = client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
-        )
-        if res.status_code >= 400:
-            raise RuntimeError(_friendly_model_error(res.status_code, res.text))
-        data = res.json()
-    return data["choices"][0]["message"]["content"].strip()
+        for _round in range(4):
+            payload: dict[str, Any] = {
+                "model": "gpt-4o-mini",
+                "temperature": 0.2,
+                "messages": chat_messages,
+            }
+            if used_tools:
+                payload["tools"] = tools
+            res = client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
+            if res.status_code >= 400:
+                last_error = RuntimeError(_friendly_model_error(res.status_code, res.text))
+                if used_tools and res.status_code == 400:
+                    used_tools = False
+                    continue
+                raise last_error
+            data = res.json()
+            try:
+                message = data["choices"][0]["message"]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise RuntimeError("תשובת המודל לא תקינה") from exc
+            tool_calls = message.get("tool_calls") or []
+            if tool_calls and tool_runner and used_tools:
+                chat_messages.append(message)
+                for call in tool_calls:
+                    fn = call.get("function") or {}
+                    raw_args = fn.get("arguments") or "{}"
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                    except (TypeError, ValueError):
+                        args = {}
+                    result = tool_runner(str(fn.get("name") or ""), args)
+                    chat_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id"),
+                            "content": json.dumps(
+                                retr.json_safe(result), ensure_ascii=False, default=str
+                            ),
+                        }
+                    )
+                continue
+            text = (message.get("content") or "").strip()
+            if text:
+                return text
+            last_error = RuntimeError("תשובת המודל לא תקינה")
+            break
+    if last_error:
+        raise last_error
+    raise RuntimeError("המודל לא היה זמין כרגע. נסה שוב בעוד רגע.")
 
 
 def detect_what_if_amount(text: str) -> Optional[float]:
@@ -696,6 +814,22 @@ def _intent(message: str) -> str:
         return "greeting"
     if re.search(r"מה\s+המצב\s+בלוח|תשומת\s+לב|מה\s+דורש", t):
         return "ops"
+    if re.search(
+        r"סה.?[\"״]?כ\s*קרן|כמה\s+קרן(\s+יש)?(\s+במערכת)?|סך\s*(ה)?כל\s*קרן|"
+        r"כל\s+הקרן|קרן\s+במערכת",
+        t,
+    ):
+        return "totals"
+    if re.search(r"חסר(ה|ים)?\s+(ה)?חודש|מי\s+חסר|לא\s+הועבר\s+החודש", t):
+        return "missing_month"
+    if re.search(r"כמה\s+לשלם|לשלם\s+(ה)?חודש|תשלומי\s+(ה)?חודש", t):
+        return "pay_month"
+    if re.search(r"סטטוס\s+הצעות|הצעות\s+(ממתינות|פתוחות)|מה\s+עם\s+ההצעות", t):
+        return "quotes"
+    if re.search(r"בלי\s+סיסמ|ללא\s+סיסמ|אין\s+סיסמ|משתמשים\s+בלי", t):
+        return "no_password"
+    if re.search(r"מסמך|מסמכים|חוזה|דוח(ות)?", t):
+        return "documents"
     if wants_pdf(t) or re.search(
         r"מה\s+המצב(\s+שלי)?\??$|התיק\s+שלי|מה\s+יש\s+לי|סיכום(\s+של)?(\s+ה)?תיק", t
     ):
@@ -749,32 +883,86 @@ def chat(
             "suggestions": [],
         }
 
-    if (
-        not manager
-        and asks_about_others(message)
-        and not re.search(r"התיק\s+שלי|שלי\s+|אצלי|עבורי", message)
-        and re.search(r"של\s+(בר|אופק|אלמוג|שושי)|משקיע(ים)?\s+אחר", message)
-    ):
-        return {
-            "reply": "אני יכול לעזור רק לגבי התיק שלך — לא לגבי משקיעים אחרים.",
-            "pdf_suggested": False,
-            "what_if": None,
-            "configured": True,
-            "cta": _investor_cta(),
-            "suggestions": [],
-        }
+    retrieval: dict[str, Any] = {}
+    if not _is_greeting(message):
+        retrieval = retr.retrieve_named_investors(
+            db, message=message, build_portfolio=build_investor_context
+        )
+
+    if not manager:
+        others = [
+            row
+            for row in (retrieval.get("retrieved_investors") or [])
+            if row.get("id") != investor_id
+        ]
+        named_other = bool(
+            asks_about_others(message)
+            and not re.search(r"התיק\s+שלי|שלי\s+|אצלי|עבורי", message)
+            and re.search(r"של\s+(בר|אופק|אלמוג|שושי)|משקיע(ים)?\s+אחר", message)
+        )
+        own_named = any(
+            row.get("id") == investor_id
+            for row in (retrieval.get("retrieved_investors") or [])
+        )
+        if others or (named_other and not own_named):
+            return {
+                "reply": "אני יכול לעזור רק לגבי התיק שלך — לא לגבי משקיעים אחרים.",
+                "pdf_suggested": False,
+                "what_if": None,
+                "configured": True,
+                "cta": _investor_cta(),
+                "suggestions": [],
+            }
 
     context = build_assistant_context(db, user=user)
+    if manager and retrieval:
+        context = {**context, **retrieval}
+    elif not manager and retrieval:
+        own_hits = [
+            row
+            for row in (retrieval.get("retrieved_investors") or [])
+            if row.get("id") == investor_id
+        ]
+        if own_hits:
+            context = {
+                **context,
+                "name_query": retrieval.get("name_query"),
+                "retrieved_investors": own_hits,
+            }
+
     what_if = None
     amount = detect_what_if_amount(message)
     months = detect_what_if_months(message)
     if amount is not None or months is not None:
-        what_if = what_if_add_principal(context, amount or 0, months=months)
+        wf_ctx = context
+        if manager:
+            hits = context.get("retrieved_investors") or []
+            if hits:
+                wf_ctx = build_investor_context(db, investor_id=int(hits[0]["id"]))
+            elif not context.get("has_personal_book"):
+                wf_ctx = {
+                    "plans": [],
+                    "active_principal": 0,
+                    "monthly_cash": 0,
+                    "monthly_savings": 0,
+                }
+        what_if = what_if_add_principal(wf_ctx, amount or 0, months=months)
         context = {**context, "what_if_calculation": what_if}
 
     settings = _settings(db)
     provider, api_key = _llm_credentials(settings)
     attach_cta = _wants_capital_cta(message, context)
+    role = context.get("role") or "investor"
+
+    def tool_runner(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return retr.execute_tool(
+            db,
+            user=user,
+            role=role,
+            name=name,
+            arguments=arguments,
+            build_portfolio=build_investor_context,
+        )
 
     if not api_key:
         reply = _local_reply(context, message, what_if, history=history)
@@ -791,15 +979,29 @@ def chat(
     msgs.append({"role": "user", "content": message})
     system = system_prompt(
         context["investor_name"],
-        role=context.get("role") or "investor",
+        role=role,
         context=context,
     )
 
     try:
         if provider == "openai":
-            raw = _call_openai(api_key, system, msgs, context)
+            raw = _call_openai(
+                api_key,
+                system,
+                msgs,
+                context,
+                tools=retr.openai_tools(role),
+                tool_runner=tool_runner,
+            )
         else:
-            raw = _call_gemini(api_key, system, msgs, context)
+            raw = _call_gemini(
+                api_key,
+                system,
+                msgs,
+                context,
+                tools=retr.gemini_tool_declarations(role),
+                tool_runner=tool_runner,
+            )
     except Exception as exc:
         raw = _local_reply(context, message, what_if, history=history)
         note = str(exc).strip() or "המודל לא היה זמין כרגע."
@@ -830,6 +1032,116 @@ def _history_has_markers(history: list | None, markers: tuple[str, ...]) -> bool
 
 
 CONTRACT_DISCLAIMER = "המספרים לפי תנאי המסלול החוזי — לא ייעוץ השקעות."
+
+
+def _format_retrieved_investors(context: dict, history: list | None) -> str:
+    hits = context.get("retrieved_investors") or []
+    query = context.get("name_query") or ""
+    if not hits:
+        return context.get("retrieval_note") or (
+            f"לא נמצא משקיע בשם «{query}» במערכת."
+            if query
+            else "לא נמצא משקיע בשם הזה."
+        )
+    lines: list[str] = []
+    first = hits[0]
+    if context.get("retrieval_note") and first.get("matched_as") != query:
+        lines.append(str(context["retrieval_note"]))
+    for hit in hits:
+        name = hit.get("name") or hit.get("matched_as") or query
+        port = hit.get("portfolio") or hit
+        principal = port.get("active_principal", hit.get("active_principal"))
+        cash = port.get("monthly_cash", hit.get("monthly_cash"))
+        sav = port.get("monthly_savings", hit.get("monthly_savings"))
+        savings_bal = port.get(
+            "current_savings_balance", hit.get("current_savings_balance")
+        )
+        lines.append(
+            f"{name}: קרן פעילה {_money(principal)} · "
+            f"החזר חודשי במזומן {_money(cash)} · "
+            f"צבירת חיסכון חודשית {_money(sav)} · "
+            f"יתרת חיסכון {_money(savings_bal)}."
+        )
+        if not port.get("has_active_plan") and float(principal or 0) == 0:
+            lines.append(f"ל{name} אין מסלול פעיל כרגע.")
+    return _with_disclaimer("\n".join(lines), history)
+
+
+def _format_totals(context: dict, history: list | None) -> str:
+    totals = context.get("totals") or {}
+    return _with_disclaimer(
+        (
+            f"סה״כ קרן פעילה במערכת {_money(totals.get('total_principal'))}. "
+            f"{int(totals.get('active_investors') or 0)} משקיעים פעילים, "
+            f"{int(totals.get('active_plans') or 0)} מסלולים. "
+            f"החזר חודשי במזומן {_money(totals.get('monthly_cash_payouts'))}, "
+            f"צבירת חיסכון חודשית {_money(totals.get('monthly_savings_accruals'))}."
+        ),
+        history,
+    )
+
+
+def _format_missing_month(context: dict) -> str:
+    rows = context.get("missing_this_month") or []
+    if not rows:
+        return "אין משקיעים שחסר להם תשלום החודש."
+    parts = [
+        f"{row.get('investor_name')} · {_money(row.get('amount'))}"
+        for row in rows[:12]
+    ]
+    return "חסר החודש: " + "; ".join(parts) + "."
+
+
+def _format_pay_month(context: dict, history: list | None) -> str:
+    totals = context.get("totals") or {}
+    count = int(totals.get("this_month_to_pay_count") or 0)
+    amount = totals.get("this_month_to_pay")
+    return _with_disclaimer(
+        f"לחודש הזה יש לשלם {_money(amount)} ל־{count} משקיעים (תשלומים שטרם נסגרו).",
+        history,
+    )
+
+
+def _format_quotes(context: dict) -> str:
+    quotes = context.get("quotes") or {}
+    counts = quotes.get("counts") or {}
+    pending = int(quotes.get("pending_count") or counts.get("pending") or 0)
+    approved = int(quotes.get("approved_count") or counts.get("approved") or 0)
+    converted = int(quotes.get("converted_count") or counts.get("converted") or 0)
+    rejected = int(quotes.get("rejected_count") or counts.get("rejected") or 0)
+    return (
+        f"הצעות: ממתינות {pending}, מאושרות {approved}, "
+        f"הומרו {converted}, נדחו {rejected}."
+    )
+
+
+def _format_no_password(context: dict) -> str:
+    without = context.get("users_without_password") or []
+    reset = context.get("users_must_reset_password") or []
+    if not without and not reset:
+        return "אין משתמשים בלי סיסמה."
+    lines = []
+    if without:
+        names = ", ".join(
+            (row.get("investor_name") or row.get("username") or "")
+            for row in without[:12]
+        )
+        lines.append(f"בלי סיסמה: {names}.")
+    if reset:
+        names = ", ".join(
+            (row.get("investor_name") or row.get("username") or "")
+            for row in reset[:12]
+        )
+        lines.append(f"חייבים איפוס סיסמה: {names}.")
+    return " ".join(lines)
+
+
+def _format_documents(context: dict) -> str:
+    docs = context.get("documents") or []
+    if not docs:
+        return "אין מסמכים בתיק כרגע."
+    titles = [str(d.get("title") or d.get("kind") or "מסמך") for d in docs[:8]]
+    return "מסמכים בתיק: " + "; ".join(titles) + "."
 
 
 def _with_disclaimer(text: str, history: list | None) -> str:
@@ -929,12 +1241,26 @@ def _local_reply(
             "או על הוספת השקעה."
         )
 
+    if role == "manager" and context.get("name_query"):
+        return _format_retrieved_investors(context, history)
+
+    if role == "manager" and intent == "totals":
+        return _format_totals(context, history)
+    if role == "manager" and intent == "missing_month":
+        return _format_missing_month(context)
+    if role == "manager" and intent == "pay_month":
+        return _format_pay_month(context, history)
+    if role == "manager" and intent == "quotes":
+        return _format_quotes(context)
+    if role == "manager" and intent == "no_password":
+        return _format_no_password(context)
+
     if role == "manager" and intent in {"ops", "awaiting", "tip"}:
         if intent == "awaiting" and awaiting:
             row = awaiting[0]
             who = row.get("investor_name") or "משקיע"
             return (
-                f"{who} ממתין לאישור · {row.get('month_label') or ''} · "
+                f"{who} ממתין לאישור · {row.get('month_label') or row.get('month_key') or ''} · "
                 f"{_money(row.get('amount'))}."
             )
         if intent == "tip":
@@ -952,6 +1278,9 @@ def _local_reply(
             "אפשר לפרט: מי ממתין לאישור, מה דורש תשומת לב בלוח, "
             "או לפתוח הצעה חדשה."
         )
+
+    if intent == "documents":
+        return _format_documents(context)
 
     if intent == "next_payment":
         if not next_pay:
