@@ -27,6 +27,7 @@ export function WelcomeSplash() {
   const sealRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(() => !hasSeenWelcome());
   const [exiting, setExiting] = useState(false);
+  const [fadingOut, setFadingOut] = useState(false);
   const [exitTransform, setExitTransform] = useState<SplashExitTransform>(REST_EXIT);
 
   const { reduceMotion } = useMotionPrefs();
@@ -40,6 +41,7 @@ export function WelcomeSplash() {
   const finishExit = useCallback(() => {
     setOpen(false);
     setExiting(false);
+    setFadingOut(false);
     setExitTransform(REST_EXIT);
   }, []);
 
@@ -61,6 +63,7 @@ export function WelcomeSplash() {
     userRef.current = user;
     if (wasSignedIn && !user) {
       setExiting(false);
+      setFadingOut(false);
       setExitTransform(REST_EXIT);
       setOpen(!hasSeenWelcome());
     }
@@ -82,34 +85,49 @@ export function WelcomeSplash() {
   }, [visible, dismiss, exiting]);
 
   useEffect(() => {
+    if (!exiting || fadingOut) return;
+    const seconds = reduceMotion ? 0 : timings.zoomHoldDuration;
+    const id = window.setTimeout(() => setFadingOut(true), Math.round(seconds * 1000));
+    return () => window.clearTimeout(id);
+  }, [exiting, fadingOut, reduceMotion, timings.zoomHoldDuration]);
+
+  useEffect(() => {
     if (!exiting) return;
-    const seconds = reduceMotion ? timings.reducedExitDuration : timings.exitTotalDuration;
+    if (!reduceMotion && !fadingOut) return;
+    const seconds = reduceMotion ? timings.reducedExitDuration : timings.splashFadeDuration;
     const id = window.setTimeout(finishExit, Math.round(seconds * 1000));
     return () => window.clearTimeout(id);
-  }, [exiting, reduceMotion, timings.exitTotalDuration, timings.reducedExitDuration, finishExit]);
+  }, [
+    exiting,
+    fadingOut,
+    reduceMotion,
+    timings.reducedExitDuration,
+    timings.splashFadeDuration,
+    finishExit,
+  ]);
 
   if (!visible) return null;
 
   const splashFadeMs = reduceMotion
     ? timings.reducedExitDuration
     : timings.splashFadeDuration;
-  const splashFadeDelay = reduceMotion
-    ? 0
-    : timings.zoomDelay + timings.zoomDuration + timings.holdAtFill;
 
   return (
     <div
       className={exiting ? "welcome-splash is-exiting" : "welcome-splash"}
+      data-splash-motion={reduceMotion ? "reduce" : "full"}
+      data-splash-compact={compact ? "1" : "0"}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={copyId}
       aria-busy={exiting || undefined}
       style={{
-        opacity: exiting ? 0 : 1,
-        transition: exiting
-          ? `opacity ${splashFadeMs}s ${EASE_CSS} ${splashFadeDelay}s`
-          : undefined,
+        opacity: fadingOut || (exiting && reduceMotion) ? 0 : 1,
+        transition:
+          fadingOut || (exiting && reduceMotion)
+            ? `opacity ${splashFadeMs}s ${EASE_CSS}`
+            : undefined,
       }}
     >
       <motion.div

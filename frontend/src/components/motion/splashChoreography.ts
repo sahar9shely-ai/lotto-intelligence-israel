@@ -66,8 +66,8 @@ export function splashTimings(compact: boolean) {
 
   const copyExitDuration = compact ? 0.28 : 0.34;
   const zoomDuration = compact ? 0.78 : 0.92;
-  const holdAtFill = compact ? 0.1 : 0.16;
-  const splashFadeDuration = compact ? 0.36 : 0.44;
+  const holdAtFill = compact ? 0.18 : 0.24;
+  const splashFadeDuration = compact ? 0.58 : 0.72;
   const reducedExitDuration = 0.32;
 
   return {
@@ -104,6 +104,7 @@ export function splashTimings(compact: boolean) {
     holdAtFill,
     splashFadeDuration,
     reducedExitDuration,
+    zoomHoldDuration: copyExitDuration * 0.35 + zoomDuration + holdAtFill,
     exitTotalDuration:
       copyExitDuration * 0.35 + zoomDuration + holdAtFill + splashFadeDuration,
     kickerEnterDuration: compact ? 0.42 : 0.52,

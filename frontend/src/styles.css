@@ -7924,10 +7924,25 @@ body {
 .welcome-splash__letter {
   display: inline-block;
   transform-origin: 50% 88%;
+  animation-name: splash-letter-rise;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+
+@keyframes splash-letter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .welcome-splash.is-exiting {
   pointer-events: none;
+  will-change: opacity;
 }
 
 .welcome-splash.is-exiting .welcome-splash__wordmark {
