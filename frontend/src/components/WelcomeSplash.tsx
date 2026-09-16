@@ -7,6 +7,8 @@ import { hasSeenWelcome, markWelcomeSeen } from "../utils/welcomeSplash";
 import { BrandMark } from "./BrandMark";
 import { FallingWealth } from "./motion/FallingWealth";
 import { MotionButton } from "./motion/MotionButton";
+import { WordmarkLetters } from "./motion/WordmarkLetters";
+import { splashTimings, useCompactSplash } from "./motion/splashChoreography";
 import { useMotionPrefs } from "../hooks/useMotionPrefs";
 
 export function WelcomeSplash() {
@@ -17,6 +19,8 @@ export function WelcomeSplash() {
   const [open, setOpen] = useState(() => !hasSeenWelcome());
 
   const { reduceMotion } = useMotionPrefs();
+  const compact = useCompactSplash();
+  const timings = splashTimings(compact);
   const waitingOnSession = loading && Boolean(getToken());
   const hideForAdmin = Boolean(user && isAdminAccount(user));
   const visible = open && !waitingOnSession && !hideForAdmin;
@@ -62,30 +66,77 @@ export function WelcomeSplash() {
     >
       <div className="welcome-splash__field" aria-hidden="true" />
       <FallingWealth />
-      <motion.div
-        className="welcome-splash__sheet"
-        initial={reduceMotion ? false : { opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <div className="welcome-splash__seal">
-          <BrandMark className="welcome-splash__mark" size={128} alt="" />
-        </div>
-        <p className="welcome-splash__kicker" id={copyId}>
-          התיק שלך
-        </p>
-        <h1 className="welcome-splash__wordmark" id={titleId}>
-          תזרים
-        </h1>
-        <MotionButton
-          ref={ctaRef}
-          type="button"
-          className="welcome-splash__cta"
-          onClick={dismiss}
+      <div className="welcome-splash__sheet">
+        <motion.div
+          className="welcome-splash__seal"
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={
+            reduceMotion
+              ? { duration: 0.28, ease: timings.fadeEase }
+              : timings.sealSpring
+          }
         >
-          המשך
-        </MotionButton>
-      </motion.div>
+          <motion.div
+            className="welcome-splash__seal-float"
+            animate={reduceMotion ? undefined : { y: [0, -4.5, 0] }}
+            transition={
+              reduceMotion
+                ? undefined
+                : {
+                    duration: timings.sealBreatheDuration,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                    delay: timings.sealBreatheDelay,
+                  }
+            }
+          >
+            <BrandMark className="welcome-splash__mark" size={128} alt="" />
+          </motion.div>
+        </motion.div>
+        <motion.p
+          className="welcome-splash__kicker"
+          id={copyId}
+          initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={
+            reduceMotion
+              ? { duration: 0.28, ease: timings.fadeEase }
+              : {
+                  duration: compact ? 0.34 : 0.42,
+                  delay: timings.kickerDelay,
+                  ease: timings.fadeEase,
+                }
+          }
+        >
+          התיק שלך
+        </motion.p>
+        <WordmarkLetters
+          id={titleId}
+          className="welcome-splash__wordmark"
+          compact={compact}
+          reduceMotion={reduceMotion}
+        />
+        <motion.div
+          className="welcome-splash__cta-enter"
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.94 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={
+            reduceMotion
+              ? { duration: 0.28, ease: timings.fadeEase }
+              : { ...timings.ctaSpring, delay: timings.ctaDelay }
+          }
+        >
+          <MotionButton
+            ref={ctaRef}
+            type="button"
+            className="welcome-splash__cta"
+            onClick={dismiss}
+          >
+            המשך
+          </MotionButton>
+        </motion.div>
+      </div>
     </div>
   );
 }
