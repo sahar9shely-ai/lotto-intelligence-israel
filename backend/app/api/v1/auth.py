@@ -9,6 +9,7 @@ from app.models.investments import Investor, utcnow
 from app.schemas.auth import (
     ChangeOwnPasswordRequest,
     CreateAccessUserRequest,
+    UpdateOwnProfileRequest,
     EmailOutboxOut,
     FulfillPasswordResetRequest,
     LoginAlertOut,
@@ -114,6 +115,57 @@ def set_user_password(
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return auth_svc.serialize_user(user, include_access_password=False)
+
+
+@router.patch("/me", response_model=UserOut)
+def update_own_profile(
+    payload: UpdateOwnProfileRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    fresh = (
+        db.query(User)
+        .options(joinedload(User.investor))
+        .filter(User.id == user.id)
+        .first()
+    )
+    if not fresh:
+        raise HTTPException(status_code=404, detail="משתמש לא נמצא")
+    data = payload.model_dump(exclude_unset=True)
+    try:
+        fresh = auth_svc.update_own_profile(
+            db,
+            fresh,
+            email=data.get("email"),
+            phone=data.get("phone"),
+            email_set="email" in data,
+            phone_set="phone" in data,
+            current_password=data.get("current_password"),
+            new_password=data.get("new_password"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from app.services import activity_service as activity_svc
+
+    changed = [key for key in data if key not in {"current_password", "new_password"}]
+    if data.get("new_password"):
+        changed.append("password")
+    activity_svc.log_activity(
+        db,
+        kind="user_updated",
+        title=f"אזור אישי עודכן · {fresh.investor.name if fresh.investor else fresh.username}",
+        body=" · ".join(changed) or "פרטים אישיים",
+        severity="info",
+        actor=fresh,
+        investor_id=fresh.investor_id,
+        investor_name=fresh.investor.name if fresh.investor else fresh.username,
+        entity_type="user",
+        entity_id=fresh.id,
+        href="/account",
+        commit=True,
+    )
+    return auth_svc.serialize_user(fresh, include_access_password=False)
 
 
 @router.post("/me/password", response_model=UserOut)
@@ -350,8 +402,12 @@ def _apply_user_update(
         user.investor.name = str(data["investor_name"]).strip()
 
     if "phone" in data and user.investor:
-        phone = str(data["phone"]).strip() if data["phone"] else None
-        user.investor.phone = phone or None
+        try:
+            user.investor.phone = auth_svc.validate_phone(
+                str(data["phone"]) if data["phone"] else None
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     new_password = data.get("new_password")
     if new_password:

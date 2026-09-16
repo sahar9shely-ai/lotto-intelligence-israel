@@ -674,3 +674,85 @@ def test_personal_sahar_cannot_access_manager_routes():
     assert dash.status_code == 200
     names = {i["name"] for i in dash.json()["investors_summary"]}
     assert names == {"סהר"}
+
+
+def test_investor_can_update_own_profile_not_name_or_others():
+    headers = _auth_headers("ofek", "OfekPass12!")
+    me = client.get("/api/v1/auth/me", headers=headers)
+    assert me.status_code == 200
+    ofek_id = me.json()["id"]
+    original_name = me.json()["investor_name"]
+
+    forbidden = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"investor_name": "שם חדש", "role": "manager"},
+    )
+    assert forbidden.status_code == 422
+
+    bad_email = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"email": "not-an-email"},
+    )
+    assert bad_email.status_code == 422
+
+    bad_phone = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"phone": "abc-123"},
+    )
+    assert bad_phone.status_code == 400
+
+    updated = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"phone": "050-111-2233", "email": "ofek.personal@example.com"},
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["phone"] == "050-111-2233"
+    assert body["email"] == "ofek.personal@example.com"
+    assert body["investor_name"] == original_name
+    assert body["role"] == "investor"
+    assert body["is_manager"] is False
+
+    other = client.patch(
+        f"/api/v1/auth/users/{ofek_id}",
+        headers=headers,
+        json={"phone": "050-000-0000"},
+    )
+    assert other.status_code == 403
+
+    bar = _auth_headers("bar", "BarPass123!")
+    steal = client.patch(
+        "/api/v1/auth/me",
+        headers=bar,
+        json={"email": "ofek.personal@example.com"},
+    )
+    assert steal.status_code == 400
+    assert "מייל" in steal.json()["detail"]
+
+    pw = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={
+            "current_password": "OfekPass12!",
+            "new_password": "OfekNew88!",
+        },
+    )
+    assert pw.status_code == 200, pw.text
+    assert pw.json()["must_reset_password"] is False
+
+    old = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ofek", "password": "OfekPass12!"},
+    )
+    assert old.status_code == 401
+    fresh = client.post(
+        "/api/v1/auth/login",
+        json={"username": "ofek", "password": "OfekNew88!"},
+    )
+    assert fresh.status_code == 200
+    assert fresh.json()["user"]["email"] == "ofek.personal@example.com"
+    assert fresh.json()["user"]["phone"] == "050-111-2233"
