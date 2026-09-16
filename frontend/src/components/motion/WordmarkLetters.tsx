@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { SPLASH_WORDMARK, splashTimings, splitWordmark } from "./splashChoreography";
 
 type WordmarkLettersProps = {
@@ -21,28 +20,26 @@ export function WordmarkLetters({
 
   if (reduceMotion) {
     return (
-      <h1 id={id} className={className}>
+      <h1 id={id} className={className} dir="rtl">
         {word}
       </h1>
     );
   }
 
   return (
-    <h1 id={id} className={className} aria-label={word}>
+    <h1 id={id} className={className} dir="rtl" aria-label={word}>
       {letters.map((letter, index) => (
-        <motion.span
+        <span
           key={`${letter}-${index}`}
           className="welcome-splash__letter"
           aria-hidden="true"
-          initial={{ opacity: 0, y: timings.letterFromY, scale: 0.86 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{
-            ...timings.letterSpring,
-            delay: timings.letterDelay + index * timings.letterStagger,
+          style={{
+            animationDuration: `${timings.letterDuration}s`,
+            animationDelay: `${timings.letterDelay + index * timings.letterStagger}s`,
           }}
         >
           {letter}
-        </motion.span>
+        </span>
       ))}
     </h1>
   );

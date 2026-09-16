@@ -7781,6 +7781,7 @@ body {
   z-index: 120;
   display: grid;
   place-items: center;
+  overflow: hidden;
   padding:
     max(28px, env(safe-area-inset-top, 0px))
     max(24px, env(safe-area-inset-right, 0px))
@@ -7792,9 +7793,17 @@ body {
   position: absolute;
   inset: 0;
   z-index: 0;
+  transform-origin: 50% 50%;
   background:
     radial-gradient(ellipse 80% 70% at 100% 0%, rgba(198, 164, 78, 0.16), transparent 52%),
     linear-gradient(158deg, #082421 0%, #0d3d38 54%, #155348 100%);
+}
+
+.welcome-splash__wealth {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .falling-wealth {
@@ -7873,6 +7882,10 @@ body {
   place-items: center;
   box-shadow: 0 0 0 1px rgba(198, 164, 78, 0.28), 0 18px 40px rgba(8, 36, 33, 0.28);
   margin-bottom: 18px;
+  transform-origin: 50% 50%;
+  transition:
+    background 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .welcome-splash__mark {
@@ -7905,11 +7918,47 @@ body {
   color: #f6f3ea;
   white-space: nowrap;
   overflow: visible;
+  unicode-bidi: isolate;
 }
 
 .welcome-splash__letter {
   display: inline-block;
   transform-origin: 50% 88%;
+  animation-name: splash-letter-rise;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+
+@keyframes splash-letter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.welcome-splash.is-exiting {
+  pointer-events: none;
+  will-change: opacity;
+}
+
+.welcome-splash.is-exiting .welcome-splash__wordmark {
+  opacity: 0;
+  transform: translateY(-10px);
+  transition:
+    opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.welcome-splash.is-exiting .welcome-splash__seal {
+  z-index: 4;
+  background: transparent;
+  box-shadow: none;
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 .welcome-splash__cta-enter {
@@ -8010,6 +8059,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .welcome-splash.is-exiting .welcome-splash__seal {
+    will-change: auto;
+  }
+
   .welcome-splash__sheet {
     animation: welcome-fade 0.32s ease both !important;
   }
