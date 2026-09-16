@@ -2,6 +2,7 @@ import {
   motion,
   useAnimationFrame,
   useMotionValue,
+  useReducedMotion,
   useSpring,
   useTransform,
   type MotionValue,
@@ -230,7 +231,9 @@ function WealthLayer({
 export function FallingWealth() {
   const rawId = useId();
   const uid = rawId.replace(/:/g, "");
-  const { reduceMotion, allowMouseFollow } = useMotionPrefs();
+  const { reduceMotion: preferReduce, allowMouseFollow } = useMotionPrefs();
+  const fmReduce = useReducedMotion();
+  const reduceMotion = preferReduce || Boolean(fmReduce);
   const [compact, setCompact] = useState(
     () => readMq("(max-width: 820px), (pointer: coarse)"),
   );
