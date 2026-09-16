@@ -6,7 +6,6 @@ type WordmarkLettersProps = {
   className?: string;
   compact: boolean;
   reduceMotion: boolean;
-  exiting?: boolean;
   word?: string;
 };
 
@@ -15,7 +14,6 @@ export function WordmarkLetters({
   className,
   compact,
   reduceMotion,
-  exiting = false,
   word = SPLASH_WORDMARK,
 }: WordmarkLettersProps) {
   const letters = splitWordmark(word);
@@ -30,24 +28,13 @@ export function WordmarkLetters({
   }
 
   return (
-    <motion.h1
-      id={id}
-      className={className}
-      dir="rtl"
-      aria-label={word}
-      initial={false}
-      animate={exiting ? { opacity: 0, y: -10 } : { opacity: 1, y: 0 }}
-      transition={
-        exiting
-          ? { duration: timings.copyExitDuration, ease: timings.fadeEase }
-          : { duration: 0 }
-      }
-    >
+    <h1 id={id} className={className} dir="rtl" aria-label={word}>
       {letters.map((letter, index) => (
         <motion.span
           key={`${letter}-${index}`}
           className="welcome-splash__letter"
           aria-hidden="true"
+          inherit={false}
           initial={{ opacity: 0, y: timings.letterFromY }}
           animate={{ opacity: 1, y: 0 }}
           transition={{
@@ -58,6 +45,6 @@ export function WordmarkLetters({
           {letter}
         </motion.span>
       ))}
-    </motion.h1>
+    </h1>
   );
 }

@@ -17,6 +17,7 @@ import {
 import { useMotionPrefs } from "../hooks/useMotionPrefs";
 
 const REST_EXIT: SplashExitTransform = { shiftX: 0, shiftY: 0, scale: 1 };
+const EASE_CSS = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 export function WelcomeSplash() {
   const { user, loading } = useAuth();
@@ -89,29 +90,32 @@ export function WelcomeSplash() {
 
   if (!visible) return null;
 
-  const splashOpacityDelay = reduceMotion
+  const splashFadeMs = reduceMotion
+    ? timings.reducedExitDuration
+    : timings.splashFadeDuration;
+  const splashFadeDelay = reduceMotion
     ? 0
     : timings.zoomDelay + timings.zoomDuration + timings.holdAtFill;
 
   return (
-    <motion.div
+    <div
       className={exiting ? "welcome-splash is-exiting" : "welcome-splash"}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={copyId}
       aria-busy={exiting || undefined}
-      initial={false}
-      animate={{ opacity: exiting ? 0 : 1 }}
-      transition={{
-        duration: reduceMotion ? timings.reducedExitDuration : timings.splashFadeDuration,
-        delay: exiting ? splashOpacityDelay : 0,
-        ease: timings.fadeEase,
+      style={{
+        opacity: exiting ? 0 : 1,
+        transition: exiting
+          ? `opacity ${splashFadeMs}s ${EASE_CSS} ${splashFadeDelay}s`
+          : undefined,
       }}
     >
       <motion.div
         className="welcome-splash__field"
         aria-hidden="true"
+        inherit={false}
         initial={false}
         animate={exiting && !reduceMotion ? { scale: 1.14 } : { scale: 1 }}
         transition={{
@@ -123,6 +127,7 @@ export function WelcomeSplash() {
       <motion.div
         className="welcome-splash__wealth"
         aria-hidden="true"
+        inherit={false}
         initial={false}
         animate={{ opacity: exiting ? 0 : 1 }}
         transition={{
@@ -136,6 +141,7 @@ export function WelcomeSplash() {
         <motion.div
           ref={sealRef}
           className="welcome-splash__seal"
+          inherit={false}
           initial={reduceMotion ? false : { opacity: 0, scale: 0.94 }}
           animate={
             exiting
@@ -175,6 +181,7 @@ export function WelcomeSplash() {
         >
           <motion.div
             className="welcome-splash__seal-float"
+            inherit={false}
             animate={exiting || reduceMotion ? { y: 0 } : { y: [0, -4.5, 0] }}
             transition={
               exiting || reduceMotion
@@ -193,10 +200,9 @@ export function WelcomeSplash() {
         <motion.p
           className="welcome-splash__kicker"
           id={copyId}
+          inherit={false}
           initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-          animate={
-            exiting ? { opacity: 0, y: -8 } : { opacity: 1, y: 0 }
-          }
+          animate={exiting ? { opacity: 0, y: -8 } : { opacity: 1, y: 0 }}
           transition={
             reduceMotion
               ? { duration: 0.28, ease: timings.fadeEase }
@@ -216,10 +222,10 @@ export function WelcomeSplash() {
           className="welcome-splash__wordmark"
           compact={compact}
           reduceMotion={reduceMotion}
-          exiting={exiting}
         />
         <motion.div
           className="welcome-splash__cta-enter"
+          inherit={false}
           initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
           animate={
             exiting ? { opacity: 0, y: 10, scale: 0.98 } : { opacity: 1, scale: 1, y: 0 }
@@ -243,6 +249,6 @@ export function WelcomeSplash() {
           </MotionButton>
         </motion.div>
       </div>
-    </motion.div>
+    </div>
   );
 }

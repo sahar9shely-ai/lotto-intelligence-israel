@@ -7930,6 +7930,14 @@ body {
   pointer-events: none;
 }
 
+.welcome-splash.is-exiting .welcome-splash__wordmark {
+  opacity: 0;
+  transform: translateY(-10px);
+  transition:
+    opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .welcome-splash.is-exiting .welcome-splash__seal {
   z-index: 4;
   background: transparent;
