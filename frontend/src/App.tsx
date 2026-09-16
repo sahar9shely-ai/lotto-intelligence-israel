@@ -11,6 +11,7 @@ import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { InvestorsPage } from "./pages/InvestorsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PaymentsPage } from "./pages/PaymentsPage";
+import { PersonalAreaPage } from "./pages/PersonalAreaPage";
 import { QuotesPage } from "./pages/QuotesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UsersPage } from "./pages/UsersPage";
@@ -30,6 +31,7 @@ export function App() {
             <Route path="investors" element={<InvestorsPage />} />
             <Route path="payments" element={<PaymentsPage />} />
             <Route path="documents" element={<DocumentsPage />} />
+            <Route path="account" element={<PersonalAreaPage />} />
             <Route element={<RequireManager />}>
               <Route path="activity" element={<ActivityPage />} />
               <Route path="quotes" element={<QuotesPage />} />

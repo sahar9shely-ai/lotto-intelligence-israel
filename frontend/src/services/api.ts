@@ -57,6 +57,7 @@ function pydanticMessage(entry: Record<string, unknown>): string {
     return "שם משתמש חייב להכיל אותיות באנגלית / ספרות / . _ - (2–64 תווים), בלי רווחים";
   }
   if (field === "email") return "כתובת המייל לא תקינה";
+  if (field === "phone") return "מספר הטלפון אינו תקין";
   if (field === "new_password") return "הסיסמה חייבת להכיל לפחות 8 תווים";
   const label = FIELD_LABELS[field];
   return label && msg ? `${label}: ${msg}` : msg || "בקשה נכשלה";
@@ -159,6 +160,16 @@ export const api = {
     request<AuthUser>("/api/v1/auth/me/password", {
       method: "POST",
       body: JSON.stringify({ current_password, new_password }),
+    }),
+  updateOwnProfile: (body: {
+    email?: string | null;
+    phone?: string | null;
+    current_password?: string;
+    new_password?: string;
+  }) =>
+    request<AuthUser>("/api/v1/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify(body),
     }),
   me: () => request<AuthUser>("/api/v1/auth/me"),
   users: () => request<AuthUser[]>("/api/v1/auth/users"),

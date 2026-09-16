@@ -25,6 +25,35 @@ class ChangeOwnPasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class UpdateOwnProfileRequest(BaseModel):
+    """Self-serve contact + optional password. Name / role / others are forbidden."""
+
+    model_config = {"extra": "forbid"}
+
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, max_length=40)
+    current_password: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    new_password: Optional[str] = Field(default=None, min_length=8, max_length=128)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def blank_email(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def blank_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
 class FulfillPasswordResetRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 

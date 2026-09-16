@@ -1789,6 +1789,88 @@ textarea:focus {
   box-shadow: 0 0 0 4px var(--accent-glow);
 }
 
+.locked-field__control {
+  position: relative;
+  display: block;
+}
+
+.locked-field input:disabled,
+.locked-field input[readonly] {
+  background: color-mix(in srgb, var(--foam-deep) 55%, #fff);
+  color: var(--ink);
+  cursor: not-allowed;
+  opacity: 1;
+  padding-inline-end: 5.6rem;
+}
+
+.locked-field__icon {
+  position: absolute;
+  inset-inline-end: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.personal-area .panel {
+  border-radius: 18px;
+  scroll-margin-top: 88px;
+}
+
+.personal-area .btn--primary {
+  justify-self: stretch;
+  min-height: 48px;
+}
+
+.personal-area {
+  padding-bottom: 32px;
+}
+
+.personal-area .page-intro {
+  padding: 14px 16px;
+}
+
+.personal-area .page-intro__title {
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+}
+
+.personal-area__toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.personal-area__password {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-soft) 42%, #fff) 0%,
+    #fff 42%
+  );
+}
+
+.personal-area__section-icon {
+  display: inline-flex;
+  color: var(--accent-strong);
+}
+
+@media (max-width: 820px) {
+  .personal-area {
+    padding-bottom: 72px;
+  }
+
+  .shell:has(.personal-area) .assistant-fab,
+  .shell:has(.personal-area) .assistant-panel {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
 .password-field-label {
   min-width: 0;
 }

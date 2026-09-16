@@ -44,6 +44,7 @@ MANAGER_USERNAME = ADMIN_USERNAME
 MANAGER_DEMO_PASSWORD = ADMIN_DEMO_PASSWORD
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{2,64}$")
+_PHONE_ALLOWED_RE = re.compile(r"^[0-9+\-\s()]+$")
 
 
 def normalize_username(username: str) -> str:
@@ -54,6 +55,33 @@ def normalize_email(email: Optional[str]) -> Optional[str]:
     if not email:
         return None
     return email.strip().lower()
+
+
+def validate_phone(phone: Optional[str]) -> Optional[str]:
+    """Israeli mobile / landline, matching the formats already used in the app."""
+    if phone is None:
+        return None
+    value = str(phone).strip()
+    if not value:
+        return None
+    if len(value) > 40:
+        raise ValueError("מספר הטלפון ארוך מדי")
+    if not _PHONE_ALLOWED_RE.match(value):
+        raise ValueError("מספר הטלפון אינו תקין")
+    digits = re.sub(r"\D", "", value)
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("972"):
+        local = "0" + digits[3:]
+    elif len(digits) == 9 and digits.startswith("5"):
+        local = "0" + digits
+    else:
+        local = digits
+    mobile = len(local) == 10 and local.startswith("05")
+    landline = len(local) == 9 and local.startswith("0") and not local.startswith("05")
+    if not (mobile or landline):
+        raise ValueError("מספר הטלפון אינו תקין")
+    return value
 
 
 def validate_username(username: str) -> str:
@@ -854,6 +882,7 @@ def change_own_password(
     *,
     current_password: str,
     new_password: str,
+    commit: bool = True,
 ) -> User:
     if not user.password_hash or not verify_password(current_password, user.password_hash):
         raise ValueError("הסיסמה הנוכחית שגויה")
@@ -866,6 +895,59 @@ def change_own_password(
     user.access_password = None
     user.must_reset_password = False
     user.password_set_at = utcnow()
+    if commit:
+        db.commit()
+        db.refresh(user)
+    else:
+        db.flush()
+    return user
+
+
+def update_own_profile(
+    db: Session,
+    user: User,
+    *,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    email_set: bool = False,
+    phone_set: bool = False,
+    current_password: Optional[str] = None,
+    new_password: Optional[str] = None,
+) -> User:
+    """Investor (or manager) updates only their own contact details / password."""
+    if email_set:
+        normalized = normalize_email(email)
+        if normalized:
+            clash = (
+                db.query(User)
+                .filter(User.email == normalized, User.id != user.id)
+                .first()
+            )
+            if clash:
+                raise ValueError("המייל כבר בשימוש")
+        user.email = normalized
+
+    if phone_set:
+        if not user.investor:
+            raise ValueError("לא ניתן לעדכן טלפון לחשבון זה")
+        user.investor.phone = validate_phone(phone)
+
+    if new_password:
+        if not current_password:
+            raise ValueError("נדרשת הסיסמה הנוכחית כדי להחליף סיסמה")
+        change_own_password(
+            db,
+            user,
+            current_password=current_password,
+            new_password=new_password,
+            commit=False,
+        )
+
+    if not email_set and not phone_set and not new_password:
+        return user
+
     db.commit()
     db.refresh(user)
+    if user.investor:
+        db.refresh(user.investor)
     return user

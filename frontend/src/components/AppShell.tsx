@@ -71,7 +71,7 @@ function DockGlyph({ path }: { path: string }) {
       </svg>
     );
   }
-  if (path === "/users") {
+  if (path === "/users" || path === "/account") {
     return (
       <svg {...common}>
         <circle cx="12" cy="8" r="3.2" />
@@ -138,20 +138,28 @@ export function AppShell() {
   }, [reloadStatus]);
 
   const links = [
-    { to: "/", label: "לוח בקרה", dockLabel: "לוח", end: true, managerOnly: false },
+    { to: "/", label: "לוח בקרה", dockLabel: "לוח", end: true, managerOnly: false, investorOnly: false },
     {
       to: "/investors",
       label: isManager ? "משקיעים" : "ההשקעה שלי",
       dockLabel: isManager ? "משקיעים" : "השקעה",
       managerOnly: false,
+      investorOnly: false,
     },
-    { to: "/payments", label: "תשלומים", dockLabel: "תשלומים", managerOnly: false },
-    { to: "/documents", label: "מסמכים", dockLabel: "מסמכים", managerOnly: false },
-    { to: "/activity", label: "מעקב", dockLabel: "מעקב", managerOnly: true },
-    { to: "/quotes", label: "הצעות", dockLabel: "הצעות", managerOnly: true },
-    { to: "/users", label: "משתמשים", dockLabel: "משתמשים", managerOnly: true },
-    { to: "/settings", label: "הגדרות", dockLabel: "הגדרות", managerOnly: true },
-  ].filter((l) => !l.managerOnly || isManager);
+    { to: "/payments", label: "תשלומים", dockLabel: "תשלומים", managerOnly: false, investorOnly: false },
+    { to: "/documents", label: "מסמכים", dockLabel: "מסמכים", managerOnly: false, investorOnly: false },
+    { to: "/activity", label: "מעקב", dockLabel: "מעקב", managerOnly: true, investorOnly: false },
+    { to: "/quotes", label: "הצעות", dockLabel: "הצעות", managerOnly: true, investorOnly: false },
+    { to: "/users", label: "משתמשים", dockLabel: "משתמשים", managerOnly: true, investorOnly: false },
+    { to: "/settings", label: "הגדרות", dockLabel: "הגדרות", managerOnly: true, investorOnly: false },
+    {
+      to: "/account",
+      label: "אזור אישי",
+      dockLabel: "אזור",
+      managerOnly: false,
+      investorOnly: true,
+    },
+  ].filter((l) => (!l.managerOnly || isManager) && (!l.investorOnly || !isManager));
 
   const primaryPaths = isManager
     ? new Set(["/", "/investors", "/payments", "/activity"])
@@ -377,21 +385,23 @@ export function AppShell() {
               <NavLink
                 key={`more-${link.to}`}
                 to={link.to}
-                className="more-sheet__link"
+                className={({ isActive }) => (isActive ? "more-sheet__link is-active" : "more-sheet__link")}
                 onClick={() => setMoreOpen(false)}
               >
                 <DockGlyph path={link.to} />
                 <span>{link.label}</span>
               </NavLink>
             ))}
-            <NavLink
-              to="/change-password"
-              className="more-sheet__link"
-              onClick={() => setMoreOpen(false)}
-            >
-              <DockGlyph path="/change-password" />
-              <span>החלפת סיסמה</span>
-            </NavLink>
+            {isManager ? (
+              <NavLink
+                to="/change-password"
+                className="more-sheet__link"
+                onClick={() => setMoreOpen(false)}
+              >
+                <DockGlyph path="/change-password" />
+                <span>החלפת סיסמה</span>
+              </NavLink>
+            ) : null}
             <button type="button" className="more-sheet__link more-sheet__link--danger" onClick={signOut}>
               <span>יציאה מהחשבון</span>
             </button>
