@@ -29,25 +29,25 @@ export function splitWordmark(word: string): string[] {
 }
 
 export function splashTimings(compact: boolean) {
-  const letterDelay = compact ? 0.14 : 0.18;
-  const letterStagger = compact ? 0.042 : 0.056;
+  const letterDelay = compact ? 0.12 : 0.16;
+  const letterStagger = compact ? 0.05 : 0.07;
   const lastLetterAt = letterDelay + 4 * letterStagger;
-  const kickerDelay = lastLetterAt + (compact ? 0.2 : 0.26);
-  const ctaDelay = kickerDelay + (compact ? 0.18 : 0.24);
+  const kickerDelay = lastLetterAt + (compact ? 0.18 : 0.22);
+  const ctaDelay = kickerDelay + (compact ? 0.16 : 0.22);
 
   return {
     letterDelay,
     letterStagger,
-    letterFromY: compact ? 16 : 22,
+    letterFromY: compact ? 20 : 28,
     kickerDelay,
     ctaDelay,
     sealBreatheDelay: compact ? 0.48 : 0.62,
     sealBreatheDuration: compact ? 3.15 : 3.7,
     letterSpring: {
       type: "spring" as const,
-      stiffness: compact ? 420 : 360,
-      damping: compact ? 18 : 16,
-      mass: compact ? 0.5 : 0.56,
+      stiffness: compact ? 380 : 320,
+      damping: compact ? 16 : 14,
+      mass: compact ? 0.52 : 0.6,
     },
     sealSpring: {
       type: "spring" as const,

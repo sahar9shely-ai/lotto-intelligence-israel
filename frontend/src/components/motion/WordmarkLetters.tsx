@@ -28,44 +28,22 @@ export function WordmarkLetters({
   }
 
   return (
-    <motion.h1
-      id={id}
-      className={className}
-      aria-label={word}
-      initial="hidden"
-      animate="show"
-      variants={{
-        hidden: {},
-        show: {
-          transition: {
-            staggerChildren: timings.letterStagger,
-            delayChildren: timings.letterDelay,
-          },
-        },
-      }}
-    >
+    <h1 id={id} className={className} aria-label={word}>
       {letters.map((letter, index) => (
         <motion.span
           key={`${letter}-${index}`}
           className="welcome-splash__letter"
           aria-hidden="true"
-          variants={{
-            hidden: {
-              opacity: 0,
-              y: timings.letterFromY,
-              scale: 0.88,
-            },
-            show: {
-              opacity: 1,
-              y: 0,
-              scale: 1,
-              transition: timings.letterSpring,
-            },
+          initial={{ opacity: 0, y: timings.letterFromY, scale: 0.86 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{
+            ...timings.letterSpring,
+            delay: timings.letterDelay + index * timings.letterStagger,
           }}
         >
           {letter}
         </motion.span>
       ))}
-    </motion.h1>
+    </h1>
   );
 }

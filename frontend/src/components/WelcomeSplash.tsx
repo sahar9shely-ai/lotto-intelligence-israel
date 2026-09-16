@@ -66,12 +66,7 @@ export function WelcomeSplash() {
     >
       <div className="welcome-splash__field" aria-hidden="true" />
       <FallingWealth />
-      <motion.div
-        className="welcome-splash__sheet"
-        initial={reduceMotion ? { opacity: 0 } : false}
-        animate={{ opacity: 1 }}
-        transition={{ duration: reduceMotion ? 0.32 : 0, ease: timings.fadeEase }}
-      >
+      <div className="welcome-splash__sheet">
         <motion.div
           className="welcome-splash__seal"
           initial={reduceMotion ? false : { opacity: 0, scale: 0.92 }}
@@ -141,7 +136,7 @@ export function WelcomeSplash() {
             המשך
           </MotionButton>
         </motion.div>
-      </motion.div>
+      </div>
     </div>
   );
 }

@@ -7953,6 +7953,15 @@ body {
   }
 }
 
+@keyframes welcome-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .auth-card__identity {
   display: grid;
   justify-items: center;
@@ -8001,7 +8010,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .welcome-splash__sheet,
+  .welcome-splash__sheet {
+    animation: welcome-fade 0.32s ease both !important;
+  }
+
   .welcome-splash__seal-float,
   .welcome-splash__letter,
   .panel,
