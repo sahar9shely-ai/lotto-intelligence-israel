@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { TiltCard } from "./motion/TiltCard";
 
 type PanelProps = {
   id?: string;
@@ -8,6 +9,7 @@ type PanelProps = {
   children: ReactNode;
   className?: string;
   delay?: number;
+  tilt?: boolean;
 };
 
 export function Panel({
@@ -18,12 +20,15 @@ export function Panel({
   children,
   className = "",
   delay = 0,
+  tilt = true,
 }: PanelProps) {
   return (
-    <section
+    <TiltCard
+      as="section"
       id={id}
       className={`panel ${className}`.trim()}
       style={{ animationDelay: `${delay}ms` }}
+      enabled={tilt}
     >
       <header className="panel__head">
         <div>
@@ -33,6 +38,6 @@ export function Panel({
         {action ? <div className="panel__action">{action}</div> : null}
       </header>
       <div className="panel__body">{children}</div>
-    </section>
+    </TiltCard>
   );
 }

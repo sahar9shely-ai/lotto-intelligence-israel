@@ -7,6 +7,7 @@ import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { PlanTrackFields } from "../components/PlanTrackFields";
 import { SavingsActions } from "../components/SavingsActions";
 import { PlanCoolingOffBanner, TopupRequestsPanel } from "../components/TopupRequestsPanel";
+import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -266,6 +267,7 @@ export function InvestorsPage() {
 
   return (
     <div className="page">
+      <ScrollReveal>
       <header className="page-intro">
         <div>
           <h1 className="page-intro__title">
@@ -298,6 +300,7 @@ export function InvestorsPage() {
           </div>
         )}
       </header>
+      </ScrollReveal>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
@@ -350,7 +353,7 @@ export function InvestorsPage() {
       ) : null}
 
       {effectiveScope === "all" && isManager ? (
-        <div className="stack">
+        <ScrollReveal className="stack">
           <Panel
             title="סיכום כל המשקיעים"
           >
@@ -477,9 +480,9 @@ export function InvestorsPage() {
               ))}
             </ul>
           </Panel>
-        </div>
+        </ScrollReveal>
       ) : selected ? (
-        <div className="stack">
+        <ScrollReveal className="stack">
           <Panel
             title={selected.name}
             action={
@@ -716,7 +719,7 @@ export function InvestorsPage() {
               )}
             </>
           )}
-        </div>
+        </ScrollReveal>
       ) : (
         <p className="empty">בחרו משקיע מהרשימה למעלה.</p>
       )}

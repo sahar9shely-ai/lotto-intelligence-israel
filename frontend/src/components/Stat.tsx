@@ -1,3 +1,5 @@
+import { TiltCard } from "./motion/TiltCard";
+
 type StatProps = {
   label: string;
   value: string;
@@ -33,27 +35,29 @@ export function Stat({
     .filter(Boolean)
     .join(" ");
 
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        className={className}
-        onClick={onClick}
-        aria-pressed={active}
-        title={title ?? `הצג פירוט: ${label}`}
-      >
-        <span className="stat__label">{label}</span>
-        <strong className="stat__value">{value}</strong>
-        {hint ? <span className="stat__hint">{hint}</span> : null}
-      </button>
-    );
-  }
-
-  return (
-    <div className={className}>
+  const body = (
+    <>
       <span className="stat__label">{label}</span>
       <strong className="stat__value">{value}</strong>
       {hint ? <span className="stat__hint">{hint}</span> : null}
-    </div>
+    </>
+  );
+
+  return (
+    <TiltCard className="tilt-card--stat">
+      {onClick ? (
+        <button
+          type="button"
+          className={className}
+          onClick={onClick}
+          aria-pressed={active}
+          title={title ?? `הצג פירוט: ${label}`}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className={className}>{body}</div>
+      )}
+    </TiltCard>
   );
 }

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import { useAuth } from "../context/AuthContext";
 import { getToken } from "../services/api";
 import { isAdminAccount } from "../utils/roles";
 import { hasSeenWelcome, markWelcomeSeen } from "../utils/welcomeSplash";
 import { BrandMark } from "./BrandMark";
+import { MotionButton } from "./motion/MotionButton";
+import { useMotionPrefs } from "../hooks/useMotionPrefs";
 
 export function WelcomeSplash() {
   const { user, loading } = useAuth();
@@ -12,6 +15,7 @@ export function WelcomeSplash() {
   const ctaRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(() => !hasSeenWelcome());
 
+  const { reduceMotion } = useMotionPrefs();
   const waitingOnSession = loading && Boolean(getToken());
   const hideForAdmin = Boolean(user && isAdminAccount(user));
   const visible = open && !waitingOnSession && !hideForAdmin;
@@ -56,7 +60,12 @@ export function WelcomeSplash() {
       aria-describedby={copyId}
     >
       <div className="welcome-splash__field" aria-hidden="true" />
-      <div className="welcome-splash__sheet">
+      <motion.div
+        className="welcome-splash__sheet"
+        initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+      >
         <div className="welcome-splash__seal">
           <BrandMark className="welcome-splash__mark" size={128} alt="" />
         </div>
@@ -66,15 +75,15 @@ export function WelcomeSplash() {
         <h1 className="welcome-splash__wordmark" id={titleId}>
           תזרים
         </h1>
-        <button
+        <MotionButton
           ref={ctaRef}
           type="button"
           className="welcome-splash__cta"
           onClick={dismiss}
         >
           המשך
-        </button>
-      </div>
+        </MotionButton>
+      </motion.div>
     </div>
   );
 }

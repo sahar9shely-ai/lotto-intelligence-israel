@@ -1,12 +1,18 @@
 import { PersonalAssistant } from "./PersonalAssistant";
 import { NotificationCenter } from "./NotificationCenter";
 import { PaymentNudgeDialog } from "./PaymentNudgeDialog";
+import { PageTransition } from "./motion/PageTransition";
+import { MotionButton } from "./motion/MotionButton";
+import { useMotionPrefs } from "../hooks/useMotionPrefs";
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState, type SVGProps } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isAdminAccount } from "../utils/roles";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
+
+const MotionNavLink = motion.create(NavLink);
 
 function DockGlyph({ path }: { path: string }) {
   const common: SVGProps<SVGSVGElement> = {
@@ -118,6 +124,9 @@ function HomeOrbGlyph() {
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const page = useOutlet();
+  const { reduceMotion } = useMotionPrefs();
   const isManager = Boolean(user?.is_manager);
   const { data: siteStatus, reload: reloadStatus } = useAsync(
     () => api.siteStatus(),
@@ -309,9 +318,9 @@ export function AppShell() {
             </nav>
             <div className="topbar__tools">
               {isManager ? <NotificationCenter /> : null}
-              <button type="button" className="topbar__logout" onClick={signOut}>
+              <MotionButton type="button" className="topbar__logout" onClick={signOut}>
                 יציאה
-              </button>
+              </MotionButton>
             </div>
           </header>
         </div>
@@ -319,45 +328,53 @@ export function AppShell() {
 
       <div className="app">
         <main className="main">
-          <Outlet />
+          <AnimatePresence mode="wait">
+            <PageTransition key={location.pathname}>{page}</PageTransition>
+          </AnimatePresence>
         </main>
       </div>
 
       <nav className="dock" aria-label="ניווט ראשי בטלפון">
         <div className="dock__bar">
           {dockLeading.map((link) => (
-            <NavLink
+            <MotionNavLink
               key={`dock-${link.to}`}
               to={link.to}
               className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
               onClick={() => setMoreOpen(false)}
+              whileTap={reduceMotion ? undefined : { scale: 0.94 }}
+              transition={{ type: "spring", stiffness: 520, damping: 28 }}
             >
               <DockGlyph path={link.to} />
               <span>{link.dockLabel}</span>
-            </NavLink>
+            </MotionNavLink>
           ))}
           <span className="dock__home-slot" aria-hidden="true" />
           {dockTrailing.map((link) => (
-            <NavLink
+            <MotionNavLink
               key={`dock-${link.to}`}
               to={link.to}
               className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
               onClick={() => setMoreOpen(false)}
+              whileTap={reduceMotion ? undefined : { scale: 0.94 }}
+              transition={{ type: "spring", stiffness: 520, damping: 28 }}
             >
               <DockGlyph path={link.to} />
               <span>{link.dockLabel}</span>
-            </NavLink>
+            </MotionNavLink>
           ))}
-          <button
+          <motion.button
             type="button"
             className={moreOpen ? "dock__link is-active" : "dock__link"}
             aria-expanded={moreOpen}
             aria-controls="more-sheet"
             onClick={() => setMoreOpen((v) => !v)}
+            whileTap={reduceMotion ? undefined : { scale: 0.94 }}
+            transition={{ type: "spring", stiffness: 520, damping: 28 }}
           >
             <DockGlyph path="more" />
             <span>עוד</span>
-          </button>
+          </motion.button>
           <NavLink
             to="/"
             end
@@ -366,7 +383,13 @@ export function AppShell() {
             title="לוח"
             onClick={() => setMoreOpen(false)}
           >
-            <HomeOrbGlyph />
+            <motion.span
+              className="dock__home-glyph"
+              whileTap={reduceMotion ? undefined : { scale: 0.9 }}
+              transition={{ type: "spring", stiffness: 520, damping: 28 }}
+            >
+              <HomeOrbGlyph />
+            </motion.span>
           </NavLink>
         </div>
       </nav>

@@ -1,5 +1,7 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
+import { PageTransition } from "./components/motion/PageTransition";
 import { RequireAuth, RequireManager } from "./components/RequireAuth";
 import { WelcomeSplash } from "./components/WelcomeSplash";
 import { AuthProvider } from "./context/AuthContext";
@@ -20,9 +22,35 @@ export function App() {
   return (
     <AuthProvider>
       <WelcomeSplash />
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <AnimatedRoutes />
+    </AuthProvider>
+  );
+}
+
+function AnimatedRoutes() {
+  const location = useLocation();
+  const isPublicAuth =
+    location.pathname === "/login" || location.pathname === "/forgot-password";
+
+  return (
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={isPublicAuth ? location.pathname : "app"}>
+        <Route
+          path="/login"
+          element={
+            <PageTransition>
+              <LoginPage />
+            </PageTransition>
+          }
+        />
+        <Route
+          path="/forgot-password"
+          element={
+            <PageTransition>
+              <ForgotPasswordPage />
+            </PageTransition>
+          }
+        />
 
         <Route element={<RequireAuth />}>
           <Route path="change-password" element={<ChangePasswordPage />} />
@@ -43,6 +71,6 @@ export function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </AuthProvider>
+    </AnimatePresence>
   );
 }

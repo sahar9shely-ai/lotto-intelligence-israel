@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
+import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -137,11 +138,13 @@ export function DocumentsPage() {
   return (
     <div className="page">
       <Toast message={message} onClear={() => setMessage(null)} />
-      <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
-        <div>
-          <h1 className="page-intro__title">כספת מסמכים</h1>
-        </div>
-      </header>
+      <ScrollReveal>
+        <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
+          <div>
+            <h1 className="page-intro__title">כספת מסמכים</h1>
+          </div>
+        </header>
+      </ScrollReveal>
 
       {isManager && investorOptions.length > 0 ? (
         <div className="scope-bar" role="tablist" aria-label="בחירת משקיע">
@@ -180,7 +183,8 @@ export function DocumentsPage() {
         </div>
       ) : (
         groups.map((group) => (
-          <Panel key={group.kind} title={group.title} className="vault-panel">
+          <ScrollReveal key={group.kind}>
+            <Panel title={group.title} className="vault-panel">
             <ul className="vault-list">
               {group.items.map((doc) => {
                 const viewBusy = busyId === `${doc.id}:view`;
@@ -219,6 +223,7 @@ export function DocumentsPage() {
               })}
             </ul>
           </Panel>
+          </ScrollReveal>
         ))
       )}
     </div>
