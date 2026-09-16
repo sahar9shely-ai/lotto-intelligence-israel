@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 type PanelProps = {
+  id?: string;
   title: string;
   subtitle?: string;
   action?: ReactNode;
@@ -9,9 +10,18 @@ type PanelProps = {
   delay?: number;
 };
 
-export function Panel({ title, subtitle, action, children, className = "", delay = 0 }: PanelProps) {
+export function Panel({
+  id,
+  title,
+  subtitle,
+  action,
+  children,
+  className = "",
+  delay = 0,
+}: PanelProps) {
   return (
     <section
+      id={id}
       className={`panel ${className}`.trim()}
       style={{ animationDelay: `${delay}ms` }}
     >

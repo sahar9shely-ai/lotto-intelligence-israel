@@ -63,6 +63,14 @@ export function PersonalAreaPage() {
     setEmail(user?.email ?? "");
   }, [user?.phone, user?.email]);
 
+  useEffect(() => {
+    const hash = window.location.hash.replace("#", "");
+    if (!hash) return;
+    const node = document.getElementById(hash);
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   async function onSaveDetails(e: FormEvent) {
     e.preventDefault();
     const nextPhone = phone.trim();
@@ -95,6 +103,10 @@ export function PersonalAreaPage() {
 
   async function onSavePassword(e: FormEvent) {
     e.preventDefault();
+    if (!currentPassword) {
+      setPasswordError("יש להזין את הסיסמה הנוכחית");
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setPasswordError("שתי הסיסמאות החדשות אינן זהות");
       return;
@@ -131,12 +143,24 @@ export function PersonalAreaPage() {
           <p className="page-intro__eyebrow">החשבון שלי</p>
           <h1 className="page-intro__title">אזור אישי</h1>
           <p className="page-intro__lead">
-            כאן מעדכנים טלפון, מייל וסיסמה. השם המלא נשאר קבוע במערכת.
+            טלפון ומייל לעדכון, והחלפת סיסמה באותו מסך. השם המלא נעול.
           </p>
         </div>
+        <nav className="page-head__actions personal-area__toc" aria-label="חלקי האזור האישי">
+          <a className="btn btn--ghost btn--small" href="#personal-details">
+            פרטים
+          </a>
+          <a className="btn btn--primary btn--small" href="#change-password">
+            החלפת סיסמה
+          </a>
+        </nav>
       </header>
 
-      <Panel title="פרטים אישיים" subtitle="השם נקבע במערכת ולא ניתן לשינוי">
+      <Panel
+        id="personal-details"
+        title="פרטים אישיים"
+        subtitle="שם מלא לקריאה בלבד. טלפון ומייל ניתנים לעריכה."
+      >
         <form className="form" onSubmit={onSaveDetails} autoComplete="on">
           <label className="locked-field">
             שם מלא
@@ -180,7 +204,17 @@ export function PersonalAreaPage() {
         </form>
       </Panel>
 
-      <Panel title="החלפת סיסמה" subtitle="הסיסמה החדשה נשארת אצלך בלבד">
+      <Panel
+        id="change-password"
+        className="personal-area__password"
+        title="החלפת סיסמה"
+        subtitle="שלושה שדות חובה: סיסמה נוכחית, סיסמה חדשה, ואימות."
+        action={
+          <span className="personal-area__section-icon" aria-hidden="true">
+            <LockGlyph />
+          </span>
+        }
+      >
         <form className="form" onSubmit={onSavePassword} autoComplete="on">
           <PasswordField
             label="הסיסמה הנוכחית"
@@ -208,6 +242,7 @@ export function PersonalAreaPage() {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
           />
+          <p className="hint">הסיסמה החדשה חייבת להכיל לפחות 8 תווים.</p>
           {passwordError ? <p className="form-error">{passwordError}</p> : null}
           <button type="submit" className="btn btn--primary" disabled={passwordBusy}>
             {passwordBusy ? "שומרים..." : "שמירת סיסמה חדשה"}

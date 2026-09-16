@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthBrand } from "../components/BrandMark";
 import { PasswordField } from "../components/PasswordField";
@@ -9,6 +9,13 @@ export function ChangePasswordPage() {
   const { user, refresh, logout } = useAuth();
   const navigate = useNavigate();
   const forced = Boolean(user?.must_reset_password);
+
+  useEffect(() => {
+    if (user && !forced && !user.is_manager) {
+      navigate("/account#change-password", { replace: true });
+    }
+  }, [user, forced, navigate]);
+
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -32,6 +39,10 @@ export function ChangePasswordPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (user && !forced && !user.is_manager) {
+    return <div className="state">מעבירים לאזור האישי...</div>;
   }
 
   return (
