@@ -8,15 +8,25 @@ import { BrandMark } from "./BrandMark";
 import { FallingWealth } from "./motion/FallingWealth";
 import { MotionButton } from "./motion/MotionButton";
 import { WordmarkLetters } from "./motion/WordmarkLetters";
-import { splashTimings, useCompactSplash } from "./motion/splashChoreography";
+import {
+  splashExitTransform,
+  splashTimings,
+  useCompactSplash,
+  type SplashExitTransform,
+} from "./motion/splashChoreography";
 import { useMotionPrefs } from "../hooks/useMotionPrefs";
+
+const REST_EXIT: SplashExitTransform = { shiftX: 0, shiftY: 0, scale: 1 };
 
 export function WelcomeSplash() {
   const { user, loading } = useAuth();
   const titleId = useId();
   const copyId = useId();
   const ctaRef = useRef<HTMLButtonElement>(null);
+  const sealRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(() => !hasSeenWelcome());
+  const [exiting, setExiting] = useState(false);
+  const [exitTransform, setExitTransform] = useState<SplashExitTransform>(REST_EXIT);
 
   const { reduceMotion } = useMotionPrefs();
   const compact = useCompactSplash();
@@ -26,15 +36,31 @@ export function WelcomeSplash() {
   const visible = open && !waitingOnSession && !hideForAdmin;
   const userRef = useRef(user);
 
-  const dismiss = useCallback(() => {
-    markWelcomeSeen();
+  const finishExit = useCallback(() => {
     setOpen(false);
+    setExiting(false);
+    setExitTransform(REST_EXIT);
   }, []);
+
+  const dismiss = useCallback(() => {
+    if (exiting) {
+      finishExit();
+      return;
+    }
+    markWelcomeSeen();
+    const el = sealRef.current;
+    if (!reduceMotion && el) {
+      setExitTransform(splashExitTransform(el.getBoundingClientRect()));
+    }
+    setExiting(true);
+  }, [exiting, finishExit, reduceMotion]);
 
   useEffect(() => {
     const wasSignedIn = Boolean(userRef.current);
     userRef.current = user;
     if (wasSignedIn && !user) {
+      setExiting(false);
+      setExitTransform(REST_EXIT);
       setOpen(!hasSeenWelcome());
     }
   }, [user]);
@@ -43,7 +69,7 @@ export function WelcomeSplash() {
     if (!visible) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    ctaRef.current?.focus();
+    if (!exiting) ctaRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") dismiss();
     };
@@ -52,37 +78,107 @@ export function WelcomeSplash() {
       document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
     };
-  }, [visible, dismiss]);
+  }, [visible, dismiss, exiting]);
+
+  useEffect(() => {
+    if (!exiting) return;
+    const seconds = reduceMotion ? timings.reducedExitDuration : timings.exitTotalDuration;
+    const id = window.setTimeout(finishExit, Math.round(seconds * 1000));
+    return () => window.clearTimeout(id);
+  }, [exiting, reduceMotion, timings.exitTotalDuration, timings.reducedExitDuration, finishExit]);
 
   if (!visible) return null;
 
+  const splashOpacityDelay = reduceMotion
+    ? 0
+    : timings.zoomDelay + timings.zoomDuration + timings.holdAtFill;
+
   return (
-    <div
-      className="welcome-splash"
+    <motion.div
+      className={exiting ? "welcome-splash is-exiting" : "welcome-splash"}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={copyId}
+      aria-busy={exiting || undefined}
+      initial={false}
+      animate={{ opacity: exiting ? 0 : 1 }}
+      transition={{
+        duration: reduceMotion ? timings.reducedExitDuration : timings.splashFadeDuration,
+        delay: exiting ? splashOpacityDelay : 0,
+        ease: timings.fadeEase,
+      }}
     >
-      <div className="welcome-splash__field" aria-hidden="true" />
-      <FallingWealth />
+      <motion.div
+        className="welcome-splash__field"
+        aria-hidden="true"
+        initial={false}
+        animate={exiting && !reduceMotion ? { scale: 1.14 } : { scale: 1 }}
+        transition={{
+          duration: reduceMotion ? 0.2 : timings.zoomDuration,
+          delay: exiting && !reduceMotion ? timings.zoomDelay : 0,
+          ease: timings.zoomEase,
+        }}
+      />
+      <motion.div
+        className="welcome-splash__wealth"
+        aria-hidden="true"
+        initial={false}
+        animate={{ opacity: exiting ? 0 : 1 }}
+        transition={{
+          duration: reduceMotion ? 0.2 : timings.wealthExitDuration,
+          ease: timings.fadeEase,
+        }}
+      >
+        <FallingWealth />
+      </motion.div>
       <div className="welcome-splash__sheet">
         <motion.div
+          ref={sealRef}
           className="welcome-splash__seal"
-          initial={reduceMotion ? false : { opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.94 }}
+          animate={
+            exiting
+              ? reduceMotion
+                ? { opacity: 1, scale: 1, x: 0, y: 0 }
+                : {
+                    opacity: 1,
+                    scale: exitTransform.scale,
+                    x: exitTransform.shiftX,
+                    y: exitTransform.shiftY,
+                  }
+              : { opacity: 1, scale: 1, x: 0, y: 0 }
+          }
           transition={
-            reduceMotion
-              ? { duration: 0.28, ease: timings.fadeEase }
-              : timings.sealSpring
+            exiting && !reduceMotion
+              ? {
+                  scale: {
+                    duration: timings.zoomDuration,
+                    delay: timings.zoomDelay,
+                    ease: timings.zoomEase,
+                  },
+                  x: {
+                    duration: timings.zoomDuration,
+                    delay: timings.zoomDelay,
+                    ease: timings.zoomEase,
+                  },
+                  y: {
+                    duration: timings.zoomDuration,
+                    delay: timings.zoomDelay,
+                    ease: timings.zoomEase,
+                  },
+                }
+              : reduceMotion
+                ? { duration: 0.28, ease: timings.fadeEase }
+                : timings.sealSpring
           }
         >
           <motion.div
             className="welcome-splash__seal-float"
-            animate={reduceMotion ? undefined : { y: [0, -4.5, 0] }}
+            animate={exiting || reduceMotion ? { y: 0 } : { y: [0, -4.5, 0] }}
             transition={
-              reduceMotion
-                ? undefined
+              exiting || reduceMotion
+                ? { duration: 0.22, ease: timings.fadeEase }
                 : {
                     duration: timings.sealBreatheDuration,
                     repeat: Infinity,
@@ -91,22 +187,26 @@ export function WelcomeSplash() {
                   }
             }
           >
-            <BrandMark className="welcome-splash__mark" size={128} alt="" />
+            <BrandMark className="welcome-splash__mark" size={385} alt="" />
           </motion.div>
         </motion.div>
         <motion.p
           className="welcome-splash__kicker"
           id={copyId}
-          initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+          animate={
+            exiting ? { opacity: 0, y: -8 } : { opacity: 1, y: 0 }
+          }
           transition={
             reduceMotion
               ? { duration: 0.28, ease: timings.fadeEase }
-              : {
-                  duration: compact ? 0.34 : 0.42,
-                  delay: timings.kickerDelay,
-                  ease: timings.fadeEase,
-                }
+              : exiting
+                ? { duration: timings.copyExitDuration, ease: timings.fadeEase }
+                : {
+                    duration: timings.kickerEnterDuration,
+                    delay: timings.kickerDelay,
+                    ease: timings.fadeEase,
+                  }
           }
         >
           התיק שלך
@@ -116,15 +216,20 @@ export function WelcomeSplash() {
           className="welcome-splash__wordmark"
           compact={compact}
           reduceMotion={reduceMotion}
+          exiting={exiting}
         />
         <motion.div
           className="welcome-splash__cta-enter"
-          initial={reduceMotion ? false : { opacity: 0, scale: 0.94 }}
-          animate={{ opacity: 1, scale: 1 }}
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
+          animate={
+            exiting ? { opacity: 0, y: 10, scale: 0.98 } : { opacity: 1, scale: 1, y: 0 }
+          }
           transition={
             reduceMotion
               ? { duration: 0.28, ease: timings.fadeEase }
-              : { ...timings.ctaSpring, delay: timings.ctaDelay }
+              : exiting
+                ? { duration: timings.copyExitDuration, ease: timings.fadeEase }
+                : { ...timings.ctaSpring, delay: timings.ctaDelay }
           }
         >
           <MotionButton
@@ -132,11 +237,12 @@ export function WelcomeSplash() {
             type="button"
             className="welcome-splash__cta"
             onClick={dismiss}
+            disabled={exiting}
           >
             המשך
           </MotionButton>
         </motion.div>
       </div>
-    </div>
+    </motion.div>
   );
 }

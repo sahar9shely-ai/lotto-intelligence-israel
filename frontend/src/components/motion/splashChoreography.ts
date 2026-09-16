@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 export const SPLASH_WORDMARK = "תזרים";
 
 const EASE_LUXE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+/** Camera push — slow start, confident finish. */
+const EASE_ZOOM: [number, number, number, number] = [0.16, 0.72, 0.12, 1];
 const COMPACT_MQ = "(max-width: 640px)";
 
 function readMq(query: string): boolean {
@@ -28,39 +30,82 @@ export function splitWordmark(word: string): string[] {
   return Array.from(word);
 }
 
+export type SplashExitTransform = {
+  shiftX: number;
+  shiftY: number;
+  scale: number;
+};
+
+/**
+ * Dolly the seal's center to the viewport center, then scale so the circle
+ * covers (or nearly covers) the screen. Transform origin stays at 50% 50%.
+ */
+export function splashExitTransform(rect: DOMRect): SplashExitTransform {
+  const vw = window.innerWidth || 1;
+  const vh = window.innerHeight || 1;
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const width = Math.max(rect.width, 1);
+  const height = Math.max(rect.height, 1);
+  return {
+    shiftX: vw / 2 - cx,
+    shiftY: vh / 2 - cy,
+    scale: Math.max(vw / width, vh / height) * 1.08,
+  };
+}
+
 export function splashTimings(compact: boolean) {
-  const letterDelay = compact ? 0.12 : 0.16;
-  const letterStagger = compact ? 0.05 : 0.07;
-  const lastLetterAt = letterDelay + 4 * letterStagger;
-  const kickerDelay = lastLetterAt + (compact ? 0.18 : 0.22);
-  const ctaDelay = kickerDelay + (compact ? 0.16 : 0.22);
+  const letterCount = Math.max(splitWordmark(SPLASH_WORDMARK).length, 1);
+  // Slow, readable RTL stagger — fade+rise, not a bounce.
+  const letterDelay = compact ? 0.28 : 0.4;
+  const letterStagger = compact ? 0.16 : 0.2;
+  const letterDuration = compact ? 0.72 : 0.9;
+  const lastLetterAt = letterDelay + (letterCount - 1) * letterStagger;
+  const kickerDelay = lastLetterAt + (compact ? 0.42 : 0.58);
+  const ctaDelay = kickerDelay + (compact ? 0.32 : 0.42);
+
+  const copyExitDuration = compact ? 0.28 : 0.34;
+  const zoomDuration = compact ? 0.78 : 0.92;
+  const holdAtFill = compact ? 0.1 : 0.16;
+  const splashFadeDuration = compact ? 0.36 : 0.44;
+  const reducedExitDuration = 0.32;
 
   return {
     letterDelay,
     letterStagger,
-    letterFromY: compact ? 20 : 28,
+    letterDuration,
+    letterFromY: compact ? 12 : 16,
     kickerDelay,
     ctaDelay,
-    sealBreatheDelay: compact ? 0.48 : 0.62,
-    sealBreatheDuration: compact ? 3.15 : 3.7,
-    letterSpring: {
-      type: "spring" as const,
-      stiffness: compact ? 380 : 320,
-      damping: compact ? 16 : 14,
-      mass: compact ? 0.52 : 0.6,
+    sealBreatheDelay: compact ? 0.82 : 1.05,
+    sealBreatheDuration: compact ? 3.4 : 4,
+    letterTween: {
+      duration: letterDuration,
+      ease: EASE_LUXE,
     },
     sealSpring: {
       type: "spring" as const,
-      stiffness: compact ? 280 : 240,
-      damping: 20,
-      mass: 0.82,
+      stiffness: compact ? 180 : 150,
+      damping: 22,
+      mass: 0.9,
     },
     ctaSpring: {
       type: "spring" as const,
-      stiffness: compact ? 340 : 300,
-      damping: 22,
-      mass: 0.55,
+      stiffness: compact ? 220 : 190,
+      damping: 24,
+      mass: 0.7,
     },
     fadeEase: EASE_LUXE,
+    zoomEase: EASE_ZOOM,
+    copyExitDuration,
+    wealthExitDuration: compact ? 0.3 : 0.36,
+    zoomDelay: copyExitDuration * 0.35,
+    zoomDuration,
+    holdAtFill,
+    splashFadeDuration,
+    reducedExitDuration,
+    exitTotalDuration:
+      copyExitDuration * 0.35 + zoomDuration + holdAtFill + splashFadeDuration,
+    kickerEnterDuration: compact ? 0.42 : 0.52,
   };
 }
