@@ -1826,6 +1826,14 @@ textarea:focus {
   min-height: 48px;
 }
 
+@media (max-width: 820px) {
+  .shell:has(.personal-area) .assistant-fab,
+  .shell:has(.personal-area) .assistant-panel {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
 .password-field-label {
   min-width: 0;
 }
