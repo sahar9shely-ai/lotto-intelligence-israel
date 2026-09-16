@@ -7920,8 +7920,19 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .welcome-splash__sheet {
-    animation: none;
+  .welcome-splash__sheet,
+  .panel,
+  .stat,
+  .auth-card,
+  .main,
+  .quote-card {
+    animation: none !important;
+  }
+
+  .btn:hover:not(:disabled),
+  .btn:active:not(:disabled),
+  .quote-card:hover {
+    transform: none;
   }
 }
 
@@ -8412,4 +8423,67 @@ body {
     transition: none;
     transform: translateX(-50%);
   }
+}
+
+/* Framer Motion support — keep CSS animation off where JS owns enter/tilt. */
+.page-transition {
+  min-width: 0;
+}
+
+.main,
+.panel,
+.stat,
+.auth-card {
+  animation: none;
+}
+
+.welcome-splash__sheet {
+  animation: none;
+}
+
+.tilt-card {
+  transform-style: preserve-3d;
+}
+
+.tilt-card--stat {
+  min-width: 0;
+  height: 100%;
+}
+
+.tilt-card--stat > .stat {
+  height: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tilt-card:hover {
+    will-change: transform;
+  }
+}
+
+.hero-depth__glow {
+  position: absolute;
+  inset: -30% -14% auto;
+  height: 72%;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    ellipse 48% 58% at 50% 36%,
+    rgba(232, 216, 168, 0.22),
+    transparent 70%
+  );
+}
+
+.investor-hero > *:not(.hero-depth__glow) {
+  position: relative;
+  z-index: 1;
+}
+
+.dock__home-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
 }

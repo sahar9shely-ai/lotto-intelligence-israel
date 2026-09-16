@@ -1,11 +1,15 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import { AuthBrand } from "../components/BrandMark";
+import { MotionButton } from "../components/motion/MotionButton";
 import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../context/AuthContext";
+import { useMotionPrefs } from "../hooks/useMotionPrefs";
 
 export function LoginPage() {
   const { user, loading, login } = useAuth();
+  const { reduceMotion } = useMotionPrefs();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -42,7 +46,12 @@ export function LoginPage() {
   return (
     <div className="auth-screen">
       <div className="atmosphere atmosphere--private" aria-hidden="true" />
-      <div className="auth-card">
+      <motion.div
+        className="auth-card"
+        initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      >
         <AuthBrand kicker="התיק שלך" />
 
         <form className="form auth-card__form" onSubmit={onSubmit} autoComplete="on">
@@ -70,15 +79,15 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
           {error ? <p className="form-error">{error}</p> : null}
-          <button type="submit" className="btn btn--primary btn--wide" disabled={busy}>
+          <MotionButton type="submit" className="btn btn--primary btn--wide" disabled={busy}>
             {busy ? "נכנס..." : "כניסה לתיק הפרטי"}
-          </button>
+          </MotionButton>
         </form>
 
         <div className="auth-links">
           <Link to="/forgot-password">שכחתי סיסמה</Link>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

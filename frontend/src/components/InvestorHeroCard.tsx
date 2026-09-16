@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import type { Payment } from "../types/investments";
 import { formatDate, formatMoney } from "../utils/format";
+import { HeroDepth } from "./motion/HeroDepth";
+import { MotionButton } from "./motion/MotionButton";
 
 export function InvestorHeroCard({
   greeting,
@@ -20,7 +22,7 @@ export function InvestorHeroCard({
   const nextIsAwaiting = nextPayment?.status === "awaiting_confirmation";
 
   return (
-    <section className="investor-hero" aria-label="התיק הפרטי">
+    <HeroDepth className="investor-hero" aria-label="התיק הפרטי">
       <h1 className="investor-hero__title">
         {greeting ? `שלום ${greeting}` : "התיק הפרטי"}
       </h1>
@@ -54,14 +56,14 @@ export function InvestorHeroCard({
       </div>
       <div className="investor-hero__actions">
         {onDownloadMonthly ? (
-          <button
+          <MotionButton
             type="button"
             className="btn btn--gold investor-hero__cta"
             disabled={monthlyBusy}
             onClick={onDownloadMonthly}
           >
             {monthlyBusy ? "מכינים דוח..." : "דוח חודשי"}
-          </button>
+          </MotionButton>
         ) : null}
         <Link className="btn btn--ghost hide-on-phone" to="/documents">
           כספת מסמכים
@@ -70,6 +72,6 @@ export function InvestorHeroCard({
           לתשלומים
         </Link>
       </div>
-    </section>
+    </HeroDepth>
   );
 }

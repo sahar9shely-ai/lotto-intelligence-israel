@@ -5,6 +5,7 @@ import { InvestorHeroCard } from "../components/InvestorHeroCard";
 import { ManagerIncomePanel } from "../components/ManagerIncomePanel";
 import { Panel } from "../components/Panel";
 import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
+import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Stat } from "../components/Stat";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
@@ -136,25 +137,27 @@ export function DashboardPage() {
     <div className={`page${!isManager ? " page--investor-home" : ""}`}>
       <Toast message={dashMessage} onClear={() => setDashMessage(null)} />
       {isManager ? (
-        <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
-          <div>
-            <h1 className="page-intro__title">
-              {isAdmin
-                ? scopeName
-                  ? `החזר חודשי · ${scopeName}`
-                  : "לוח בקרה"
-                : `שלום ${user?.investor_name || user?.username || ""}`}
-            </h1>
-          </div>
-          <div className="page-head__actions hide-on-phone">
-            <Link className="btn btn--admin" to="/investors">
-              למשקיעים
-            </Link>
-            <Link className="btn btn--ghost" to="/payments">
-              תשלומים
-            </Link>
-          </div>
-        </header>
+        <ScrollReveal>
+          <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
+            <div>
+              <h1 className="page-intro__title">
+                {isAdmin
+                  ? scopeName
+                    ? `החזר חודשי · ${scopeName}`
+                    : "לוח בקרה"
+                  : `שלום ${user?.investor_name || user?.username || ""}`}
+              </h1>
+            </div>
+            <div className="page-head__actions hide-on-phone">
+              <Link className="btn btn--admin" to="/investors">
+                למשקיעים
+              </Link>
+              <Link className="btn btn--ghost" to="/payments">
+                תשלומים
+              </Link>
+            </div>
+          </header>
+        </ScrollReveal>
       ) : (
         <div className="investor-home-stage">
           <InvestorHeroCard
@@ -169,19 +172,26 @@ export function DashboardPage() {
       )}
 
       {!isManager ? (
-        <PaymentCeremonyCard
-          payments={awaitingPayments}
-          busyId={ceremonyBusyId}
-          onReceived={(id) => void confirmReceived(id)}
-          onNotYet={(id) => void markNotYet(id)}
-        />
+        <ScrollReveal>
+          <PaymentCeremonyCard
+            payments={awaitingPayments}
+            busyId={ceremonyBusyId}
+            onReceived={(id) => void confirmReceived(id)}
+            onNotYet={(id) => void markNotYet(id)}
+          />
+        </ScrollReveal>
       ) : null}
 
-      {isManager ? <DashboardUrgentOps investorId={filterId} /> : null}
+      {isManager ? (
+        <ScrollReveal>
+          <DashboardUrgentOps investorId={filterId} />
+        </ScrollReveal>
+      ) : null}
 
       {(topupRequests ?? []).some(
         (r) => r.status === "pending" || r.status === "contract" || r.can_reverse_investment,
       ) ? (
+        <ScrollReveal>
         <Panel
           title={isManager ? "בקשות מסלול" : "הוסף מסלול"}
           action={
@@ -214,12 +224,13 @@ export function DashboardPage() {
                   <span className={`badge badge--${r.status}`}>{statusLabel(r.status)}</span>
                 </li>
               ))}
-          </ul>
-        </Panel>
+            </ul>
+          </Panel>
+        </ScrollReveal>
       ) : null}
 
       {isManager && investorScopeOptions.length > 0 ? (
-        <div className="scope-bar" role="tablist" aria-label="סינון סיכום">
+        <ScrollReveal className="scope-bar" role="tablist" aria-label="סינון סיכום">
           <button
             type="button"
             role="tab"
@@ -241,17 +252,19 @@ export function DashboardPage() {
               {inv.name}
             </button>
           ))}
-        </div>
+        </ScrollReveal>
       ) : null}
 
       {isAdmin ? (
-        <ManagerIncomePanel variant="admin" investorId={filterId} />
+        <ScrollReveal>
+          <ManagerIncomePanel variant="admin" investorId={filterId} />
+        </ScrollReveal>
       ) : (
         <>
       {!isManager ? (
         <p className="ledger-kicker">פירוט המסלול — מזומן וחיסכון בנפרד</p>
       ) : null}
-      <div className={`money-ledger${!isManager ? " money-ledger--with-hero money-ledger--secondary" : ""}`}>
+      <ScrollReveal className={`money-ledger${!isManager ? " money-ledger--with-hero money-ledger--secondary" : ""}`}>
         <div className="money-ledger__item money-ledger__item--accent">
           <span>{isManager && !scopeName ? "סך קרן פעילה" : "קרן"}</span>
           <strong>{formatMoney(data.total_principal)}</strong>
@@ -293,10 +306,10 @@ export function DashboardPage() {
             מזומן {formatMoney(cash)} + חיסכון {formatMoney(savings)}
           </em>
         </div>
-      </div>
+      </ScrollReveal>
 
       {isManager && filterId == null && !isAdmin ? (
-        <div className="stats-grid stats-grid--compact hide-on-phone">
+        <ScrollReveal className="stats-grid stats-grid--compact hide-on-phone">
           <Stat
             label="עמלת ניהול חודשית"
             value={formatMoney(data.monthly_manager_fees)}
@@ -309,14 +322,19 @@ export function DashboardPage() {
             hint={`השקעה עצמית ${formatMoney(data.monthly_manager_own_total ?? data.monthly_manager_own_payout)} + עמלה`}
             tone="manager"
           />
-        </div>
+        </ScrollReveal>
       ) : null}
 
-      {isManager && filterId == null && !isAdmin ? <ManagerIncomePanel /> : null}
+      {isManager && filterId == null && !isAdmin ? (
+        <ScrollReveal>
+          <ManagerIncomePanel />
+        </ScrollReveal>
+      ) : null}
         </>
       )}
 
       {showOpsFeed ? (
+        <ScrollReveal>
         <Panel
           className="hide-on-phone"
           title="יומן מעקב"
@@ -376,9 +394,11 @@ export function DashboardPage() {
             </ul>
           )}
         </Panel>
+        </ScrollReveal>
       ) : null}
 
       {showOpsFeed && (alerts?.length ?? 0) > 0 ? (
+        <ScrollReveal>
         <Panel
           title="התראות כניסה"
           action={
@@ -415,12 +435,13 @@ export function DashboardPage() {
                 </button>
               </li>
             ))}
-          </ul>
+            </ul>
         </Panel>
+        </ScrollReveal>
       ) : null}
 
       {!isAdmin ? (
-      <div className="grid-2">
+      <ScrollReveal className="grid-2" delay={80}>
         {isManager ? (
           <Panel
             title={scopeName ? `פירוט · ${scopeName}` : "משקיעים"}
@@ -528,10 +549,11 @@ export function DashboardPage() {
             </ul>
           )}
         </Panel>
-      </div>
+      </ScrollReveal>
       ) : null}
 
       {!isAdmin ? (
+      <ScrollReveal delay={200}>
       <Panel
         className="home-card home-card--yearly"
         title="סיכום שנתי וסה״כ"
@@ -582,6 +604,7 @@ export function DashboardPage() {
           <p className="empty">אין תשלומים אחרונים להצגה.</p>
         )}
       </Panel>
+      </ScrollReveal>
       ) : null}
     </div>
   );

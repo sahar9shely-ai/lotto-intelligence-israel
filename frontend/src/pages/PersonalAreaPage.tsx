@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
+import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../services/api";
@@ -138,7 +139,8 @@ export function PersonalAreaPage() {
   return (
     <div className="page personal-area">
       <Toast message={message} onClear={clearMessage} />
-      <header className="page-intro">
+      <ScrollReveal>
+        <header className="page-intro">
         <div>
           <p className="page-intro__eyebrow">החשבון שלי</p>
           <h1 className="page-intro__title">אזור אישי</h1>
@@ -155,11 +157,14 @@ export function PersonalAreaPage() {
           </a>
         </nav>
       </header>
+      </ScrollReveal>
 
+      <ScrollReveal>
       <Panel
         id="personal-details"
         title="פרטים אישיים"
         subtitle="שם מלא לקריאה בלבד. טלפון ומייל ניתנים לעריכה."
+        tilt={false}
       >
         <form className="form" onSubmit={onSaveDetails} autoComplete="on">
           <label className="locked-field">
@@ -203,12 +208,15 @@ export function PersonalAreaPage() {
           </button>
         </form>
       </Panel>
+      </ScrollReveal>
 
+      <ScrollReveal delay={80}>
       <Panel
         id="change-password"
         className="personal-area__password"
         title="החלפת סיסמה"
         subtitle="שלושה שדות חובה: סיסמה נוכחית, סיסמה חדשה, ואימות."
+        tilt={false}
         action={
           <span className="personal-area__section-icon" aria-hidden="true">
             <LockGlyph />
@@ -249,6 +257,7 @@ export function PersonalAreaPage() {
           </button>
         </form>
       </Panel>
+      </ScrollReveal>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Panel } from "../components/Panel";
 import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
 import { SavingsActions } from "../components/SavingsActions";
+import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Stat } from "../components/Stat";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
@@ -886,6 +887,7 @@ export function PaymentsPage() {
     <div className={`page${refreshing ? " page--refreshing" : ""}`}>
       {confirmDialog}
       <Toast message={message} onClear={clearMessage} />
+      <ScrollReveal>
       <header className="page-intro">
         <div>
           <h1 className="page-intro__title">
@@ -942,17 +944,20 @@ export function PaymentsPage() {
           ) : null}
         </div>
       </header>
+      </ScrollReveal>
 
       {!isManager ? (
+        <ScrollReveal>
         <PaymentCeremonyCard
           payments={payments.filter((p) => p.status === "awaiting_confirmation")}
           busyId={markBusyId}
           onReceived={(id) => void confirmPayment(id)}
           onNotYet={(id) => void rejectPayment(id)}
         />
+        </ScrollReveal>
       ) : null}
 
-      <div className="filters">
+      <ScrollReveal className="filters">
         <label>
           שנה
           <select
@@ -1014,9 +1019,9 @@ export function PaymentsPage() {
             </select>
           </label>
         ) : null}
-      </div>
+      </ScrollReveal>
 
-      <div className="grid-2 hide-on-phone">
+      <ScrollReveal className="grid-2 hide-on-phone">
         <Panel
           title="סיכום שנתי"
         >
@@ -1103,7 +1108,7 @@ export function PaymentsPage() {
             />
           </div>
         </Panel>
-      </div>
+      </ScrollReveal>
 
       {(focusPaymentId || focusMonth) && !detailFocus ? (
         <div className="detail-focus-banner" role="status">
