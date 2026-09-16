@@ -1827,6 +1827,10 @@ textarea:focus {
   min-height: 48px;
 }
 
+.personal-area {
+  padding-bottom: 32px;
+}
+
 .personal-area .page-intro {
   padding: 14px 16px;
 }
@@ -1856,6 +1860,10 @@ textarea:focus {
 }
 
 @media (max-width: 820px) {
+  .personal-area {
+    padding-bottom: 72px;
+  }
+
   .shell:has(.personal-area) .assistant-fab,
   .shell:has(.personal-area) .assistant-panel {
     visibility: hidden;
