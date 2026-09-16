@@ -5,6 +5,7 @@ import { getToken } from "../services/api";
 import { isAdminAccount } from "../utils/roles";
 import { hasSeenWelcome, markWelcomeSeen } from "../utils/welcomeSplash";
 import { BrandMark } from "./BrandMark";
+import { FallingWealth } from "./motion/FallingWealth";
 import { MotionButton } from "./motion/MotionButton";
 import { useMotionPrefs } from "../hooks/useMotionPrefs";
 
@@ -60,6 +61,7 @@ export function WelcomeSplash() {
       aria-describedby={copyId}
     >
       <div className="welcome-splash__field" aria-hidden="true" />
+      <FallingWealth />
       <motion.div
         className="welcome-splash__sheet"
         initial={reduceMotion ? false : { opacity: 0, y: 12 }}

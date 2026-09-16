@@ -7791,14 +7791,70 @@ body {
 .welcome-splash__field {
   position: absolute;
   inset: 0;
+  z-index: 0;
   background:
     radial-gradient(ellipse 80% 70% at 100% 0%, rgba(198, 164, 78, 0.16), transparent 52%),
     linear-gradient(158deg, #082421 0%, #0d3d38 54%, #155348 100%);
 }
 
+.falling-wealth {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 6%,
+    #000 92%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 6%,
+    #000 92%,
+    transparent 100%
+  );
+}
+
+.falling-wealth__defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.falling-wealth__layer {
+  position: absolute;
+  inset: 0;
+}
+
+.falling-wealth__item {
+  position: absolute;
+  top: 0;
+  will-change: transform;
+  filter: drop-shadow(0 6px 10px rgba(8, 36, 33, 0.18));
+}
+
+.falling-wealth__item--far {
+  filter: blur(0.2px) drop-shadow(0 2px 6px rgba(8, 36, 33, 0.12));
+}
+
+.falling-wealth__item--near {
+  filter: drop-shadow(0 10px 14px rgba(8, 36, 33, 0.22));
+}
+
+.falling-wealth__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .welcome-splash__sheet {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   width: min(420px, 100%);
   display: grid;
   justify-items: center;
@@ -7919,6 +7975,14 @@ body {
   }
 }
 
+@media (max-width: 820px) {
+  .falling-wealth__item,
+  .falling-wealth__item--far,
+  .falling-wealth__item--near {
+    filter: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .welcome-splash__sheet,
   .panel,
@@ -7927,6 +7991,11 @@ body {
   .main,
   .quote-card {
     animation: none !important;
+  }
+
+  .falling-wealth__item {
+    will-change: auto;
+    filter: none;
   }
 
   .btn:hover:not(:disabled),
