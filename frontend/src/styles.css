@@ -7882,6 +7882,11 @@ body {
   object-fit: contain;
 }
 
+.welcome-splash__seal-float {
+  display: grid;
+  place-items: center;
+}
+
 .welcome-splash__kicker {
   margin: 0;
   font-size: 0.82rem;
@@ -7898,6 +7903,18 @@ body {
   letter-spacing: -0.04em;
   line-height: 1;
   color: #f6f3ea;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.welcome-splash__letter {
+  display: inline-block;
+  transform-origin: 50% 88%;
+}
+
+.welcome-splash__cta-enter {
+  display: grid;
+  justify-items: center;
 }
 
 .welcome-splash__cta {
@@ -7985,6 +8002,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .welcome-splash__sheet,
+  .welcome-splash__seal-float,
+  .welcome-splash__letter,
   .panel,
   .stat,
   .auth-card,
