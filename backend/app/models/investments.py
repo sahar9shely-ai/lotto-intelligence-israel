@@ -23,6 +23,8 @@ class Investor(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
+    available_balance_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     plans: Mapped[list["InvestmentPlan"]] = relationship(back_populates="investor")
     payments: Mapped[list["Payment"]] = relationship(back_populates="investor")
     topup_requests: Mapped[list["InvestmentTopupRequest"]] = relationship(
@@ -47,6 +49,12 @@ class InvestmentPlan(Base):
     monthly_rate_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     savings_rate_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     manager_fee_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    manager_savings_rate_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    manager_savings_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    closed_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    closing_principal_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    closing_savings_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    closing_accrued_savings: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     duration_months: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
@@ -68,6 +76,22 @@ class InvestmentPlan(Base):
         uselist=False,
         foreign_keys="InvestmentTopupRequest.created_plan_id",
     )
+
+
+class WalletEntry(Base):
+    __tablename__ = "investor_wallet_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    investor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("investors.id", ondelete="SET NULL"), nullable=True, index=True)
+    investor_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("investment_plans.id", ondelete="SET NULL"), nullable=True)
+    operation_key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    operation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    balance_after_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class SavingsAction(Base):
@@ -95,7 +119,6 @@ class Payment(Base):
     __tablename__ = "payments"
     __table_args__ = (
         UniqueConstraint("plan_id", "month_number", name="uq_payments_plan_month"),
-        UniqueConstraint("investor_id", "due_date", name="uq_payments_investor_due"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

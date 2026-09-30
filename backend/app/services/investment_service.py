@@ -6,6 +6,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import update
 
 from app.models.investments import (
     AppSettings,
@@ -35,6 +36,10 @@ MANAGER_FEE_KEYS = (
     "monthly_manager_fee",
     "total_manager_fee",
     "paid_manager_total",
+    "manager_savings_rate_percent",
+    "monthly_manager_savings",
+    "accrued_manager_savings",
+    "manager_savings_start_date",
 )
 
 QUOTE_STATUSES = frozenset({"pending", "approved", "converted", "rejected"})
@@ -150,6 +155,20 @@ def redact_manager_fees(payload: dict) -> dict:
     return out
 
 
+def redact_private_manager_data(payload):
+    if isinstance(payload, list):
+        return [redact_private_manager_data(row) for row in payload]
+    if not isinstance(payload, dict):
+        return payload
+    return {key: redact_private_manager_data(value) for key, value in payload.items()
+            if key not in MANAGER_FEE_KEYS and key not in {
+                "manager_amount", "monthly_manager_fees", "monthly_manager_own_payout",
+                "monthly_manager_own_savings", "monthly_manager_own_total", "monthly_manager_total",
+                "ytd_manager_earned", "lifetime_manager_earned", "planned_manager", "paid_manager",
+                "offered_management_fee_percent",
+            }}
+
+
 def months_elapsed_inclusive(start: date, today: date, *, cap: int) -> int:
     """Count due months from start through today (inclusive), capped at track length.
 
@@ -161,6 +180,15 @@ def months_elapsed_inclusive(start: date, today: date, *, cap: int) -> int:
     due_for_month = add_months(start, diff)
     elapsed = diff + 1 if today >= due_for_month else diff
     return min(max(elapsed, 0), cap)
+
+
+def completed_months(start: date, today: date, *, cap: int) -> int:
+    if today < start or cap <= 0:
+        return 0
+    count = months_between(start, today)
+    if add_months(start, count) > today:
+        count -= 1
+    return min(max(count, 0), cap)
 
 
 def reporting_year_from_notes(notes: Optional[str]) -> Optional[int]:
@@ -223,7 +251,7 @@ def projected_compound_savings(
     savings_rate_percent: float,
     duration_months: int,
 ) -> dict:
-    """Savings accrues monthly; every 12 months the balance compounds onto the base."""
+    """Monthly savings on the original principal, without capitalization."""
     if principal <= 0 or savings_rate_percent <= 0 or duration_months <= 0:
         return {
             "monthly_savings_accrual": 0.0,
@@ -232,20 +260,8 @@ def projected_compound_savings(
         }
 
     initial_monthly = calc_monthly(principal, savings_rate_percent)
-    base = principal
-    total_savings = 0.0
-    year_bucket = 0.0
-    first_year_savings = 0.0
-
-    for month in range(1, duration_months + 1):
-        accrual = calc_monthly(base, savings_rate_percent)
-        year_bucket = round(year_bucket + accrual, 2)
-        if month % 12 == 0 or month == duration_months:
-            total_savings = round(total_savings + year_bucket, 2)
-            if month <= 12:
-                first_year_savings = total_savings
-            base = round(principal + total_savings, 2)
-            year_bucket = 0.0
+    total_savings = round(initial_monthly * duration_months, 2)
+    first_year_savings = round(initial_monthly * min(duration_months, 12), 2)
 
     return {
         "monthly_savings_accrual": initial_monthly,
@@ -422,7 +438,9 @@ def accrued_savings_for_plan(
     plan: InvestmentPlan, today: Optional[date] = None
 ) -> float:
     """Gross savings accrued from terms (before withdrawals/transfers)."""
-    today = today or date.today()
+    today = today or israel_today()
+    if plan.closed_on and plan.closing_accrued_savings is not None:
+        return float(plan.closing_accrued_savings)
     _, _, savings_rate = normalize_plan_rates(
         getattr(plan, "plan_type", None) or "monthly",
         plan.monthly_rate_percent,
@@ -431,7 +449,7 @@ def accrued_savings_for_plan(
     duration = plan_effective_duration(plan)
     if savings_rate <= 0 or duration <= 0:
         return 0.0
-    elapsed = months_elapsed_inclusive(plan.start_date, today, cap=duration)
+    elapsed = completed_months(plan.start_date, today, cap=duration)
     if elapsed <= 0:
         return 0.0
     rows = month_savings_ledger(
@@ -447,10 +465,25 @@ def available_savings_for_plan(
     plan: InvestmentPlan, today: Optional[date] = None
 ) -> float:
     """Savings still available to withdraw or move into principal."""
+    if plan.closed_on:
+        return 0.0
     accrued = accrued_savings_for_plan(plan, today)
     redeemed = float(getattr(plan, "savings_redeemed_total", 0.0) or 0.0)
     rollover = float(getattr(plan, "rollover_savings_balance", 0.0) or 0.0)
     return max(0.0, round(accrued - redeemed + rollover, 2))
+
+
+def manager_savings_for_plan(plan: InvestmentPlan, today: Optional[date] = None) -> float:
+    start = plan.manager_savings_start_date
+    if not start or not plan.manager_savings_rate_percent:
+        return 0.0
+    cutoff = today or israel_today()
+    if plan.closed_on:
+        cutoff = min(cutoff, plan.closed_on)
+    end = add_months(plan.start_date, plan_effective_duration(plan))
+    cutoff = min(cutoff, end)
+    months = completed_months(start, cutoff, cap=1200)
+    return round(calc_monthly(plan.principal, plan.manager_savings_rate_percent) * months, 2)
 
 
 def current_savings_for_plan(
@@ -461,7 +494,8 @@ def current_savings_for_plan(
 
 
 def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
-    today = today or date.today()
+    today = today or israel_today()
+    cutoff = min(today, plan.closed_on) if plan.closed_on else today
     duration = plan_effective_duration(plan)
     accrual_principal = plan_accrual_principal(plan)
     track = track_metrics(
@@ -481,10 +515,12 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
         manager_fee_percent=plan.manager_fee_percent,
         duration_months=duration if duration > 0 else plan.duration_months,
     )
-    elapsed = months_elapsed_inclusive(
-        plan.start_date, today, cap=duration if duration > 0 else plan.duration_months
+    elapsed = completed_months(
+        plan.start_date, cutoff, cap=duration if duration > 0 else plan.duration_months
     )
     remaining = max((duration if duration > 0 else plan.duration_months) - elapsed, 0)
+    if plan.closed_on:
+        remaining = 0
     payments = plan.payments or []
     paid = [p for p in payments if p.status == "paid"]
     accrued = accrued_savings_for_plan(plan, today)
@@ -496,10 +532,10 @@ def plan_metrics(plan: InvestmentPlan, today: Optional[date] = None) -> dict:
         "monthly_savings_accrual": savings_track["monthly_savings_accrual"],
         "projected_savings_balance": round(
             available
-            + max(
+            + (0 if plan.closed_on else max(
                 0.0,
                 savings_track["projected_savings_balance"] - accrued,
-            ),
+            )),
             2,
         ),
         "accrued_savings_balance": round(accrued, 2),
@@ -538,6 +574,12 @@ def redeem_savings(
     action_type = (action_type or "").strip().lower()
     if action_type not in {"withdraw", "transfer_to_principal"}:
         raise ValueError("סוג פעולה לא תקין")
+    db.query(Investor).filter(Investor.id == plan.investor_id).with_for_update().one()
+    db.refresh(plan)
+    if plan.status != "active" or plan.closed_on:
+        raise ValueError("פעולות חיסכון מותרות רק במסלול פעיל")
+    if action_type == "transfer_to_principal" and plan.manager_savings_rate_percent:
+        raise ValueError("יש לסגור ולפתוח מסלול חדש כדי לשמור את היסטוריית חיסכון המנהל")
     amount = round(float(amount or 0), 2)
     if amount <= 0:
         raise ValueError("סכום חייב להיות גדול מאפס")
@@ -560,9 +602,15 @@ def redeem_savings(
             f"אין מספיק חיסכון זמין (יתרה ₪{available:,.2f})"
         )
 
-    plan.savings_redeemed_total = round(
-        float(getattr(plan, "savings_redeemed_total", 0.0) or 0.0) + amount, 2
-    )
+    previous_redeemed = float(plan.savings_redeemed_total or 0)
+    next_redeemed = round(previous_redeemed + amount, 2)
+    changed = db.execute(update(InvestmentPlan).where(
+        InvestmentPlan.id == plan.id, InvestmentPlan.status == "active",
+        InvestmentPlan.closed_on.is_(None), InvestmentPlan.savings_redeemed_total == previous_redeemed
+    ).values(savings_redeemed_total=next_redeemed).execution_options(synchronize_session=False))
+    if changed.rowcount != 1:
+        raise ValueError("יתרת החיסכון השתנתה. רעננו ונסו שוב")
+    plan.savings_redeemed_total = next_redeemed
 
     if action_type == "transfer_to_principal":
         plan.principal = round(float(plan.principal or 0) + amount, 2)
@@ -867,7 +915,7 @@ def roll_savings_to_active_plan(
     today: Optional[date] = None,
 ) -> float:
     """Transfer leftover savings from a closed track into the investor's active track."""
-    if from_plan.id == to_plan.id:
+    if from_plan.closed_on or from_plan.id == to_plan.id:
         return 0.0
     if from_plan.status != "completed":
         return 0.0
@@ -992,6 +1040,13 @@ def serialize_plan(plan: InvestmentPlan, *, hide_fees: bool = False) -> dict:
         "monthly_rate_percent": monthly_rate,
         "savings_rate_percent": savings_rate,
         "manager_fee_percent": plan.manager_fee_percent,
+        "manager_savings_rate_percent": plan.manager_savings_rate_percent,
+        "manager_savings_start_date": plan.manager_savings_start_date,
+        "monthly_manager_savings": calc_monthly(plan.principal, plan.manager_savings_rate_percent),
+        "accrued_manager_savings": manager_savings_for_plan(plan),
+        "closed_on": plan.closed_on,
+        "closing_principal": plan.closing_principal_cents / 100 if plan.closing_principal_cents is not None else None,
+        "closing_savings": plan.closing_savings_cents / 100 if plan.closing_savings_cents is not None else None,
         "start_date": plan.start_date,
         "track_end_date": metrics["track_end_date"],
         "duration_months": duration,
@@ -1173,6 +1228,7 @@ def serialize_investor(
         "notes": investor.notes,
         "created_at": investor.created_at,
         "active_principal": active_principal,
+        "available_balance": (investor.available_balance_cents or 0) / 100,
         "monthly_payout": monthly_cash,
         "monthly_cash": monthly_cash,
         "monthly_savings": monthly_savings,
@@ -1267,7 +1323,7 @@ def _resolve_investor_due_conflict(
     others = (
         db.query(Payment)
         .filter(
-            Payment.investor_id == payment.investor_id,
+            Payment.plan_id == payment.plan_id,
             Payment.due_date == due,
             Payment.id != payment.id,
         )
@@ -1298,7 +1354,7 @@ def month_savings_ledger(
     savings_rate_percent: float,
     duration_months: int,
 ) -> list[dict]:
-    """Per-month savings accrual with compound every 12 months."""
+    """Per-month savings on unchanged principal."""
     rows: list[dict] = []
     if principal <= 0 or savings_rate_percent <= 0 or duration_months <= 0:
         for month in range(1, duration_months + 1):
@@ -1312,24 +1368,16 @@ def month_savings_ledger(
             )
         return rows
 
-    base = principal
     total_savings = 0.0
-    year_bucket = 0.0
     for month in range(1, duration_months + 1):
-        accrual = calc_monthly(base, savings_rate_percent)
-        year_bucket = round(year_bucket + accrual, 2)
-        compounded = False
-        if month % 12 == 0 or month == duration_months:
-            total_savings = round(total_savings + year_bucket, 2)
-            base = round(principal + total_savings, 2)
-            year_bucket = 0.0
-            compounded = month % 12 == 0
+        accrual = calc_monthly(principal, savings_rate_percent)
+        total_savings = round(total_savings + accrual, 2)
         rows.append(
             {
                 "month_number": month,
                 "savings_accrual": accrual,
-                "cumulative_savings": round(total_savings + year_bucket, 2),
-                "compounded": compounded,
+                "cumulative_savings": total_savings,
+                "compounded": False,
             }
         )
     return rows
@@ -1361,6 +1409,13 @@ def build_plan_status_report(
             duration_months=duration,
         )
     }
+    if plan.closed_on:
+        cutoff_month = completed_months(plan.start_date, plan.closed_on, cap=duration)
+        frozen = float(plan.closing_accrued_savings or 0)
+        for month, row in savings_rows.items():
+            if month > cutoff_month:
+                row["savings_accrual"] = 0.0
+                row["cumulative_savings"] = frozen
     payments_by_month = {
         p.month_number: p for p in (plan.payments or []) if p.month_number
     }
@@ -1421,15 +1476,9 @@ def build_plan_status_report(
         "monthly_savings_accrual": calc_monthly(plan.principal, savings_rate)
         if savings_rate
         else 0.0,
-        "projected_savings_balance": (
-            savings_rows.get(duration, {}).get("cumulative_savings", 0.0)
-            if savings_rows
-            else 0.0
-        ),
+        "projected_savings_balance": plan_metrics(plan)["projected_savings_balance"],
         "paid_cash_total": paid_cash,
-        "current_savings_balance": (latest or current or {}).get("cumulative_savings", 0.0)
-        if (latest or current)
-        else 0.0,
+        "current_savings_balance": available_savings_for_plan(plan),
         "filter_year": year,
         "months": months,
     }
@@ -1451,10 +1500,9 @@ def sync_payment_amounts(db: Session, plan: InvestmentPlan) -> dict:
     updated = 0
     payments = db.query(Payment).filter(Payment.plan_id == plan.id).all()
     for payment in payments:
-        if payment.status == "skipped":
+        if payment.status in {"skipped", "paid"}:
             continue
-        # Keep historical paid as-is only if amounts already match; otherwise sync
-        # so the client view stays consistent after rate edits.
+        # Preserve paid history; only unpaid cash amounts follow current terms.
         if (
             payment.investor_amount != monthly_investor
             or payment.manager_amount != monthly_manager
@@ -1482,6 +1530,8 @@ def generate_payment_schedule(
     When realign_dates is False (rate/principal edits), keep existing due_dates and
     only sync amounts + create missing months — never rewrite plan.start_date.
     """
+    if plan.closed_on is not None:
+        return []
     kind, monthly_rate, _savings_rate = normalize_plan_rates(
         getattr(plan, "plan_type", None) or "monthly",
         plan.monthly_rate_percent,
@@ -1518,7 +1568,7 @@ def generate_payment_schedule(
                     by_month.pop(month, None)
                 continue
             payment.investor_id = plan.investor_id
-            if payment.status != "skipped":
+            if payment.status not in {"skipped", "paid"}:
                 payment.investor_amount = monthly_investor
                 payment.manager_amount = monthly_manager
 
@@ -1541,7 +1591,7 @@ def generate_payment_schedule(
             clash = (
                 db.query(Payment)
                 .filter(
-                    Payment.investor_id == plan.investor_id,
+                    Payment.plan_id == plan.id,
                     Payment.due_date == due,
                 )
                 .first()
@@ -1616,6 +1666,8 @@ def generate_payment_schedule(
 
     # Move preserved dues first.
     for month, payment in list(preserved.items()):
+        if payment.status == "paid":
+            continue
         if month < 1 or month > plan.duration_months:
             continue
         due = add_months(plan.start_date, month - 1)
@@ -1635,7 +1687,7 @@ def generate_payment_schedule(
         clash = (
             db.query(Payment)
             .filter(
-                Payment.investor_id == plan.investor_id,
+                Payment.plan_id == plan.id,
                 Payment.due_date == due,
             )
             .first()
@@ -1688,21 +1740,6 @@ def dedupe_all_payments(db: Session) -> dict:
             removed += 1
     db.flush()
 
-    # investor_id + due_date (across plans)
-    rows = db.query(Payment).order_by(Payment.investor_id.asc(), Payment.due_date.asc(), Payment.id.asc()).all()
-    seen_due: dict[tuple[int, date], Payment] = {}
-    for payment in rows:
-        key = (payment.investor_id, payment.due_date)
-        prior = seen_due.get(key)
-        if prior is None:
-            seen_due[key] = payment
-            continue
-        if _payment_priority(payment.status) > _payment_priority(prior.status):
-            db.delete(prior)
-            seen_due[key] = payment
-        else:
-            db.delete(payment)
-        removed += 1
     db.commit()
     return {"removed": removed}
 
@@ -2124,6 +2161,14 @@ def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
     investor = db.query(Investor).filter(Investor.id == investor_id).first()
     if not investor:
         raise ValueError("משקיע לא נמצא")
+    if (investor.available_balance_cents or 0) > 0 or db.query(InvestmentPlan.id).filter(
+        InvestmentPlan.investor_id == investor_id, InvestmentPlan.closed_on.isnot(None)
+    ).first():
+        raise ValueError("לא ניתן למחוק משקיע עם יתרה זמינה או היסטוריית סגירה")
+    from app.models.investments import WalletEntry
+    db.query(WalletEntry).filter(WalletEntry.investor_id == investor_id).update(
+        {"investor_id": None, "plan_id": None}, synchronize_session=False
+    )
 
     user = db.query(User).filter(User.investor_id == investor_id).first()
     plan_ids = [
@@ -2149,6 +2194,9 @@ def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
         {"investor_id": None}, synchronize_session=False
     )
     if user:
+        db.query(WalletEntry).filter(WalletEntry.actor_user_id == user.id).update(
+            {"actor_user_id": None}, synchronize_session=False
+        )
         db.query(ActivityEvent).filter(ActivityEvent.actor_user_id == user.id).update(
             {"actor_user_id": None}, synchronize_session=False
         )
@@ -2578,6 +2626,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     return {
         "scope_investor_id": investor_id,
         "total_principal": round(total_principal, 2),
+        "available_balance": sum((investor.available_balance_cents or 0) for investor in book_investors) / 100,
         "monthly_investor_payouts": round(monthly_investor_cash, 2),
         "monthly_cash_payouts": round(monthly_investor_cash, 2),
         "monthly_savings_accruals": round(monthly_investor_savings, 2),
@@ -2621,11 +2670,16 @@ def get_manager_income_board(db: Session) -> dict:
 
     fee_rows: list[dict] = []
     monthly_fees_total = 0.0
+    monthly_savings_total = 0.0
+    accrued_savings_total = 0.0
+    paid_cash_total = 0.0
     for inv in investors:
         if is_admin_shell(inv):
             continue
         active = [p for p in (inv.plans or []) if p.status == "active"]
-        if not active:
+        accrued_savings = round(sum(manager_savings_for_plan(p) for p in inv.plans), 2)
+        paid_cash = round(sum(payment.manager_amount for p in inv.plans for payment in p.payments if payment.status == "paid"), 2)
+        if not active and not accrued_savings and not paid_cash:
             continue
         principal = round(sum(p.principal for p in active), 2)
         monthly_fee = round(
@@ -2633,6 +2687,7 @@ def get_manager_income_board(db: Session) -> dict:
             2,
         )
         plans_out = []
+        monthly_savings = round(sum(calc_monthly(p.principal, p.manager_savings_rate_percent) for p in active), 2)
         for p in active:
             fee = calc_monthly(p.principal, p.manager_fee_percent)
             plans_out.append(
@@ -2642,6 +2697,9 @@ def get_manager_income_board(db: Session) -> dict:
                     "principal": p.principal,
                     "manager_fee_percent": p.manager_fee_percent,
                     "monthly_fee": fee,
+                    "manager_savings_rate_percent": p.manager_savings_rate_percent,
+                    "monthly_savings": calc_monthly(p.principal, p.manager_savings_rate_percent),
+                    "accrued_savings": manager_savings_for_plan(p),
                 }
             )
         fee_rows.append(
@@ -2650,10 +2708,16 @@ def get_manager_income_board(db: Session) -> dict:
                 "investor_name": inv.name,
                 "principal": principal,
                 "monthly_fee": monthly_fee,
+                "monthly_savings": monthly_savings,
+                "accrued_savings": accrued_savings,
+                "paid_cash": paid_cash,
                 "plans": plans_out,
             }
         )
         monthly_fees_total = round(monthly_fees_total + monthly_fee, 2)
+        monthly_savings_total = round(monthly_savings_total + monthly_savings, 2)
+        accrued_savings_total = round(accrued_savings_total + accrued_savings, 2)
+        paid_cash_total = round(paid_cash_total + paid_cash, 2)
 
     fee_rows.sort(key=lambda r: (-r["monthly_fee"], r["investor_name"]))
 
@@ -2702,6 +2766,9 @@ def get_manager_income_board(db: Session) -> dict:
         "manager_investor_id": manager_inv.id if manager_inv else None,
         "investors": fee_rows,
         "monthly_fees_total": monthly_fees_total,
+        "monthly_manager_savings_total": monthly_savings_total,
+        "accrued_manager_savings_total": accrued_savings_total,
+        "paid_manager_cash_total": paid_cash_total,
         "manager_own": {
             "investor_id": manager_inv.id if manager_inv else None,
             "investor_name": manager_inv.name if manager_inv else manager_name,
@@ -3041,6 +3108,9 @@ def _execute_signed_contract(
         return
     if not request.offered_start_date or not request.offered_duration_months:
         raise ValueError("חסרים תנאי חוזה לביצוע")
+    investor = db.query(Investor).filter(Investor.id == request.investor_id).with_for_update().one()
+    if investor.available_balance_cents:
+        raise ValueError("יש יתרה זמינה. יש לפתוח מסלול הכולל את כל היתרה דרך טופס מסלול חדש")
     amount = round(float(request.amount), 2)
     kind, monthly_rate, savings_rate = normalize_plan_rates(
         request.offered_plan_type or "monthly",

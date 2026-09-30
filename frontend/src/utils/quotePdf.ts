@@ -95,7 +95,7 @@ function buildQuoteDocumentHtml(quote: Quote): string {
     .map(
       (r, i) => `
       <tr class="${i % 2 === 0 ? "even" : "odd"}">
-        <td class="muted">חודש ${r.month}${r.compounded ? " · ריבית דריבית" : ""}</td>
+        <td class="muted">חודש ${r.month}${r.compounded ? "" : ""}</td>
         ${showCash ? `<td class="col-num">${formatMoney(r.profit, true)}</td>` : ""}
         ${showSavings ? `<td class="col-num">${formatMoney(r.savings, true)}</td>` : ""}
         <td class="col-num">${formatMoney(
@@ -173,9 +173,9 @@ function buildQuoteDocumentHtml(quote: Quote): string {
         <h2>מפרט חודשי</h2>
         <p>${
           quote.plan_type === "savings"
-            ? "צבירה לחיסכון עם ריבית דריבית כל 12 חודשים"
+            ? "צבירה לחיסכון על הקרן בלבד"
             : quote.plan_type === "hybrid"
-              ? "החזר חודשי במזומן + צבירה לחיסכון עם ריבית דריבית"
+              ? "החזר חודשי במזומן + צבירה לחיסכון על הקרן בלבד"
               : "החזר קבוע בכל חודש לאורך המסלול"
         }</p>
       </div>

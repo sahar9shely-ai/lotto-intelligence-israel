@@ -37,6 +37,7 @@ class InvestorOut(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
     active_principal: float = 0
+    available_balance: float = 0
     monthly_payout: float = 0
     monthly_cash: float = 0
     monthly_savings: float = 0
@@ -61,10 +62,13 @@ class InvestorOut(BaseModel):
 class PlanCreate(BaseModel):
     investor_id: int
     principal: float = Field(ge=0)
+    additional_funds: Optional[float] = Field(default=None, ge=0)
+    operation_key: Optional[str] = Field(default=None, min_length=8, max_length=80)
     plan_type: PlanType = "monthly"
     monthly_rate_percent: float = Field(ge=0, default=0)
     savings_rate_percent: float = Field(ge=0, default=0)
     manager_fee_percent: float = Field(ge=0)
+    manager_savings_rate_percent: float = Field(ge=0, default=0)
     start_date: date
     duration_months: int = Field(ge=1, le=120, default=12)
     notes: Optional[str] = None
@@ -77,6 +81,7 @@ class PlanUpdate(BaseModel):
     monthly_rate_percent: Optional[float] = Field(default=None, ge=0)
     savings_rate_percent: Optional[float] = Field(default=None, ge=0)
     manager_fee_percent: Optional[float] = Field(default=None, ge=0)
+    manager_savings_rate_percent: Optional[float] = Field(default=None, ge=0)
     start_date: Optional[date] = None
     duration_months: Optional[int] = Field(default=None, ge=1, le=120)
     status: Optional[PlanStatus] = None
@@ -93,6 +98,13 @@ class PlanOut(BaseModel):
     monthly_rate_percent: float
     savings_rate_percent: float = 0.0
     manager_fee_percent: Optional[float] = None
+    manager_savings_rate_percent: Optional[float] = None
+    monthly_manager_savings: Optional[float] = None
+    accrued_manager_savings: Optional[float] = None
+    manager_savings_start_date: Optional[date] = None
+    closed_on: Optional[date] = None
+    closing_principal: Optional[float] = None
+    closing_savings: Optional[float] = None
     start_date: date
     track_end_date: Optional[date] = None
     duration_months: int
@@ -133,6 +145,10 @@ class PlanOut(BaseModel):
                 "monthly_manager_fee",
                 "total_manager_fee",
                 "paid_manager_total",
+                "manager_savings_rate_percent",
+                "monthly_manager_savings",
+                "accrued_manager_savings",
+                "manager_savings_start_date",
             ):
                 data.pop(key, None)
         return data
@@ -194,7 +210,16 @@ class PaymentUpdate(BaseModel):
     notes: Optional[str] = None
 
 
-class PaymentOut(BaseModel):
+class PrivateFinancialOut(BaseModel):
+    @model_serializer(mode="wrap")
+    def omit_private_defaults(self, serializer):
+        data = serializer(self)
+        return {key: value for key, value in data.items() if not (
+            value is None and ("manager" in key or key in {"planned_manager", "paid_manager"})
+        )}
+
+
+class PaymentOut(PrivateFinancialOut):
     id: int
     plan_id: int
     investor_id: int
@@ -202,7 +227,7 @@ class PaymentOut(BaseModel):
     month_number: int
     due_date: date
     investor_amount: float
-    manager_amount: float
+    manager_amount: Optional[float] = None
     status: str
     paid_at: Optional[date] = None
     confirmation_requested_at: Optional[datetime] = None
@@ -351,24 +376,25 @@ class SlackAnnounceOut(BaseModel):
     public_url: Optional[str] = None
 
 
-class DashboardOut(BaseModel):
+class DashboardOut(PrivateFinancialOut):
     scope_investor_id: Optional[int] = None
     total_principal: float
+    available_balance: float = 0
     monthly_investor_payouts: float
     monthly_cash_payouts: float = 0.0
     monthly_savings_accruals: float = 0.0
     monthly_investor_total: float = 0.0
     current_savings_total: float = 0.0
     projected_savings_total: float = 0.0
-    monthly_manager_fees: float
-    monthly_manager_own_payout: float
-    monthly_manager_own_savings: float = 0.0
-    monthly_manager_own_total: float = 0.0
-    monthly_manager_total: float
+    monthly_manager_fees: Optional[float] = None
+    monthly_manager_own_payout: Optional[float] = None
+    monthly_manager_own_savings: Optional[float] = None
+    monthly_manager_own_total: Optional[float] = None
+    monthly_manager_total: Optional[float] = None
     ytd_investor_paid: float
-    ytd_manager_earned: float
+    ytd_manager_earned: Optional[float] = None
     lifetime_investor_paid: float = 0.0
-    lifetime_manager_earned: float = 0.0
+    lifetime_manager_earned: Optional[float] = None
     active_investors: int
     active_plans: int
     upcoming_payments: list[PaymentOut]
@@ -376,11 +402,11 @@ class DashboardOut(BaseModel):
     investors_summary: list[InvestorOut]
 
 
-class PaymentTotalsOut(BaseModel):
+class PaymentTotalsOut(PrivateFinancialOut):
     planned_investor: float
     paid_investor: float
-    planned_manager: float
-    paid_manager: float
+    planned_manager: Optional[float] = None
+    paid_manager: Optional[float] = None
     paid_count: int
     scheduled_count: int
     awaiting_count: int = 0

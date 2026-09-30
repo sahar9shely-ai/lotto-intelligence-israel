@@ -672,7 +672,7 @@ def test_regenerate_after_start_change_does_not_duplicate_due_dates():
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
 
 
-def test_no_duplicate_investor_due_dates_across_plans():
+def test_separate_plans_keep_separate_payment_histories_on_same_dates():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     bar = next(i for i in investors if i["name"] == "בר")
@@ -716,9 +716,10 @@ def test_no_duplicate_investor_due_dates_across_plans():
         f"/api/v1/investments/payments?year={year}&investor_id={bar['id']}",
         headers=headers,
     ).json()
-    due_dates = [p["due_date"] for p in payments]
-    assert len(due_dates) == len(set(due_dates)), due_dates
-    assert len(due_dates) == 12
+    selected = [p for p in payments if p["plan_id"] in {first_id, second_id}]
+    assert len(selected) == 24
+    assert len({(p["plan_id"], p["month_number"]) for p in selected}) == 24
+    assert len({p["due_date"] for p in selected}) == 12
 
     client.delete(f"/api/v1/investments/plans/{first_id}", headers=headers)
     client.delete(f"/api/v1/investments/plans/{second_id}", headers=headers)
@@ -774,9 +775,9 @@ def test_hybrid_and_savings_plan_types_available_without_seeding():
     assert s["monthly_rate_percent"] == 0
     assert s["monthly_investor_payout"] == 0
     assert s["monthly_savings_accrual"] == 2000
-    # Year1: 12*2000=24000 compounds; Year2 accrues on 124000 → 12*2480=29760; total 53760
-    assert s["projected_savings_balance"] == 53760
-    assert s["total_investor_payout"] == 53760
+    # Both years accrue on the same principal: 24 * 2000 = 48000
+    assert s["projected_savings_balance"] == 48000
+    assert s["total_investor_payout"] == 48000
 
     _approve_quote(headers, body["id"])
     # Convert hybrid quote → plan keeps type; do not attach to existing seeded people.
@@ -909,8 +910,8 @@ def test_reporting_board_savings_do_not_overlap_next_year():
         m_active = svc.plan_metrics(active, today)
         assert m_board["months_elapsed"] == 4
         assert abs(m_board["current_savings_balance"] - 4400.04) < 0.05
-        assert m_active["months_elapsed"] == 8
-        assert abs(m_active["current_savings_balance"] - 8799.84) < 0.05
+        assert m_active["months_elapsed"] == 7
+        assert abs(m_active["current_savings_balance"] - 7699.86) < 0.05
 
         investor = (
             db.query(Investor)
@@ -925,8 +926,8 @@ def test_reporting_board_savings_do_not_overlap_next_year():
         summary = svc.serialize_investor(investor, today)
         # Monthly line is active-only (no double 1100)
         assert abs(summary["monthly_savings"] - 1099.98) < 0.05
-        # Lifetime = 4×1100 + 8×1100
-        assert abs(summary["current_savings_balance"] - 13199.88) < 0.1
+        # Lifetime = 4 completed reporting months + 7 completed active months
+        assert abs(summary["current_savings_balance"] - 12099.90) < 0.1
 
         # Reporting-year boards must not roll savings into the next active plan.
         svc.sync_investor_track_continuity(db, investor, today)
@@ -934,7 +935,7 @@ def test_reporting_board_savings_do_not_overlap_next_year():
         db.refresh(board)
         db.refresh(active)
         assert abs(svc.plan_metrics(board, today)["current_savings_balance"] - 4400.04) < 0.05
-        assert abs(svc.plan_metrics(active, today)["current_savings_balance"] - 8799.84) < 0.05
+        assert abs(svc.plan_metrics(active, today)["current_savings_balance"] - 7699.86) < 0.05
 
         clipped = svc.clip_reporting_year_plan_spans(db)
         assert clipped["clipped"] >= 1
@@ -1054,124 +1055,21 @@ def test_withdraw_and_transfer_savings_to_principal():
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
 
 
-def test_settle_savings_continue_and_close():
-    """Questionnaire: continue opens successor; close marks completed."""
+def test_legacy_settlement_requires_available_account_flow():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
-
-    create_inv = client.post(
-        "/api/v1/investments/investors",
-        headers=headers,
-        json={
-            "name": "בדיקת סגירה",
-            "username": "settleclose",
-            "password": "Password1!",
-        },
-    )
-    assert create_inv.status_code == 201, create_inv.text
-    inv_id = create_inv.json()["id"]
-
-    start = date.today().replace(day=1)
-    month = start.month - 5
-    year = start.year
-    while month <= 0:
-        month += 12
-        year -= 1
-    start = start.replace(year=year, month=month)
-
-    create_plan = client.post(
-        "/api/v1/investments/plans",
-        headers=headers,
-        json={
-            "investor_id": inv_id,
-            "principal": 100000,
-            "plan_type": "hybrid",
-            "monthly_rate_percent": 1,
-            "savings_rate_percent": 1,
-            "manager_fee_percent": 0.5,
-            "start_date": start.isoformat(),
-            "duration_months": 12,
-            "generate_schedule": True,
-        },
-    )
-    assert create_plan.status_code == 201, create_plan.text
-    plan_id = create_plan.json()["id"]
-    available = float(create_plan.json()["current_savings_balance"])
-    assert available >= 1000
-
-    # Continue with new compound track after partial transfer
-    settle = client.post(
-        f"/api/v1/investments/plans/{plan_id}/savings/settle",
-        headers=headers,
-        json={
-            "action_type": "transfer_to_principal",
-            "amount": 1000,
-            "outcome": "continue_new_track",
-            "compound_savings": True,
-            "include_monthly_cash": True,
-            "monthly_rate_percent": 1.2,
-            "savings_rate_percent": 1.1,
-            "manager_fee_percent": 0.5,
-            "new_duration_months": 12,
-            "new_start_date": date.today().replace(day=1).isoformat(),
-        },
-    )
-    assert settle.status_code == 200, settle.text
-    body = settle.json()
-    assert body["outcome"] == "continue_new_track"
-    assert body["closed_plan"]["status"] == "completed"
-    assert body["closed_plan"]["successor_plan_id"] == body["new_plan"]["id"]
-    assert body["new_plan"]["status"] == "active"
-    assert body["new_plan"]["plan_type"] == "hybrid"
-    assert abs(body["new_plan"]["monthly_rate_percent"] - 1.2) < 0.001
-    assert abs(body["new_plan"]["savings_rate_percent"] - 1.1) < 0.001
-    # Leftover savings rolled into קרן: principal ≈ 100000 + available
-    assert abs(body["new_plan"]["principal"] - (100000 + available)) < 0.05
-
-    new_id = body["new_plan"]["id"]
-
-    # Seed a bit of savings on the new plan by backdating... can't easily.
-    # Create another plan to test close_plan path.
-    create_plan2 = client.post(
-        "/api/v1/investments/plans",
-        headers=headers,
-        json={
-            "investor_id": inv_id,
-            "principal": 50000,
-            "plan_type": "savings",
-            "monthly_rate_percent": 0,
-            "savings_rate_percent": 2,
-            "manager_fee_percent": 0,
-            "start_date": start.isoformat(),
-            "duration_months": 12,
-            "generate_schedule": True,
-        },
-    )
-    assert create_plan2.status_code == 201, create_plan2.text
-    plan2 = create_plan2.json()
-    plan2_id = plan2["id"]
-    avail2 = float(plan2["current_savings_balance"])
-    assert avail2 > 0
-
-    close = client.post(
-        f"/api/v1/investments/plans/{plan2_id}/savings/settle",
-        headers=headers,
-        json={
-            "action_type": "withdraw",
-            "amount": min(500, avail2),
-            "outcome": "close_plan",
-            "withdraw_remaining": True,
-        },
-    )
-    assert close.status_code == 200, close.text
-    closed = close.json()
-    assert closed["outcome"] == "close_plan"
-    assert closed["closed_plan"]["status"] == "completed"
-    assert closed["new_plan"] is None
-    assert float(closed["closed_plan"]["current_savings_balance"]) < 0.02
-
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    investor = next(row for row in investors if not row["is_manager"])
+    created = client.post("/api/v1/investments/plans", headers=headers, json={
+        "investor_id": investor["id"], "principal": 10000, "plan_type": "hybrid",
+        "monthly_rate_percent": 2, "savings_rate_percent": 2, "manager_fee_percent": 0,
+        "start_date": date.today().isoformat(), "duration_months": 12,
+    })
+    assert created.status_code == 201, created.text
+    plan_id = created.json()["id"]
+    response = client.post(f"/api/v1/investments/plans/{plan_id}/savings/settle", headers=headers,
+        json={"action_type": "withdraw", "amount": 1, "outcome": "close_plan"})
+    assert response.status_code == 409
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
-    client.delete(f"/api/v1/investments/plans/{new_id}", headers=headers)
-    client.delete(f"/api/v1/investments/plans/{plan2_id}", headers=headers)
 
 
 def test_closed_track_savings_roll_to_active_plan():
@@ -1275,7 +1173,7 @@ def test_auto_extend_active_plan_at_term_end():
     inv_id = created.json()["id"]
 
     start = date.today().replace(day=1)
-    month = start.month - 11
+    month = start.month - 12
     year = start.year
     while month <= 0:
         month += 12

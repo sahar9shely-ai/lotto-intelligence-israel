@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Panel } from "../components/Panel";
+import { AvailableBalancePanel } from "../components/AvailableBalancePanel";
 import { RevealSecret } from "../components/RevealSecret";
 import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
@@ -171,6 +172,7 @@ export function InvestorsPage() {
     });
     setShowNewInvestor(false);
     setScope(created.id);
+    setShowNewPlan(true);
     setMessage("משקיע חדש נוסף עם שם משתמש וסיסמה");
     reload();
   }
@@ -182,10 +184,13 @@ export function InvestorsPage() {
     const plan = await api.createPlan({
       investor_id: selected.id,
       principal: Number(fd.get("principal") || 0),
+      additional_funds: Number(fd.get("additional_funds") || 0),
+      operation_key: String(fd.get("operation_key")),
       plan_type: String(fd.get("plan_type") || "monthly"),
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
       savings_rate_percent: Number(fd.get("savings_rate_percent") || 0),
       manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
+      manager_savings_rate_percent: Number(fd.get("manager_savings_rate_percent") || 0),
       start_date: String(fd.get("start_date") || yearStartISO()),
       duration_months: Number(fd.get("duration_months") || 12),
       notes: String(fd.get("notes") || "") || undefined,
@@ -209,6 +214,7 @@ export function InvestorsPage() {
       monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
       savings_rate_percent: Number(fd.get("savings_rate_percent") || 0),
       manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
+      manager_savings_rate_percent: Number(fd.get("manager_savings_rate_percent") || 0),
       duration_months: Number(fd.get("duration_months") || 12),
       status: String(fd.get("status") || "active"),
       regenerate_schedule: true,
@@ -216,10 +222,14 @@ export function InvestorsPage() {
     if (nextStart !== plan.start_date) {
       body.start_date = nextStart;
     }
-    await api.updatePlan(plan.id, body);
-    setEditingPlanId(null);
-    setMessage("המסלול עודכן — מזומן וחיסכון סונכרנו בנפרד");
-    refreshAll();
+    try {
+      await api.updatePlan(plan.id, body);
+      setEditingPlanId(null);
+      setMessage("המסלול עודכן — מזומן וחיסכון סונכרנו בנפרד");
+      refreshAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "עדכון המסלול נכשל");
+    }
   }
 
   async function onDeletePlan(plan: {
@@ -273,6 +283,13 @@ export function InvestorsPage() {
           <h1 className="page-intro__title">
             {isManager ? "משקיעים" : "המסלול שלי"}
           </h1>
+          {isManager ? (
+            <p className="hint" id="new-plan-help">
+              {selected
+                ? `המשקיע שנבחר: ${selected.name}. מסלול חדש ייפתח עבורו.`
+                : "בחרו משקיע מהרשימה כדי לצפות במסלולים שלו או לפתוח עבורו מסלול חדש."}
+            </p>
+          ) : null}
         </div>
         {isManager ? (
           <div className="page-head__actions">
@@ -284,6 +301,7 @@ export function InvestorsPage() {
               className="btn btn--primary"
               onClick={() => setShowNewPlan(true)}
               disabled={!planTarget}
+              aria-describedby="new-plan-help"
             >
               מסלול חדש
             </button>
@@ -562,6 +580,8 @@ export function InvestorsPage() {
             </div>
           </Panel>
 
+          <AvailableBalancePanel key={`${selected.id}:${selected.available_balance}`} investorId={selected.id} canManage={isManager} onChanged={refreshAll} onNewPlan={() => setShowNewPlan(true)} />
+
           {selectedPlans.length === 0 ? (
             <Panel title="אין מסלול עדיין">
               <p className="empty">עדיין אין מסלול למשקיע הזה.</p>
@@ -683,6 +703,7 @@ export function InvestorsPage() {
                               {plan.notes}
                             </span>
                           ) : null}
+                          {plan.closed_on ? <span className="muted" style={{display: "block"}}>נסגר ב-{plan.closed_on} · הועברו ליתרה הזמינה: קרן {formatMoney(plan.closing_principal ?? 0)} + חיסכון {formatMoney(plan.closing_savings ?? 0)}</span> : null}
                         </div>
                         <button
                           type="button"
@@ -787,7 +808,7 @@ export function InvestorsPage() {
 
       {showNewPlan && planTarget ? (
         <Modal title={`מסלול חדש ל-${planTarget.name}`} onClose={() => setShowNewPlan(false)}>
-          <PlanForm settings={settings} onSubmit={onCreatePlan} />
+          <PlanForm settings={settings} investor={planTarget} onSubmit={onCreatePlan} />
         </Modal>
       ) : null}
     </div>
@@ -841,6 +862,7 @@ function PlanCard({
               {editing ? "סגור עריכה" : "ערוך"}
             </button>
           ) : null}
+          <SavingsActions plan={plan} canManage={isManager} onDone={onSavingsChanged} />
         </div>
       }
     >
@@ -882,6 +904,7 @@ function PlanCard({
             <em>נוספת — לא מהמשקיע</em>
           </div>
         ) : null}
+        {isManager ? <div className="money-ledger__item"><span>חיסכון מנהל {formatPercent(plan.manager_savings_rate_percent ?? 0)}</span><strong>{formatMoney(plan.monthly_manager_savings ?? 0)}</strong><em>/ חודש · נצבר {formatMoney(plan.accrued_manager_savings ?? 0)}</em></div> : null}
         <div className="money-ledger__item">
           <span>שולם בפועל (מזומן)</span>
           <strong>{formatMoney(plan.paid_investor_total)}</strong>
@@ -900,12 +923,6 @@ function PlanCard({
           onMessage={onMessage}
         />
       ) : null}
-
-      <SavingsActions
-        plan={plan}
-        canManage={isManager}
-        onDone={onSavingsChanged}
-      />
 
       {showReport ? (
         <PlanStatusReportPanel
@@ -937,6 +954,7 @@ function PlanCard({
                 defaultValue={plan.manager_fee_percent ?? 0}
               />
             </label>
+            <label>אחוז חיסכון מנהל<input name="manager_savings_rate_percent" type="number" min="0" step="0.01" defaultValue={plan.manager_savings_rate_percent ?? 0} /></label>
             <label>
               תאריך התחלה
               <input name="start_date" type="date" defaultValue={plan.start_date} />
@@ -956,7 +974,6 @@ function PlanCard({
               <select name="status" defaultValue={plan.status}>
                 <option value="active">פעיל</option>
                 <option value="paused">מושהה</option>
-                <option value="completed">הסתיים</option>
               </select>
             </label>
           </div>
@@ -978,72 +995,88 @@ function PlanCard({
   );
 }
 
-function PlanForm({
-  settings,
-  onSubmit,
-}: {
-  settings: Settings | null;
-  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+export function PlanForm({settings, investor, onSubmit}: {
+  settings: Settings | null; investor: Investor;
+  onSubmit: (e: FormEvent<HTMLFormElement>) => Promise<void>;
 }) {
-  return (
-    <form className="form modal__form" onSubmit={onSubmit}>
-      <div className="modal__body">
+  const [additional, setAdditional] = useState("");
+  const [cashRate, setCashRate] = useState(String(settings?.default_monthly_rate_percent ?? 0));
+  const [savingsRate, setSavingsRate] = useState("0");
+  const [managerCash, setManagerCash] = useState(String(settings?.default_manager_fee_percent ?? 0));
+  const [managerSavings, setManagerSavings] = useState("0");
+  const [operationKey, setOperationKey] = useState(() => crypto.randomUUID());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [review, setReview] = useState<{start: string; duration: string; notes: string} | null>(null);
+  const available = investor.available_balance ?? 0;
+  const principal = Math.round((available + Number(additional || 0)) * 100) / 100;
+  const cash = Number(cashRate || 0), savings = Number(savingsRate || 0);
+  const type = cash > 0 && savings > 0 ? "hybrid" : savings > 0 ? "savings" : "monthly";
+  const monthly = (rate: string) => Math.round(principal * Number(rate || 0)) / 100;
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy) return;
+    if (!review) {
+      const values = new FormData(e.currentTarget);
+      setReview({start: String(values.get("start_date")), duration: String(values.get("duration_months")), notes: String(values.get("notes") || "")});
+      return;
+    }
+    setBusy(true); setError(null);
+    try { await onSubmit(e); }
+    catch (err) { setError(err instanceof Error ? err.message : "יצירת המסלול נכשלה"); }
+    finally { setBusy(false); }
+  }
+  return <form className="form modal__form plan-opening" onSubmit={submit} onChange={() => setOperationKey(crypto.randomUUID())}>
+    <div className="modal__body">
+      <input type="hidden" name="operation_key" value={operationKey} />
+      <input type="hidden" name="principal" value={principal} />
+      <input type="hidden" name="plan_type" value={type} />
+      <fieldset hidden={Boolean(review)} disabled={busy} className="plan-opening__section"><legend>1 · הקרן למסלול החדש</legend>
+        <dl className="plan-opening-summary">
+          <dt>קרן במסלולים פעילים</dt><dd>{formatMoney(investor.active_principal)}</dd>
+          <dt>יתרה זמינה קיימת</dt><dd>{formatMoney(available)}</dd>
+        </dl>
+        <label>תוספת כסף חדש (₪)<input name="additional_funds" type="number" min="0" step="0.01" required value={additional} onChange={e => setAdditional(e.target.value)} placeholder="0 אם אין תוספת" /></label>
+        <div className="plan-opening__total"><span>סך הקרן למסלול החדש</span><strong>{formatMoney(principal)}</strong></div>
+        <p className="hint">כל היתרה הזמינה תיכנס למסלול. כדי להשקיע פחות, יש לבצע משיכה קודם. קרן במסלול פעיל תישאר בו עד לסגירתו.</p>
+      </fieldset>
+      <fieldset hidden={Boolean(review)} disabled={busy} className="plan-opening__section"><legend>2 · תנאי המשקיע</legend>
         <div className="form__grid">
-          <label>
-            קרן (₪)
-            <input name="principal" type="number" min="0" step="0.01" defaultValue={0} required />
-          </label>
-          <PlanTrackFields
-            defaultPlanType="monthly"
-            defaultMonthlyRate={settings?.default_monthly_rate_percent ?? 0}
-            defaultSavingsRate={0}
-            defaultPrincipal={0}
-          />
-          <label>
-            אחוז עמלת ניהול (נוסף)
-            <input
-              name="manager_fee_percent"
-              type="number"
-              min="0"
-              step="0.01"
-              defaultValue={settings?.default_manager_fee_percent ?? 0}
-              required
-            />
-          </label>
-          <label>
-            תאריך התחלה
-            <input name="start_date" type="date" defaultValue={yearStartISO()} required />
-          </label>
-          <label>
-            משך (חודשים)
-            <select name="duration_months" defaultValue={settings?.default_duration_months ?? 12}>
-              {[12, 14, 18, 24, 36].map((m) => (
-                <option key={m} value={m}>
-                  {m} חודשים
-                </option>
-              ))}
-              <option value="6">6 חודשים</option>
-              <option value="10">10 חודשים</option>
-              <option value="15">15 חודשים</option>
-              <option value="16">16 חודשים</option>
-            </select>
-          </label>
-          <label>
-            הערות
-            <input name="notes" placeholder="אופציונלי" />
-          </label>
+          <label>אחוז החזר חודשי למשקיע<input name="monthly_rate_percent" type="number" min="0" step="0.01" required value={cashRate} onChange={e => setCashRate(e.target.value)} /><span className="hint">{formatMoney(monthly(cashRate))} במזומן לחודש</span></label>
+          <label>אחוז חיסכון חודשי למשקיע<input name="savings_rate_percent" type="number" min="0" step="0.01" required value={savingsRate} onChange={e => setSavingsRate(e.target.value)} /><span className="hint">{formatMoney(monthly(savingsRate))} לחיסכון לחודש</span></label>
         </div>
-        <p className="hint">
-          מזומן וחיסכון נשמרים כשדות נפרדים. עמלת ניהול מתווספת מעבר לתשלום למשקיע.
-        </p>
-      </div>
-      <div className="modal__actions">
-        <button type="submit" className="btn btn--primary">
-          צור מסלול + לוח תשלומים
-        </button>
-      </div>
-    </form>
-  );
+        <p className="hint">החיסכון נצבר על הקרן בלבד, בחודשים מלאים, ללא ריבית דריבית. הזינו 0 לרכיב שאינו רלוונטי.</p>
+      </fieldset>
+      <fieldset hidden={Boolean(review)} disabled={busy} className="plan-opening__section plan-opening__section--manager"><legend>3 · רווח מנהל · גלוי למנהל בלבד</legend>
+        <div className="form__grid">
+          <label>אחוז מזומן חודשי למנהל<input name="manager_fee_percent" type="number" min="0" step="0.01" required value={managerCash} onChange={e => setManagerCash(e.target.value)} /><span className="hint">{formatMoney(monthly(managerCash))} במזומן לחודש</span></label>
+          <label>אחוז חיסכון חודשי למנהל<input name="manager_savings_rate_percent" type="number" min="0" step="0.01" required value={managerSavings} onChange={e => setManagerSavings(e.target.value)} /><span className="hint">{formatMoney(monthly(managerSavings))} לחיסכון לחודש</span></label>
+        </div>
+        <p className="hint">רווחי המנהל מחושבים בנפרד, מעבר לתשואת המשקיע. חיסכון המנהל מתחיל ממועד פתיחת המסלול או מהיום, המאוחר מביניהם.</p>
+      </fieldset>
+      <fieldset disabled={busy} className="plan-opening__section"><legend>4 · תקופה וסיכום לפני שמירה</legend>
+        <div className="form__grid" hidden={Boolean(review)}>
+          <label>תאריך התחלה<input name="start_date" type="date" defaultValue={new Date().toLocaleDateString("en-CA")} required /></label>
+          <label>משך בחודשים<input name="duration_months" type="number" min="1" max="120" defaultValue={settings?.default_duration_months ?? 12} required /></label>
+          <label>הערות<input name="notes" placeholder="אופציונלי" /></label>
+        </div>
+        <dl className="plan-opening-summary">
+          <dt>משקיע</dt><dd>{investor.name}</dd>
+          <dt>קרן חדשה</dt><dd>{formatMoney(principal)}</dd>
+          <dt>יתרה קיימת</dt><dd>{formatMoney(available)}</dd>
+          <dt>תוספת כסף חדש</dt><dd>{formatMoney(Number(additional || 0))}</dd>
+          <dt>מזומן למשקיע בחודש</dt><dd>{formatPercent(cash)} · {formatMoney(monthly(cashRate))}</dd>
+          <dt>חיסכון למשקיע בחודש</dt><dd>{formatPercent(savings)} · {formatMoney(monthly(savingsRate))}</dd>
+          <dt>מזומן למנהל בחודש</dt><dd>{formatPercent(Number(managerCash))} · {formatMoney(monthly(managerCash))}</dd>
+          <dt>חיסכון למנהל בחודש</dt><dd>{formatPercent(Number(managerSavings))} · {formatMoney(monthly(managerSavings))}</dd>
+          <dt>יתרה זמינה לאחר פתיחה</dt><dd>{formatMoney(0)}</dd>
+        </dl>
+        {review ? <p className="hint">תאריך התחלה: {review.start} · משך: {review.duration} חודשים{review.notes ? ` · הערות: ${review.notes}` : ""}</p> : null}
+      </fieldset>
+      {error ? <p role="alert" className="form-error">{error}</p> : null}
+    </div>
+    <div className="modal__actions">{review ? <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setReview(null)}>חזרה לעריכה</button> : null}<button type="submit" className="btn btn--primary" disabled={busy || principal <= 0}>{busy ? "יוצר מסלול..." : review ? "אישור ופתיחת מסלול" : "בדיקת הנתונים לפני פתיחה"}</button></div>
+  </form>;
 }
 
 function Modal({

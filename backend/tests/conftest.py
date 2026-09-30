@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Generator
 from pathlib import Path
 
-_TEST_DB = Path("/tmp/tazrim-investments-pytest.db")
-if _TEST_DB.exists():
-    _TEST_DB.unlink()
+_TEST_DIR = tempfile.TemporaryDirectory(prefix="tazrim-investments-pytest-")
+_TEST_DB = Path(_TEST_DIR.name) / "investments.db"
+os.environ.pop("DATABASE_URL", None)
+os.environ.pop("INVESTMENTS_DATABASE_URL", None)
 os.environ["INVESTMENTS_DB_PATH"] = str(_TEST_DB)
 
 import pytest
@@ -36,6 +38,12 @@ def _seed_investments() -> None:
         inv_svc.seed_defaults(db)
     finally:
         db.close()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    from app.db.investment_session import investment_engine
+    investment_engine.dispose()
+    _TEST_DIR.cleanup()
 
 
 @pytest.fixture()

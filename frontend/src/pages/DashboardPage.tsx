@@ -173,6 +173,9 @@ export function DashboardPage() {
 
       {!isManager ? (
         <ScrollReveal>
+          <Panel title="חשבון יתרה זמינה" action={<Link className="btn btn--small btn--ghost" to="/investors">פרטי החשבון</Link>}>
+            <Stat label="זמין למשיכה או להשקעה" value={formatMoney(data.available_balance ?? 0)} hint="כסף שאינו משויך למסלול פעיל ואינו צובר תשואה" />
+          </Panel>
           <PaymentCeremonyCard
             payments={awaitingPayments}
             busyId={ceremonyBusyId}

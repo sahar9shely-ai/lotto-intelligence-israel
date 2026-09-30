@@ -51,6 +51,9 @@ export function ManagerIncomePanel({
           monthly_fees_total: data.investors
             .filter((row) => row.investor_id === investorId)
             .reduce((sum, row) => sum + row.monthly_fee, 0),
+          monthly_manager_savings_total: data.investors.filter(row => row.investor_id === investorId).reduce((sum, row) => sum + (row.monthly_savings ?? 0), 0),
+          accrued_manager_savings_total: data.investors.filter(row => row.investor_id === investorId).reduce((sum, row) => sum + (row.accrued_savings ?? 0), 0),
+          paid_manager_cash_total: data.investors.filter(row => row.investor_id === investorId).reduce((sum, row) => sum + (row.paid_cash ?? 0), 0),
         }
       : data;
 
@@ -67,14 +70,20 @@ export function ManagerIncomeBoardView({
   const own = data.manager_own;
   const name = data.manager_name || own.investor_name || "סהר";
   const feesOnly = variant === "admin";
-  const heroTotal = feesOnly ? data.monthly_fees_total : data.monthly_grand_total;
+  const heroTotal = (feesOnly ? data.monthly_fees_total : data.monthly_grand_total) + (data.monthly_manager_savings_total ?? 0);
 
   return (
     <Panel
-      title={feesOnly ? "רווח חודשי ממשקיעים" : "הכנסות מנהל · כל חודש"}
+      title={feesOnly ? "תיק רווחי מנהל" : "הכנסות מנהל · כל חודש"}
       className={feesOnly ? "panel--admin-profit" : undefined}
     >
       <div className="manager-income">
+        <div className="money-ledger">
+          <div className="money-ledger__item"><span>מזומן חודשי ממשקיעים</span><strong>{formatMoney(data.monthly_fees_total)}</strong><em>לפי תנאי המסלולים הפעילים</em></div>
+          <div className="money-ledger__item"><span>חיסכון מנהל חודשי</span><strong>{formatMoney(data.monthly_manager_savings_total ?? 0)}</strong><em>על הקרן בלבד</em></div>
+          <div className="money-ledger__item"><span>חיסכון מנהל שנצבר</span><strong>{formatMoney(data.accrued_manager_savings_total ?? 0)}</strong><em>חודשים מלאים · כולל מסלולים שנסגרו</em></div>
+          <div className="money-ledger__item"><span>מזומן מנהל שנרשם כשולם</span><strong>{formatMoney(data.paid_manager_cash_total ?? 0)}</strong><em>לפי תשלומים שסומנו כשולמו</em></div>
+        </div>
         <div className={`manager-income__hero${feesOnly ? " manager-income__hero--admin" : ""}`}>
           <div className="manager-income__hero-main">
             <span className="stat__label">
@@ -129,6 +138,8 @@ export function ManagerIncomeBoardView({
                         ? formatMoney(row.monthly_fee)
                         : "ללא עמלה"}
                     </strong>
+                    <span>חיסכון חודשי {formatMoney(row.monthly_savings ?? 0)}</span>
+                    <span>חיסכון שנצבר {formatMoney(row.accrued_savings ?? 0)}</span>
                   </div>
                 </li>
               ))}

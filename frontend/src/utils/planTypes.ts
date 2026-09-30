@@ -8,13 +8,13 @@ export const PLAN_TYPE_OPTIONS: { value: PlanType; label: string; hint: string }
   },
   {
     value: "savings",
-    label: "חיסכון (ריבית דריבית)",
+    label: "חיסכון",
     hint: "האחוזים נכנסים לחיסכון ומתרכבים כל 12 חודשים",
   },
   {
     value: "hybrid",
     label: "משולב",
-    hint: "חלק בהחזר חודשי וחלק נכנס לחיסכון עם ריבית דריבית",
+    hint: "חלק בהחזר חודשי וחלק נכנס לחיסכון על הקרן בלבד",
   },
 ];
 

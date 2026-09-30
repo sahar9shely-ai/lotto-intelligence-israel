@@ -46,6 +46,14 @@ from app.schemas.investments import (
 from app.security.auth import get_current_user, is_manager, require_manager
 from app.services import auth_service as auth_svc
 from app.services import investment_service as svc
+from app.services import wallet_service as wallet_svc
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, Field
+
+
+class WalletWithdrawalRequest(BaseModel):
+    amount: float = Field(gt=0)
+    operation_key: str = Field(min_length=8, max_length=80)
 
 router = APIRouter(prefix="/api/v1/investments", tags=["investments"])
 
@@ -108,7 +116,8 @@ def dashboard(
         scoped = investor_id
     else:
         scoped = user.investor_id
-    return svc.get_dashboard(db, investor_id=scoped)
+    data = svc.get_dashboard(db, investor_id=scoped)
+    return data if is_manager(user) else svc.redact_private_manager_data(data)
 
 
 @router.get("/documents", response_model=DocumentVaultOut)
@@ -477,20 +486,12 @@ def create_plan(
     if not investor:
         raise HTTPException(status_code=404, detail="Investor not found")
 
-    data = payload.model_dump(exclude={"generate_schedule"})
-    kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
-        data.get("plan_type") or "monthly",
-        data.get("monthly_rate_percent") or 0,
-        data.get("savings_rate_percent") or 0,
-    )
-    data["plan_type"] = kind
-    data["monthly_rate_percent"] = monthly_rate
-    data["savings_rate_percent"] = savings_rate
-    data["accrual_principal"] = float(data.get("principal") or 0)
-    data["savings_redeemed_total"] = 0.0
-    plan = InvestmentPlan(**data)
-    db.add(plan)
-    db.flush()
+    data = payload.model_dump(exclude={"generate_schedule", "additional_funds", "operation_key"})
+    try:
+        plan = wallet_svc.fund_plan(db, data, payload.additional_funds, payload.operation_key, user.id)
+    except (ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
     from app.services import activity_service as activity_svc
 
     activity_svc.log_activity(
@@ -508,9 +509,6 @@ def create_plan(
     )
     db.commit()
     db.refresh(plan)
-
-    if payload.generate_schedule:
-        svc.generate_payment_schedule(db, plan)
 
     plan = (
         db.query(InvestmentPlan)
@@ -536,6 +534,20 @@ def update_plan(
     )
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+
+    if plan.closed_on:
+        raise HTTPException(status_code=409, detail="מסלול סגור נשמר כהיסטוריה ואינו ניתן לעריכה")
+    if payload.status == "completed":
+        raise HTTPException(status_code=409, detail="יש לסגור מסלול באמצעות פעולת סגירת מסלול")
+    if payload.manager_savings_rate_percent is not None and payload.manager_savings_rate_percent != plan.manager_savings_rate_percent:
+        if plan.manager_savings_rate_percent > 0:
+            raise HTTPException(status_code=409, detail="כדי לשנות חיסכון מנהל קיים יש לסגור ולפתוח מסלול חדש, לשמירת ההיסטוריה")
+        plan.manager_savings_start_date = max(plan.start_date, svc.israel_today())
+    if plan.manager_savings_rate_percent > 0 and (
+        (payload.principal is not None and payload.principal != plan.principal)
+        or (payload.start_date is not None and payload.start_date != plan.start_date)
+    ):
+        raise HTTPException(status_code=409, detail="כדי לשנות קרן או תאריך במסלול עם חיסכון מנהל יש לסגור ולפתוח מסלול חדש")
 
     old_start = plan.start_date
     old_duration = plan.duration_months
@@ -603,6 +615,44 @@ def update_plan(
     return svc.serialize_plan(plan)
 
 
+@router.post("/plans/{plan_id}/close", response_model=PlanOut)
+def close_plan_to_wallet(plan_id: int, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
+    try:
+        plan = wallet_svc.close_plan(db, plan_id, user.id)
+        db.commit()
+        return svc.serialize_plan(plan)
+    except (ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
+
+
+@router.post("/investors/{investor_id}/wallet/withdraw")
+def withdraw_available_balance(investor_id: int, payload: WalletWithdrawalRequest, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
+    try:
+        entry = wallet_svc.withdraw(db, investor_id, payload.amount, payload.operation_key, user.id)
+        db.commit()
+        return {"id": entry.id, "amount": -entry.amount_cents / 100, "balance_after": entry.balance_after_cents / 100}
+    except (ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
+
+
+@router.get("/investors/{investor_id}/wallet")
+def investor_wallet_history(investor_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
+    if not is_manager(user) and investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="אין גישה למשקיע זה")
+    from app.models.investments import WalletEntry
+    investor = db.get(Investor, investor_id)
+    if not investor:
+        raise HTTPException(status_code=404, detail="המשקיע לא נמצא")
+    entries = db.query(WalletEntry).filter(WalletEntry.investor_id == investor_id).order_by(WalletEntry.id.desc()).all()
+    return {"available_balance": (investor.available_balance_cents or 0) / 100, "entries": [
+        {"id": row.id, "plan_id": row.plan_id, "type": row.operation_type,
+         "amount": row.amount_cents / 100, "balance_after": row.balance_after_cents / 100,
+         "created_at": row.created_at} for row in entries
+    ]}
+
+
 @router.delete("/plans/{plan_id}", status_code=204)
 def delete_plan(
     plan_id: int,
@@ -617,6 +667,10 @@ def delete_plan(
     )
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+    if plan.closed_on:
+        raise HTTPException(status_code=409, detail="מסלול שנסגר לחשבון היתרה הזמינה נשמר כהיסטוריה ואינו ניתן למחיקה")
+    from app.models.investments import WalletEntry
+    db.query(WalletEntry).filter(WalletEntry.plan_id == plan_id).update({"plan_id": None}, synchronize_session=False)
     inv_name = plan.investor.name if plan.investor else ""
     inv_id = plan.investor_id
     principal = float(plan.principal or 0)
@@ -1076,51 +1130,8 @@ def settle_savings_action(
     user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    """Redeem savings then close the track or open a new successor plan (manager)."""
-    plan = _load_plan_for_savings(db, plan_id)
-    if plan.status == "completed":
-        raise HTTPException(status_code=400, detail="המסלול כבר סגור")
-    inv_name = plan.investor.name if plan.investor else ""
-    inv_id = plan.investor_id
-    try:
-        result = svc.settle_savings_action(
-            db,
-            plan=plan,
-            action_type=payload.action_type,
-            amount=payload.amount,
-            outcome=payload.outcome,
-            actor_user_id=user.id,
-            notes=payload.notes,
-            withdraw_remaining=payload.withdraw_remaining,
-            compound_savings=payload.compound_savings,
-            include_monthly_cash=payload.include_monthly_cash,
-            monthly_rate_percent=payload.monthly_rate_percent,
-            savings_rate_percent=payload.savings_rate_percent,
-            manager_fee_percent=payload.manager_fee_percent,
-            new_principal=payload.new_principal,
-            new_duration_months=payload.new_duration_months,
-            new_start_date=payload.new_start_date,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    from app.services import activity_service as activity_svc
-
-    activity_svc.log_activity(
-        db,
-        kind="savings_settle",
-        title=f"סגירת/גלגול מסלול · {inv_name}",
-        body=f"פעולה: {payload.action_type} · תוצאה: {payload.outcome}",
-        severity="warning",
-        actor=user,
-        investor_id=inv_id,
-        investor_name=inv_name or None,
-        entity_type="plan",
-        entity_id=plan_id,
-        href="/investors",
-        commit=True,
-    )
-    return result
-
+    """Legacy settlement is superseded by atomic closure to the available account."""
+    raise HTTPException(status_code=409, detail="יש לסגור את המסלול לחשבון היתרה הזמינה, ואז למשוך או לפתוח מסלול חדש")
 
 @router.post("/remove-from-calendar-year")
 def remove_from_calendar_year(
@@ -1250,7 +1261,7 @@ def list_payments(
     else:
         payments = query.order_by(Payment.due_date.desc(), Payment.id.desc()).all()
 
-    # Safety net: never return two rows for the same investor on the same due date.
+    # Preserve separate plans' payment history even when their dates coincide.
     priority = {
         "paid": 3,
         "awaiting_confirmation": 2,
@@ -1259,7 +1270,7 @@ def list_payments(
     }
     unique: dict[tuple[int, date], Payment] = {}
     for payment in payments:
-        key = (payment.investor_id, payment.due_date)
+        key = (payment.plan_id, payment.month_number)
         prior = unique.get(key)
         if prior is None or priority.get(payment.status, 0) > priority.get(prior.status, 0):
             unique[key] = payment
@@ -1269,7 +1280,7 @@ def list_payments(
         reverse=year is None,
     )
     return [
-        svc.serialize_payment(p)
+        svc.serialize_payment(p) if is_manager(user) else svc.redact_private_manager_data(svc.serialize_payment(p))
         for p in ordered
         if not svc.is_admin_shell(p.investor)
     ]
@@ -1292,7 +1303,8 @@ def payment_report(
     db: Session = Depends(get_investment_db),
 ):
     scoped = _scope_investor_id(user, investor_id)
-    return svc.get_payment_report(db, year=year, investor_id=scoped)
+    data = svc.get_payment_report(db, year=year, investor_id=scoped)
+    return data if is_manager(user) else svc.redact_private_manager_data(data)
 
 
 @router.post("/open-calendar-year")
@@ -1441,7 +1453,7 @@ def confirm_payment(
         commit=True,
     )
     db.refresh(payment)
-    return svc.serialize_payment(payment)
+    return svc.serialize_payment(payment) if is_manager(user) else svc.redact_private_manager_data(svc.serialize_payment(payment))
 
 
 @router.post("/payments/{payment_id}/reject", response_model=PaymentOut)
@@ -1481,7 +1493,7 @@ def reject_payment(
         commit=True,
     )
     db.refresh(payment)
-    return svc.serialize_payment(payment)
+    return svc.serialize_payment(payment) if is_manager(user) else svc.redact_private_manager_data(svc.serialize_payment(payment))
 
 
 @router.get("/quotes", response_model=list[QuoteOut])

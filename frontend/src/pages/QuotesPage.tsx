@@ -707,7 +707,7 @@ export function QuotesPage() {
                   ) : null}
                   {q.plan_type !== "monthly" ? (
                     <div>
-                      <dt>יתרת חיסכון בסיום (ריבית דריבית)</dt>
+                      <dt>יתרת חיסכון בסיום (ללא ריבית דריבית)</dt>
                       <dd>{formatMoney(q.projected_savings_balance)}</dd>
                     </div>
                   ) : null}
@@ -772,7 +772,7 @@ export function QuotesPage() {
                           <tr key={r.month}>
                             <td data-label="חודש">
                               {r.month}
-                              {r.compounded ? " · ריבית דריבית" : ""}
+                              {r.compounded ? "" : ""}
                             </td>
                             {q.plan_type !== "savings" ? (
                               <td data-label="החזר חודשי">{formatMoney(r.profit, true)}</td>

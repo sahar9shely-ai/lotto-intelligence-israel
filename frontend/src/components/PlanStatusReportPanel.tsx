@@ -108,7 +108,7 @@ export function PlanStatusReportPanel({
                   <tr key={m.month_number}>
                     <td data-label="חודש #">
                       {m.month_number}
-                      {m.compounded ? " · ריבית דריבית" : ""}
+                      {m.compounded ? "" : ""}
                     </td>
                     <td data-label="חודש">{formatCalendarMonth(m.due_date)}</td>
                     <td data-label="תאריך">{formatDate(m.due_date)}</td>

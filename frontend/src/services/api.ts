@@ -299,10 +299,13 @@ export const api = {
   createPlan: (body: {
     investor_id: number;
     principal: number;
+    additional_funds?: number;
+    operation_key?: string;
     plan_type?: string;
     monthly_rate_percent: number;
     savings_rate_percent?: number;
     manager_fee_percent: number;
+    manager_savings_rate_percent?: number;
     start_date: string;
     duration_months: number;
     notes?: string;
@@ -320,6 +323,7 @@ export const api = {
       monthly_rate_percent: number;
       savings_rate_percent: number;
       manager_fee_percent: number;
+      manager_savings_rate_percent: number;
       start_date: string;
       duration_months: number;
       status: string;
@@ -331,6 +335,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  closePlan: (id: number) => request<Plan>(`/api/v1/investments/plans/${id}/close`, { method: "POST" }),
+  withdrawBalance: (id: number, amount: number, operationKey: string) => request<{balance_after: number}>(`/api/v1/investments/investors/${id}/wallet/withdraw`, {
+    method: "POST", body: JSON.stringify({amount, operation_key: operationKey}),
+  }),
+  wallet: (id: number) => request<{available_balance: number; entries: {id: number; plan_id: number | null; type: string; amount: number; balance_after: number; created_at: string}[]}>(`/api/v1/investments/investors/${id}/wallet`),
   planStatusReport: (id: number, params?: { year?: number }) => {
     const q =
       params?.year != null ? `?year=${encodeURIComponent(String(params.year))}` : "";

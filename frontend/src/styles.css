@@ -8640,3 +8640,11 @@ body {
 .btn:active:not(:disabled) {
   transform: scale(0.98);
 }
+/* Plan setup keeps funding, investor terms and private manager terms distinct. */
+.plan-opening__section { margin: 0 0 1rem; padding: 1rem; border: 1px solid var(--border, #d7dee9); border-radius: 12px; min-width: 0; }
+.plan-opening__section legend { padding: 0 .4rem; font-weight: 700; }
+.plan-opening__section--manager { border-color: #b4a4dc; background: rgba(133, 100, 190, .07); }
+.plan-opening-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .65rem 1rem; margin: 1rem 0; }
+.plan-opening-summary dd { margin: 0; text-align: end; font-weight: 600; }
+.plan-opening__total { display: flex; justify-content: space-between; gap: 1rem; padding: 1rem 0; font-size: 1.1rem; }
+.plan-opening [hidden] { display: none !important; }

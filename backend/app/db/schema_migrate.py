@@ -65,6 +65,23 @@ def ensure_schema(engine: Engine) -> None:
 
     InvestmentBase.metadata.create_all(bind=engine)
 
+    for table, additions in {
+        "investors": {"available_balance_cents": "INTEGER NOT NULL DEFAULT 0"},
+        "investment_plans": {
+            "manager_savings_rate_percent": "FLOAT NOT NULL DEFAULT 0",
+            "manager_savings_start_date": "DATE",
+            "closed_on": "DATE",
+            "closing_principal_cents": "INTEGER",
+            "closing_savings_cents": "INTEGER",
+            "closing_accrued_savings": "FLOAT",
+        },
+    }.items():
+        columns = _table_columns(engine, table)
+        with engine.begin() as conn:
+            for name, definition in additions.items():
+                if name not in columns:
+                    _add_column(conn, table, f"{name} {definition}")
+
     # Activity / notification stream indexes (create_all covers the table).
     if _table_exists(engine, "activity_events"):
         with engine.begin() as conn:
@@ -89,39 +106,25 @@ def ensure_schema(engine: Engine) -> None:
 
     if _table_exists(engine, "payments"):
         with engine.begin() as conn:
-            # Deduplicate before unique indexes (keep lowest id per key).
-            conn.execute(
-                text(
-                    """
-                    DELETE FROM payments
-                    WHERE id NOT IN (
-                      SELECT MIN(id) FROM payments GROUP BY plan_id, month_number
-                    )
-                    """
-                )
-            )
-            conn.execute(
-                text(
-                    """
-                    DELETE FROM payments
-                    WHERE id NOT IN (
-                      SELECT MIN(id) FROM payments GROUP BY investor_id, due_date
-                    )
-                    """
-                )
-            )
-            conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_plan_month "
-                    "ON payments(plan_id, month_number)"
-                )
-            )
-            conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_investor_due "
-                    "ON payments(investor_id, due_date)"
-                )
-            )
+            if _dialect(engine) == "postgresql":
+                conn.execute(text("ALTER TABLE payments DROP CONSTRAINT IF EXISTS uq_payments_investor_due"))
+                conn.execute(text("DROP INDEX IF EXISTS uq_payments_investor_due"))
+            elif _dialect(engine) == "sqlite":
+                import re
+                definition = conn.execute(text("SELECT sql FROM sqlite_master WHERE type='table' AND name='payments'")).scalar()
+                if definition and "CONSTRAINT uq_payments_investor_due" in definition:
+                    revised = re.sub(r",\s*CONSTRAINT uq_payments_investor_due UNIQUE \(investor_id, due_date\)", "", definition)
+                    if revised == definition:
+                        raise RuntimeError("Cannot safely migrate the payments date constraint")
+                    revised = revised.replace("CREATE TABLE payments", "CREATE TABLE payments_wallet_migration", 1)
+                    columns = [row[1] for row in conn.execute(text("PRAGMA table_info(payments)"))]
+                    column_sql = ", ".join('"' + name + '"' for name in columns)
+                    conn.execute(text(revised))
+                    conn.execute(text(f"INSERT INTO payments_wallet_migration ({column_sql}) SELECT {column_sql} FROM payments"))
+                    conn.execute(text("DROP TABLE payments"))
+                    conn.execute(text("ALTER TABLE payments_wallet_migration RENAME TO payments"))
+                conn.execute(text("DROP INDEX IF EXISTS uq_payments_investor_due"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_plan_month ON payments(plan_id, month_number)"))
 
     if _table_exists(engine, "payments"):
         cols = _table_columns(engine, "payments")

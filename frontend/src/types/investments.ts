@@ -6,6 +6,7 @@ export type Investor = {
   notes?: string | null;
   created_at: string;
   active_principal: number;
+  available_balance?: number;
   monthly_payout: number;
   monthly_cash?: number;
   monthly_savings?: number;
@@ -55,6 +56,12 @@ export type Plan = {
   monthly_rate_percent: number;
   savings_rate_percent: number;
   manager_fee_percent?: number;
+  manager_savings_rate_percent?: number;
+  monthly_manager_savings?: number;
+  accrued_manager_savings?: number;
+  closed_on?: string | null;
+  closing_principal?: number | null;
+  closing_savings?: number | null;
   start_date: string;
   track_end_date?: string | null;
   duration_months: number;
@@ -200,6 +207,7 @@ export type SiteStatus = {
 };
 
 export type Dashboard = {
+  available_balance?: number;
   scope_investor_id?: number | null;
   total_principal: number;
   monthly_investor_payouts: number;
@@ -258,6 +266,9 @@ export type ManagerIncomeInvestor = {
   investor_name: string;
   principal: number;
   monthly_fee: number;
+  monthly_savings?: number;
+  accrued_savings?: number;
+  paid_cash?: number;
   plans: ManagerIncomePlanFee[];
 };
 
@@ -281,6 +292,9 @@ export type ManagerIncomeBoard = {
   manager_investor_id?: number | null;
   investors: ManagerIncomeInvestor[];
   monthly_fees_total: number;
+  monthly_manager_savings_total?: number;
+  accrued_manager_savings_total?: number;
+  paid_manager_cash_total?: number;
   manager_own: {
     investor_id?: number | null;
     investor_name: string;
