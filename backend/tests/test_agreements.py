@@ -153,3 +153,14 @@ class AgreementTests(unittest.TestCase):
             self.assertEqual(self.investor.available_balance_cents,7640000)
             self.assertEqual(self.client.post(f"/api/v1/investments/investors/{self.investor.id}/wallet/withdraw",json=body).status_code,200)
             self.assertEqual(self.investor.available_balance_cents,7640000)
+
+    def test_signed_term_survives_legacy_reporting_notes_and_startup_repair(self):
+        data=dict(investor_id=self.investor.id,principal=10000,additional_funds=10000,plan_type="hybrid",monthly_rate_percent=2,savings_rate_percent=1,
+                  manager_fee_percent=0,manager_savings_rate_percent=0,start_date=date(2026,8,1),duration_months=12,notes="לוח דיווח לשנת 2026")
+        row,token=agreements.issue(self.db,investor_id=self.investor.id,kind="open",actor_id=self.admin.id,notice_id=self.notice("new").id,data=data)
+        self.db.commit();self.assertEqual(self.sign(row,token).status_code,200)
+        self.db.expire_all()
+        plan=self.db.get(InvestmentPlan,row.plan_id)
+        self.assertEqual(svc.plan_effective_duration(plan),12)
+        svc.repair_reporting_year_plans(self.db)
+        self.assertEqual(plan.duration_months,12);self.assertEqual(len(plan.payments),12)

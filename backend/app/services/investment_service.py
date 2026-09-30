@@ -206,6 +206,8 @@ def plan_effective_duration(plan: InvestmentPlan) -> int:
     and double-counts savings against the next active plan (~₪1,100 twice).
     """
     stored = max(int(plan.duration_months or 0), 0)
+    if any(a.kind == "open" and a.status == "signed" for a in plan.agreements):
+        return stored
     payments = list(plan.payments or [])
     schedule_len = 0
     if payments:
@@ -1961,10 +1963,12 @@ def clip_reporting_year_plan_spans(db: Session) -> dict:
     clipped = 0
     plans = (
         db.query(InvestmentPlan)
-        .options(joinedload(InvestmentPlan.payments))
+        .options(joinedload(InvestmentPlan.payments), joinedload(InvestmentPlan.agreements))
         .all()
     )
     for plan in plans:
+        if any(a.status == "signed" for a in plan.agreements):
+            continue
         year = reporting_year_from_notes(plan.notes)
         if not year or not plan.start_date or plan.start_date.year != year:
             continue

@@ -1145,7 +1145,6 @@ export function PaymentsPage() {
         <div
           ref={savingsPanelRef}
           className={[
-            "hide-on-phone",
             detailFocus === "lifetime-savings-now" ||
             detailFocus === "lifetime-savings-end"
               ? "detail-target detail-target--active"
@@ -1211,7 +1210,7 @@ export function PaymentsPage() {
                       ·
                     </div>
                     <div className="savings-breakdown__item savings-breakdown__item--total">
-                      <span className="stat__label">חיסכון שנצבר לאורך המסלולים</span>
+                      <span className="stat__label">צבירת חיסכון חדשה במסלולים המוצגים</span>
                       <strong>{formatMoney(inv.plans.reduce((sum, p) => sum + Number(p.accrued_savings_balance ?? p.current_savings_balance ?? 0), 0))}</strong>
                     </div>
                     <div className="savings-breakdown__item savings-breakdown__item--end">
@@ -1300,7 +1299,7 @@ export function PaymentsPage() {
                             </span>
                           </div>
                           <div className="savings-track-nums__total">
-                            <span className="stat__label">חיסכון שנצבר עד היום</span>
+                            <span className="stat__label">צבירת חיסכון במסלול עד היום</span>
                             <strong>{formatMoney(Number(p.accrued_savings_balance ?? sav))}</strong>
                             <span className="muted">לפני משיכות חיסכון קודמות</span>
                           </div>

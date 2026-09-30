@@ -62,6 +62,7 @@ class InvestmentPlan(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     investor: Mapped["Investor"] = relationship(back_populates="plans")
+    agreements: Mapped[list["PlanAgreement"]] = relationship(viewonly=True)
     payments: Mapped[list["Payment"]] = relationship(
         back_populates="plan", cascade="all, delete-orphan"
     )
