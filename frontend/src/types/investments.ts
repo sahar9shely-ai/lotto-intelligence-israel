@@ -26,7 +26,17 @@ export type Investor = {
   has_login?: boolean;
 };
 
-export type VaultDocumentKind = "contract" | "quote" | "monthly" | "yearly";
+export type VaultDocumentKind = "contract" | "agreement" | "quote" | "monthly" | "yearly";
+
+export type PlanAgreement = {
+  id: number; investor_id: number; plan_id: number | null; kind: "open" | "close";
+  status: "pending" | "signed" | "cancelled";
+  snapshot: {version: number; title: string; investor_name: string; manager_name: string;
+    terms: Record<string, string | number>; clauses: string[]; notice_requested_on: string};
+  document_hash: string; created_at: string; expires_at: string; signed_at: string | null;
+  signed_name: string | null; signature_png: string | null; token?: string;
+  execution_details?: Record<string, string | number> | null;
+};
 
 export type VaultDocument = {
   id: string;

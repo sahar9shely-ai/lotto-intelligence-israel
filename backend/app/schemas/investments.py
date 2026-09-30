@@ -289,6 +289,7 @@ class QuoteUpdate(BaseModel):
 
 
 class QuoteConvert(BaseModel):
+    notice_requested_on: Optional[date] = None
     start_date: Optional[date] = None
     phone: Optional[str] = None
     notes: Optional[str] = None
@@ -529,7 +530,7 @@ class TopupRequestOut(BaseModel):
 
 class VaultDocumentOut(BaseModel):
     id: str
-    kind: Literal["contract", "quote", "monthly", "yearly"]
+    kind: Literal["contract", "agreement", "quote", "monthly", "yearly"]
     title: str
     subtitle: Optional[str] = None
     issued_at: Optional[datetime] = None

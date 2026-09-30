@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
 import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
@@ -95,12 +95,7 @@ function round2(n: number): number {
 }
 
 function planCashToDate(plan: Plan): number {
-  // Prefer actual paid cash; fall back to elapsed × monthly for hybrid/monthly cash leg.
-  if (Number(plan.paid_investor_total || 0) > 0) return Number(plan.paid_investor_total);
-  if (plan.plan_type === "savings") return 0;
-  return round2(
-    Number(plan.monthly_investor_payout || 0) * Number(plan.months_elapsed || 0),
-  );
+  return Number(plan.paid_investor_total || 0);
 }
 
 function planTotalToDate(plan: Plan): number {
@@ -127,8 +122,6 @@ export function PaymentsPage() {
   const clearMessage = useCallback(() => setMessage(null), []);
   const [markBusyId, setMarkBusyId] = useState<number | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
-  const [alignBusy, setAlignBusy] = useState(false);
-  const [openBusy, setOpenBusy] = useState(false);
   const [markBusy, setMarkBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [removeBusyId, setRemoveBusyId] = useState<number | null>(null);
@@ -704,31 +697,6 @@ export function PaymentsPage() {
     }
   }
 
-  async function openReportingYear() {
-    if (
-      !window.confirm(
-        `לפתוח לוח תשלומים לשנת ${year}?\nלכל משקיע ייווצר לוח מתחילת המסלול שלו לפי תנאי המסלול (משך מלא) — בלי חודשים שלפני ההתחלה.`,
-      )
-    ) {
-      return;
-    }
-    setOpenBusy(true);
-    setMessage(null);
-    try {
-      const result = await api.openCalendarYear(year);
-      setMessage(
-        result.created_count
-          ? `נפתח לוח לשנת ${year} עבור ${result.created_count} משקיעים — אפשר למלא את הדוח`
-          : `כבר קיים לוח לשנת ${year}`,
-      );
-      refreshAll();
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "פתיחת שנת דיווח נכשלה");
-    } finally {
-      setOpenBusy(false);
-    }
-  }
-
   async function markEntireYearPaid() {
     if (
       !window.confirm(
@@ -779,31 +747,6 @@ export function PaymentsPage() {
       setMessage(err instanceof Error ? err.message : "הסרה מהשנה נכשלה");
     } finally {
       setRemoveBusyId(null);
-    }
-  }
-
-  async function alignToCalendarYear() {
-    if (
-      !window.confirm(
-        `ליישר את לוחות התשלומים לשנה הקלנדרית ${year}?\nהמסלולים יתחילו ב-1 בינואר ${year} ויכסו את השנה מתחילתה ועד סופה.`,
-      )
-    ) {
-      return;
-    }
-    setAlignBusy(true);
-    setMessage(null);
-    try {
-      const result = await api.alignCalendarYear(year);
-      setMessage(
-        result.count
-          ? `יושרו ${result.count} מסלולים לשנת ${year} (1 בינואר – 31 בדצמבר)`
-          : `כל המסלולים כבר מיושרים לשנה הקלנדרית ${year}`,
-      );
-      refreshAll();
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "יישור שנתי נכשל");
-    } finally {
-      setAlignBusy(false);
     }
   }
 
@@ -923,22 +866,7 @@ export function PaymentsPage() {
                 >
                   {syncBusy ? "מסנכרנים..." : `סנכרון סכומי ${year}`}
                 </button>
-                <button
-                  type="button"
-                  className="tools-menu__item"
-                  disabled={openBusy}
-                  onClick={openReportingYear}
-                >
-                  {openBusy ? "פותחים..." : `פתח לוח ${year}`}
-                </button>
-                <button
-                  type="button"
-                  className="tools-menu__item"
-                  disabled={alignBusy}
-                  onClick={alignToCalendarYear}
-                >
-                  {alignBusy ? "מיישרים..." : "יישור לתחילת שנה"}
-                </button>
+                <Link className="tools-menu__item" to="/investors">הכנת הסכם למסלול חדש</Link>
               </div>
             </details>
           ) : null}
@@ -1239,15 +1167,7 @@ export function PaymentsPage() {
               <div className="savings-grand-total">
                 <span className="muted">סה״כ כל המשקיעים בלוח</span>
                 <div className="savings-grand-total__nums">
-                  <span>
-                    מזומן {formatMoney(savingsTotals.cashToDate)}
-                  </span>
-                  <span>+</span>
-                  <span>
-                    חיסכון {formatMoney(savingsTotals.savingsToDate)}
-                  </span>
-                  <span>=</span>
-                  <strong>סה״כ עד עכשיו {formatMoney(savingsTotals.totalToDate)}</strong>
+                  <strong>חיסכון שנצבר עד עכשיו {formatMoney(savingsTotals.savingsToDate)}</strong>
                 </div>
               </div>
             ) : null}
@@ -1265,49 +1185,44 @@ export function PaymentsPage() {
                       </p>
                     </div>
                     <div className="savings-investor-card__hero">
-                      <span className="stat__label">סה״כ עד עכשיו</span>
+                      <span className="stat__label">יתרת חיסכון שנצברה</span>
                       <strong className="savings-investor-card__hero-value">
-                        {formatMoney(inv.totalToDate)}
+                        {formatMoney(inv.savingsToDate)}
                       </strong>
                       <span className="muted">
-                        מזומן {formatMoney(inv.cashToDate)} + חיסכון{" "}
-                        {formatMoney(inv.savingsToDate)}
+                        חיסכון בלבד · ללא תשלומי המזומן
                       </span>
                     </div>
                   </header>
 
                   <div className="savings-breakdown">
                     <div className="savings-breakdown__item">
-                      <span className="stat__label">מזומן עד עכשיו</span>
-                      <strong>{formatMoney(inv.cashToDate)}</strong>
+                      <span className="stat__label">צבירת חיסכון חודשית</span>
+                      <strong>{formatMoney(inv.plans.reduce((sum, p) => sum + Number(p.monthly_savings_accrual || 0), 0))}</strong>
                     </div>
                     <div className="savings-breakdown__plus" aria-hidden>
-                      +
+                      ·
                     </div>
                     <div className="savings-breakdown__item">
                       <span className="stat__label">חיסכון עד עכשיו</span>
                       <strong>{formatMoney(inv.savingsToDate)}</strong>
                     </div>
                     <div className="savings-breakdown__plus" aria-hidden>
-                      =
+                      ·
                     </div>
                     <div className="savings-breakdown__item savings-breakdown__item--total">
-                      <span className="stat__label">סה״כ עד עכשיו</span>
-                      <strong>{formatMoney(inv.totalToDate)}</strong>
+                      <span className="stat__label">חיסכון שנצבר לאורך המסלולים</span>
+                      <strong>{formatMoney(inv.plans.reduce((sum, p) => sum + Number(p.accrued_savings_balance ?? p.current_savings_balance ?? 0), 0))}</strong>
                     </div>
                     <div className="savings-breakdown__item savings-breakdown__item--end">
-                      <span className="stat__label">צפוי בסיום מסלול</span>
-                      <strong>{formatMoney(inv.totalAtEnd)}</strong>
-                      <span className="muted">
-                        מתוכו חיסכון {formatMoney(inv.savingsAtEnd)}
-                      </span>
+                      <span className="stat__label">חיסכון צפוי בסיום מסלול</span>
+                      <strong>{formatMoney(inv.savingsAtEnd)}</strong>
                     </div>
                   </div>
 
                   {inv.plans.map((p) => {
                     const cash = planCashToDate(p);
                     const sav = Number(p.current_savings_balance || 0);
-                    const totalNow = planTotalToDate(p);
                     const progress =
                       p.duration_months > 0
                         ? Math.min(
@@ -1385,18 +1300,17 @@ export function PaymentsPage() {
                             </span>
                           </div>
                           <div className="savings-track-nums__total">
-                            <span className="stat__label">סה״כ עד עכשיו</span>
-                            <strong>{formatMoney(totalNow)}</strong>
-                            <span className="muted">מזומן + חיסכון</span>
+                            <span className="stat__label">חיסכון שנצבר עד היום</span>
+                            <strong>{formatMoney(Number(p.accrued_savings_balance ?? sav))}</strong>
+                            <span className="muted">לפני משיכות חיסכון קודמות</span>
                           </div>
                           <div>
-                            <span className="stat__label">צפוי בסיום</span>
+                            <span className="stat__label">חיסכון צפוי בסיום</span>
                             <strong>
-                              {formatMoney(Number(p.total_investor_payout || 0))}
+                              {formatMoney(p.projected_savings_balance)}
                             </strong>
                             <span className="muted">
-                              חיסכון{" "}
-                              {formatMoney(p.projected_savings_balance)}
+                              מחושב על הקרן בלבד
                             </span>
                           </div>
                         </div>
@@ -1521,20 +1435,13 @@ export function PaymentsPage() {
                   ? "אין רשומות לכל השנים עם הסינון הנוכחי."
                   : `אין רשומות לשנת ${year}. `}
               {!detailFocus && !allYears && isManager
-                ? `לחץ על «פתח לוח ${year}» כדי ליצור לוח דיווח מלא לפי תנאי המסלולים הקיימים.`
+                ? "מסלולים חדשים מופיעים בלוח רק לאחר חתימת המשקיע. אפשר להכין הסכם בעמוד המשקיעים."
                 : !detailFocus && !allYears
-                  ? "פנו למנהל לפתיחת לוח הדיווח לשנה זו."
+                  ? "פנו למנהל לבירור המסלולים והמסמכים לשנה זו."
                   : null}
             </p>
             {isManager && !allYears && !detailFocus ? (
-              <button
-                type="button"
-                className="btn btn--admin"
-                disabled={openBusy}
-                onClick={openReportingYear}
-              >
-                {openBusy ? "פותחים..." : `פתח לוח תשלומים ל-${year}`}
-              </button>
+              <Link className="btn btn--admin" to="/investors">להסכמים ולמסלולים</Link>
             ) : null}
           </div>
         ) : (

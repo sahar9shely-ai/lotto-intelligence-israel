@@ -1,3 +1,4 @@
+from portfolio_fixtures import seed_legacy_plan
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -72,8 +73,8 @@ def test_confirmation_nudge_lists_stale_awaiting_only():
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     bar = next(i for i in investors if i["name"] == "בר")
     year = 2033
-    plan_res = client.post(
-        "/api/v1/investments/plans",
+    plan_res = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": bar["id"],

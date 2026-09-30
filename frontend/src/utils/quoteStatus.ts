@@ -5,7 +5,7 @@ export type QuoteViewTab = "pipeline" | "completed" | "rejected";
 /** In progress: waiting or approved, money not yet transferred. */
 export const PIPELINE_QUOTE_STATUSES: QuoteLifecycleStatus[] = ["pending", "approved"];
 
-/** Done: investor created and track opened. */
+/** Investor onboarded; activation status belongs to the signed agreement. */
 export const COMPLETED_QUOTE_STATUSES: QuoteLifecycleStatus[] = ["converted"];
 
 export const REJECTED_QUOTE_STATUSES: QuoteLifecycleStatus[] = ["rejected"];
@@ -68,8 +68,8 @@ export function quoteStatusLabel(status: string): string {
   const normalized = normalizeQuoteStatus(status);
   const map: Record<QuoteLifecycleStatus, string> = {
     pending: "ממתין לתגובה",
-    approved: "אושר — ממתין להעברה",
-    converted: "הושלם — מסלול פעיל",
+    approved: "אושר — להכנת הסכם",
+    converted: "נקלט בתיק המשקיע",
     rejected: "לא אושר",
   };
   return map[normalized as QuoteLifecycleStatus] ?? status;
@@ -79,8 +79,8 @@ export function quoteMoneyPhaseLabel(status: string): string {
   const normalized = normalizeQuoteStatus(status);
   const map: Record<QuoteLifecycleStatus, string> = {
     pending: "טרם אושר — אין העברת כסף",
-    approved: "אושר — להעביר כסף ולפתוח מסלול",
-    converted: "הכסף הועבר והמסלול פעיל",
+    approved: "ממתין להסכם וחתימת המשקיע",
+    converted: "פרטי ההסכם ומצב המסלול בתיק המשקיע",
     rejected: "לא בוצעה השקעה",
   };
   return map[normalized as QuoteLifecycleStatus] ?? "";
@@ -102,7 +102,7 @@ export function canConvertQuote(status: string): boolean {
   return normalizeQuoteStatus(status) === "approved";
 }
 
-/** Login credentials go out only after money transfer + track opened. */
+/** Onboarded investors need account access to sign their agreement. */
 export function canSendQuoteAccessMessage(status: string): boolean {
   return isCompletedQuote(status);
 }

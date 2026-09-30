@@ -20,6 +20,7 @@ import type {
   SiteStatus,
   TopupRequest,
   DocumentVault,
+  PlanAgreement,
 } from "../types/investments";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -125,6 +126,16 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
 }
 
 export const api = {
+  agreements: (investorId: number) => request<PlanAgreement[]>(`/api/v1/investments/investors/${investorId}/agreements`),
+  notices: (investorId: number) => request<{id: number; purpose: string; requested_on: string; eligible_on: string; notes: string | null}[]>(`/api/v1/investments/investors/${investorId}/notices`),
+  agreement: (id: number) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}`),
+  agreementLink: (id: number) => request<{token: string}>(`/api/v1/investments/agreements/${id}/link`, {method: "POST"}),
+  cancelAgreement: (id: number) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}/cancel`, {method: "POST"}),
+  createNotice: (id: number, body: {purpose: string; requested_on?: string; notes?: string}) => request<{id: number; eligible_on: string}>(`/api/v1/investments/investors/${id}/notices`, {method: "POST", body: JSON.stringify(body)}),
+  openAgreement: (body: Record<string, unknown>) => request<PlanAgreement>("/api/v1/investments/agreements/open", {method: "POST", body: JSON.stringify(body)}),
+  closingAgreement: (id: number, noticeId: number) => request<PlanAgreement>(`/api/v1/investments/plans/${id}/closing-agreement`, {method: "POST", body: JSON.stringify({notice_id: noticeId})}),
+  publicAgreement: (token: string) => request<PlanAgreement>("/api/v1/investments/agreement-public/read", {method: "POST", body: JSON.stringify({token})}),
+  signAgreement: (body: {token: string; password: string; typed_name: string; signature_png: string; accepted_terms: boolean; document_hash: string}) => request<PlanAgreement>("/api/v1/investments/agreement-public/sign", {method: "POST", body: JSON.stringify(body)}),
   login: (username: string, password: string) =>
     request<{ access_token: string; user: AuthUser }>(
       "/api/v1/auth/login",
@@ -623,6 +634,7 @@ export const api = {
   convertQuote: (
     id: number,
     body: {
+      notice_requested_on?: string;
       start_date?: string;
       phone?: string;
       notes?: string;
@@ -631,7 +643,7 @@ export const api = {
       email?: string;
     },
   ) =>
-    request<Plan>(`/api/v1/investments/quotes/${id}/convert`, {
+    request<PlanAgreement>(`/api/v1/investments/quotes/${id}/convert`, {
       method: "POST",
       body: JSON.stringify(body),
     }),

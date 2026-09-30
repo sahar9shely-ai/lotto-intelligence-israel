@@ -1,3 +1,4 @@
+from portfolio_fixtures import seed_legacy_plan
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -134,24 +135,27 @@ def test_username_login_and_investor_scope_alerts_manager():
     assert all(e["kind"] == "login" for e in login_only.json())
 
 
-def test_plan_create_writes_activity_event():
+def test_agreement_preparation_writes_activity_without_creating_plan():
     headers = _auth_headers("admin", "ManagerPass1!")
     investors = client.get("/api/v1/investments/investors", headers=headers)
     assert investors.status_code == 200
     target = next((i for i in investors.json() if not i.get("is_manager")), None)
     assert target is not None
 
-    created = client.post(
-        "/api/v1/investments/plans",
+    from datetime import date
+    notice = client.post(f"/api/v1/investments/investors/{target['id']}/notices", headers=headers,
+                         json={"purpose":"new", "requested_on": inv_svc.add_months(date.today(), -1).isoformat()}).json()
+    created = client.post("/api/v1/investments/agreements/open",
         headers=headers,
         json={
             "investor_id": target["id"],
+            "notice_id": notice["id"],
             "principal": 12000,
             "plan_type": "monthly",
             "monthly_rate_percent": 1.5,
             "savings_rate_percent": 0,
             "manager_fee_percent": 20,
-            "start_date": "2026-01-01",
+            "start_date": date.today().isoformat(),
             "duration_months": 6,
             "generate_schedule": True,
         },
@@ -164,7 +168,7 @@ def test_plan_create_writes_activity_event():
     )
     assert activity.status_code == 200
     assert any(
-        e["kind"] == "plan_created" and e["investor_id"] == target["id"]
+        e["kind"] == "plan_agreement_prepared" and e["investor_id"] == target["id"]
         for e in activity.json()
     )
 
@@ -356,8 +360,8 @@ def test_delete_user_removes_investor_and_history():
     user_id = body["id"]
     investor_id = body["investor_id"]
 
-    plan = client.post(
-        "/api/v1/investments/plans",
+    plan = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": investor_id,

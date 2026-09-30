@@ -12,6 +12,7 @@ export function AvailableBalancePanel({investorId, canManage, onChanged, onNewPl
   const {data, error, loading, reload} = useAsync(() => api.wallet(investorId), [investorId]);
   const [showWithdrawal, setShowWithdrawal] = useState(false);
   const [amount, setAmount] = useState("");
+  const [requestedOn,setRequestedOn] = useState(new Date().toLocaleDateString("en-CA"));
   const [operationKey, setOperationKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -20,6 +21,7 @@ export function AvailableBalancePanel({investorId, canManage, onChanged, onNewPl
     if (busy) return;
     setBusy(true); setFailure(null);
     try {
+      await api.createNotice(investorId,{purpose:"withdraw",requested_on:requestedOn});
       await api.withdrawBalance(investorId, Number(amount), operationKey);
       setOperationKey(crypto.randomUUID()); setShowWithdrawal(false); setAmount("");
       reload(); onChanged();
@@ -37,6 +39,7 @@ export function AvailableBalancePanel({investorId, canManage, onChanged, onNewPl
         <button type="button" className="btn btn--primary" onClick={onNewPlan}>פתיחת מסלול חדש</button>
       </div> : null}
       {showWithdrawal ? <form className="form" onSubmit={withdraw}>
+        <label>מועד קבלת בקשת המשיכה<input type="date" required max={new Date().toLocaleDateString("en-CA")} value={requestedOn} disabled={busy} onChange={e=>setRequestedOn(e.target.value)}/><span className="hint">יש לתעד את מועד הבקשה בפועל. נדרש חודש מראש לפני משיכת הכספים.</span></label>
         <label>סכום למשיכה (₪)<input type="number" min="0.01" max={data.available_balance} step="0.01" required value={amount} disabled={busy} onChange={e => {setAmount(e.target.value); setOperationKey(crypto.randomUUID());}} /></label>
         <p className="hint">יתרה לאחר משיכה: {formatMoney(Math.max(0, data.available_balance - Number(amount || 0)))}. כל היתרה שתישאר תשמש למסלול הבא.</p>
         <p className="hint">האישור רושם משיכה במערכת; יש לבצע את העברת הכסף בפועל בנפרד.</p>

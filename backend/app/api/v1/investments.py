@@ -482,41 +482,7 @@ def create_plan(
     user: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    investor = db.query(Investor).filter(Investor.id == payload.investor_id).first()
-    if not investor:
-        raise HTTPException(status_code=404, detail="Investor not found")
-
-    data = payload.model_dump(exclude={"generate_schedule", "additional_funds", "operation_key"})
-    try:
-        plan = wallet_svc.fund_plan(db, data, payload.additional_funds, payload.operation_key, user.id)
-    except (ValueError, IntegrityError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
-    from app.services import activity_service as activity_svc
-
-    activity_svc.log_activity(
-        db,
-        kind="plan_created",
-        title=f"מסלול חדש · {investor.name}",
-        body=f"קרן {float(plan.principal or 0):,.0f} ₪ · {plan.duration_months} חודשים",
-        severity="success",
-        actor=user,
-        investor_id=investor.id,
-        investor_name=investor.name,
-        entity_type="plan",
-        entity_id=plan.id,
-        href="/investors",
-    )
-    db.commit()
-    db.refresh(plan)
-
-    plan = (
-        db.query(InvestmentPlan)
-        .options(joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments))
-        .filter(InvestmentPlan.id == plan.id)
-        .one()
-    )
-    return svc.serialize_plan(plan)
+    raise HTTPException(status_code=409, detail="פתיחת מסלול מחייבת הסכם חדש וחתימת המשקיע. יש להכין הסכם דרך טופס מסלול חדש")
 
 
 @router.patch("/plans/{plan_id}", response_model=PlanOut)
@@ -537,6 +503,11 @@ def update_plan(
 
     if plan.closed_on:
         raise HTTPException(status_code=409, detail="מסלול סגור נשמר כהיסטוריה ואינו ניתן לעריכה")
+    from app.models.investments import PlanAgreement
+    signed = db.query(PlanAgreement).filter(PlanAgreement.plan_id == plan.id, PlanAgreement.status == "signed").first()
+    if signed and any(getattr(payload, field) is not None and getattr(payload, field) != getattr(plan, field)
+                      for field in ("principal", "start_date", "duration_months", "monthly_rate_percent", "savings_rate_percent", "plan_type", "status")):
+        raise HTTPException(status_code=409, detail="תנאי מסלול חתום אינם ניתנים לשינוי ללא הסכם חדש")
     if payload.status == "completed":
         raise HTTPException(status_code=409, detail="יש לסגור מסלול באמצעות פעולת סגירת מסלול")
     if payload.manager_savings_rate_percent is not None and payload.manager_savings_rate_percent != plan.manager_savings_rate_percent:
@@ -617,17 +588,15 @@ def update_plan(
 
 @router.post("/plans/{plan_id}/close", response_model=PlanOut)
 def close_plan_to_wallet(plan_id: int, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
-    try:
-        plan = wallet_svc.close_plan(db, plan_id, user.id)
-        db.commit()
-        return svc.serialize_plan(plan)
-    except (ValueError, IntegrityError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
+    raise HTTPException(status_code=409, detail="סגירת מסלול מחייבת הסכם סיום וחתימת המשקיע בתום התקופה")
 
 
 @router.post("/investors/{investor_id}/wallet/withdraw")
 def withdraw_available_balance(investor_id: int, payload: WalletWithdrawalRequest, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
+    from app.models.investments import PlanNotice
+    notices = db.query(PlanNotice).filter(PlanNotice.investor_id == investor_id, PlanNotice.purpose == "withdraw").all()
+    if not any(svc.add_months(n.requested_on, 1) <= svc.israel_today() for n in notices):
+        raise HTTPException(status_code=409, detail="משיכת כספים מחייבת בקשה מתועדת חודש מראש")
     try:
         entry = wallet_svc.withdraw(db, investor_id, payload.amount, payload.operation_key, user.id)
         db.commit()
@@ -669,6 +638,9 @@ def delete_plan(
         raise HTTPException(status_code=404, detail="Plan not found")
     if plan.closed_on:
         raise HTTPException(status_code=409, detail="מסלול שנסגר לחשבון היתרה הזמינה נשמר כהיסטוריה ואינו ניתן למחיקה")
+    from app.models.investments import PlanAgreement
+    if db.query(PlanAgreement).filter(PlanAgreement.plan_id == plan.id).first():
+        raise HTTPException(status_code=409, detail="מסלול המקושר להסכם נשמר בהיסטוריה ואינו ניתן למחיקה")
     from app.models.investments import WalletEntry
     db.query(WalletEntry).filter(WalletEntry.plan_id == plan_id).update({"plan_id": None}, synchronize_session=False)
     inv_name = plan.investor.name if plan.investor else ""
@@ -1041,38 +1013,7 @@ def withdraw_savings(
     db: Session = Depends(get_investment_db),
 ):
     """Pull available savings out of the pot (does not change קרן). Manager only."""
-    plan = _load_plan_for_savings(db, plan_id)
-    inv_name = plan.investor.name if plan.investor else ""
-    inv_id = plan.investor_id
-    plan_pk = plan.id
-    try:
-        result = svc.redeem_savings(
-            db,
-            plan=plan,
-            action_type="withdraw",
-            amount=payload.amount,
-            actor_user_id=user.id,
-            notes=payload.notes,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    from app.services import activity_service as activity_svc
-
-    activity_svc.log_activity(
-        db,
-        kind="savings_withdraw",
-        title=f"משיכת חיסכון · {inv_name}",
-        body=f"סכום: {float(payload.amount or 0):,.0f} ₪",
-        severity="warning",
-        actor=user,
-        investor_id=inv_id,
-        investor_name=inv_name or None,
-        entity_type="plan",
-        entity_id=plan_pk,
-        href="/investors",
-        commit=True,
-    )
-    return result
+    raise HTTPException(status_code=409, detail="משיכת כספים תתבצע מהיתרה הזמינה לאחר הסכם סיום חתום, ולא מתוך מסלול פעיל")
 
 
 @router.post(
@@ -1086,38 +1027,7 @@ def transfer_savings_to_principal(
     db: Session = Depends(get_investment_db),
 ):
     """Move available savings into קרן. Manager only."""
-    plan = _load_plan_for_savings(db, plan_id)
-    inv_name = plan.investor.name if plan.investor else ""
-    inv_id = plan.investor_id
-    plan_pk = plan.id
-    try:
-        result = svc.redeem_savings(
-            db,
-            plan=plan,
-            action_type="transfer_to_principal",
-            amount=payload.amount,
-            actor_user_id=user.id,
-            notes=payload.notes,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    from app.services import activity_service as activity_svc
-
-    activity_svc.log_activity(
-        db,
-        kind="savings_transfer",
-        title=f"העברת חיסכון לקרן · {inv_name}",
-        body=f"סכום: {float(payload.amount or 0):,.0f} ₪",
-        severity="info",
-        actor=user,
-        investor_id=inv_id,
-        investor_name=inv_name or None,
-        entity_type="plan",
-        entity_id=plan_pk,
-        href="/investors",
-        commit=True,
-    )
-    return result
+    raise HTTPException(status_code=409, detail="הוספת חיסכון לקרן מחייבת סיום מסלול והסכם חדש חתום")
 
 
 @router.post(
@@ -1141,6 +1051,9 @@ def remove_from_calendar_year(
     db: Session = Depends(get_investment_db),
 ):
     """Remove an investor from a reporting year so they no longer appear in that year's report."""
+    from app.models.investments import PlanAgreement
+    if db.query(PlanAgreement).filter(PlanAgreement.investor_id == investor_id).first():
+        raise HTTPException(status_code=409, detail="תיק עם הסכמים נשמר בהיסטוריה ואינו ניתן להסרה מהדוחות")
     return svc.remove_investor_from_calendar_year(db, year=year, investor_id=investor_id)
 
 
@@ -1313,11 +1226,8 @@ def open_calendar_year(
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    """Open a Jan–Dec reporting year for all investors who already have a plan."""
-    try:
-        return svc.open_calendar_year_plans(db, year=year)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    """Reporting must not create unsigned financial plans."""
+    raise HTTPException(status_code=409, detail="לוח השנה מציג מסלולים קיימים. פתיחת מסלול חדש מחייבת הסכם וחתימה")
 
 
 @router.post("/payments/mark-year-paid")
@@ -1339,8 +1249,8 @@ def align_calendar_year(
     _: User = Depends(require_manager),
     db: Session = Depends(get_investment_db),
 ):
-    """Align active plans to 1 Jan–Dec of the calendar year."""
-    return svc.align_plans_to_calendar_year(db, year=year)
+    """Keep agreed dates and paid history unchanged."""
+    raise HTTPException(status_code=409, detail="תאריכי המסלולים נשמרים לפי ההסכמים; אין יישור אוטומטי לתחילת שנה")
 
 
 @router.get("/payments/confirmation-nudges", response_model=PaymentNudgeListOut)
@@ -1669,7 +1579,7 @@ def delete_quote(
     return None
 
 
-@router.post("/quotes/{quote_id}/convert", response_model=PlanOut)
+@router.post("/quotes/{quote_id}/convert")
 def convert_quote(
     quote_id: int,
     payload: QuoteConvert,
@@ -1713,20 +1623,14 @@ def convert_quote(
     db.add(investor)
     db.flush()
 
-    plan = InvestmentPlan(
-        investor_id=investor.id,
-        principal=quote.principal,
-        plan_type=getattr(quote, "plan_type", None) or "monthly",
-        monthly_rate_percent=quote.monthly_rate_percent,
-        savings_rate_percent=getattr(quote, "savings_rate_percent", 0.0) or 0.0,
-        manager_fee_percent=quote.manager_fee_percent,
-        start_date=start_date,
-        duration_months=quote.duration_months,
-        notes=quote.notes,
-        status="active",
-    )
-    db.add(plan)
-    db.flush()
+    from app.models.investments import PlanNotice
+    from app.services import agreement_service
+    requested = payload.notice_requested_on or svc.israel_today()
+    if requested > svc.israel_today():
+        db.rollback()
+        raise HTTPException(status_code=409, detail="מועד הבקשה אינו יכול להיות בעתיד")
+    notice = PlanNotice(investor_id=investor.id, purpose="new", requested_on=requested, actor_user_id=user.id)
+    db.add(notice); db.flush()
     quote.status = "converted"
     quote.converted_investor_id = investor.id
     quote.start_date = start_date
@@ -1740,7 +1644,11 @@ def convert_quote(
             email=payload.email,
             password=password,
         )
-        svc.generate_payment_schedule(db, plan, commit=False)
+        agreement, token = agreement_service.issue(db, investor_id=investor.id, kind="open", actor_id=user.id, notice_id=notice.id,
+            data={"investor_id": investor.id, "principal": quote.principal, "additional_funds": quote.principal,
+                  "plan_type": quote.plan_type or "monthly", "monthly_rate_percent": quote.monthly_rate_percent,
+                  "savings_rate_percent": quote.savings_rate_percent or 0, "manager_fee_percent": quote.manager_fee_percent,
+                  "manager_savings_rate_percent": 0, "start_date": start_date, "duration_months": quote.duration_months})
         db.commit()
     except ValueError as exc:
         db.rollback()
@@ -1752,19 +1660,13 @@ def convert_quote(
             detail="לא ניתן להוסיף את המשקיע — בדקו שם משתמש, סיסמה ותאריך התחלה",
         ) from exc
 
-    plan = (
-        db.query(InvestmentPlan)
-        .options(joinedload(InvestmentPlan.investor), joinedload(InvestmentPlan.payments))
-        .filter(InvestmentPlan.id == plan.id)
-        .one()
-    )
     from app.services import activity_service as activity_svc
 
     activity_svc.log_activity(
         db,
         kind="quote_converted",
         title=f"משקיע חדש מקליטת הצעה · {investor.name}",
-        body=f"נפתח מסלול · משתמש {username}",
+        body=f"הוכן הסכם הממתין לחתימת המשקיע · משתמש {username}",
         severity="success",
         actor=user,
         investor_id=investor.id,
@@ -1774,4 +1676,4 @@ def convert_quote(
         href="/investors",
         commit=True,
     )
-    return svc.serialize_plan(plan)
+    return {**agreement_service.serialize(agreement), "token": token}

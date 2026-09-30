@@ -2,6 +2,8 @@ import { useState } from "react";
 import { api } from "../services/api";
 import type { Plan } from "../types/investments";
 import { formatMoney } from "../utils/format";
+import { AgreementShare } from "./AgreementPanel";
+import type { PlanAgreement } from "../types/investments";
 
 export function SavingsActions({ plan, onDone, canManage = false }: {
   plan: Plan; onDone: () => void; canManage?: boolean;
@@ -9,6 +11,8 @@ export function SavingsActions({ plan, onDone, canManage = false }: {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreement,setAgreement] = useState<PlanAgreement | null>(null);
+  const [requestedOn,setRequestedOn] = useState(new Date().toLocaleDateString("en-CA"));
   if (!canManage || plan.status !== "active") return null;
   const savings = plan.current_savings_balance ?? 0;
   async function close() {
@@ -16,8 +20,8 @@ export function SavingsActions({ plan, onDone, canManage = false }: {
     setBusy(true);
     setError(null);
     try {
-      await api.closePlan(plan.id);
-      setOpen(false);
+      const notice=await api.createNotice(plan.investor_id,{purpose:"withdraw",requested_on:requestedOn});
+      setAgreement(await api.closingAgreement(plan.id,notice.id));
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "סגירת המסלול נכשלה");
@@ -30,19 +34,21 @@ export function SavingsActions({ plan, onDone, canManage = false }: {
       <div className="modal__sheet">
         <header className="modal__head"><h2>סגירת מסלול · {plan.investor_name}</h2></header>
         <div className="modal__body">
-          <p>הקרן והחיסכון שנותר יעברו לחשבון היתרה הזמינה.</p>
+          <p>בתום התקופה שסוכמה, ורק לאחר חתימת המשקיע, הקרן והחיסכון שנותר יעברו לחשבון היתרה הזמינה.</p>
+          {!agreement ? <label>מועד קבלת בקשת המשקיע<input type="date" value={requestedOn} max={new Date().toLocaleDateString("en-CA")} onChange={e=>setRequestedOn(e.target.value)} required/><span className="hint">יש לתעד את מועד הבקשה בפועל; נדרש חודש מראש.</span></label>:null}
           <dl className="plan-opening-summary">
             <dt>קרן</dt><dd>{formatMoney(plan.principal)}</dd>
             <dt>חיסכון מחודשים מלאים</dt><dd>{formatMoney(savings)}</dd>
             <dt>סה״כ להעברה</dt><dd><strong>{formatMoney(plan.principal + savings)}</strong></dd>
           </dl>
           <p className="hint">הצבירה נעצרת ותשלומים עתידיים מבוטלים. תשלום שמועדו הגיע וטרם שולם יישאר לתשלום. תשלומים שכבר שולמו נשמרים בהיסטוריה.</p>
-          <p className="hint">הסכום הסופי יחושב מחדש בעת האישור.</p>
+          <p className="hint">המסלול נשאר פעיל עד חתימה. שינוי בסכומים מחייב הכנת הסכם מעודכן.</p>
+          {agreement ? <AgreementShare row={agreement}/>:null}
           {error ? <p role="alert" className="form-error">{error}</p> : null}
         </div>
         <div className="modal__actions">
           <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setOpen(false)}>ביטול</button>
-          <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void close()}>{busy ? "סוגר..." : "אישור סגירה והעברה ליתרה הזמינה"}</button>
+          {!agreement ? <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void close()}>{busy ? "מכין הסכם..." : "הכנת הסכם סיום לחתימה"}</button> : <button type="button" className="btn btn--primary" onClick={()=>{setOpen(false);onDone();}}>סיום</button>}
         </div>
       </div>
     </div> : null}

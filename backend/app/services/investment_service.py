@@ -221,7 +221,7 @@ def plan_effective_duration(plan: InvestmentPlan) -> int:
     if plan.status == "completed" and schedule_len > 0:
         return max(1, schedule_len)
 
-    return max(stored, schedule_len, 0)
+    return stored
 
 
 def calc_monthly(principal: float, rate_percent: float) -> float:
@@ -958,21 +958,8 @@ def auto_extend_active_plan(
     plan: InvestmentPlan,
     today: Optional[date] = None,
 ) -> bool:
-    """Extend an active track by 12 months once its term ends (unless explicitly closed)."""
-    today = today or date.today()
-    if plan.status != "active" or _plan_blocks_auto_continue(plan):
-        return False
-
-    metrics = plan_metrics(plan, today)
-    if metrics["months_remaining"] > 0:
-        return False
-
-    plan.duration_months = int(plan.duration_months or 0) + AUTO_EXTEND_MONTHS
-    marker = f"המשך אוטומטי +{AUTO_EXTEND_MONTHS} ח׳"
-    if marker not in (plan.notes or ""):
-        plan.notes = (plan.notes + " · " if plan.notes else "") + marker
-    generate_payment_schedule(db, plan, realign_dates=False, commit=False)
-    return True
+    """Keep the agreed term fixed; renewal requires a new signed agreement."""
+    return False  # Renewal requires a new investor-signed agreement.
 
 
 def sync_investor_track_continuity(
@@ -980,25 +967,8 @@ def sync_investor_track_continuity(
     investor: Investor,
     today: Optional[date] = None,
 ) -> dict:
-    """Roll closed-track savings into the active track and auto-extend active timelines."""
-    today = today or date.today()
-    plans = list(investor.plans or [])
-    target = _primary_active_savings_plan(plans)
-    extended = 0
-    rolled = 0.0
-
-    for plan in plans:
-        if auto_extend_active_plan(db, plan, today):
-            extended += 1
-
-    if target is not None:
-        for plan in sorted(plans, key=lambda p: p.id):
-            moved = roll_savings_to_active_plan(
-                db, from_plan=plan, to_plan=target, today=today
-            )
-            rolled += moved
-
-    return {"extended": extended, "rolled_amount": round(rolled, 2)}
+    """Compatibility hook: no financial rollover or renewal without a signed agreement."""
+    return {"extended": 0, "rolled_amount": 0.0}
 
 
 def sync_track_continuity(
@@ -2161,6 +2131,9 @@ def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
     investor = db.query(Investor).filter(Investor.id == investor_id).first()
     if not investor:
         raise ValueError("משקיע לא נמצא")
+    from app.models.investments import PlanAgreement, PlanNotice
+    if db.query(PlanAgreement).filter(PlanAgreement.investor_id == investor_id).first() or db.query(PlanNotice).filter(PlanNotice.investor_id == investor_id).first():
+        raise ValueError("תיק עם הסכמים או בקשות מתועדות נשמר בהיסטוריה ואינו ניתן למחיקה")
     if (investor.available_balance_cents or 0) > 0 or db.query(InvestmentPlan.id).filter(
         InvestmentPlan.investor_id == investor_id, InvestmentPlan.closed_on.isnot(None)
     ).first():
@@ -3108,6 +3081,8 @@ def _execute_signed_contract(
         return
     if not request.offered_start_date or not request.offered_duration_months:
         raise ValueError("חסרים תנאי חוזה לביצוע")
+    if request.offered_start_date < add_months(request.created_at.date(), 1):
+        raise ValueError("התחלת מסלול מחייבת בקשה חודש מראש. יש להכין הסכם מעודכן")
     investor = db.query(Investor).filter(Investor.id == request.investor_id).with_for_update().one()
     if investor.available_balance_cents:
         raise ValueError("יש יתרה זמינה. יש לפתוח מסלול הכולל את כל היתרה דרך טופס מסלול חדש")
@@ -3292,6 +3267,15 @@ def list_document_vault(db: Session, *, investor: Investor) -> dict:
     digits = phone_digits(investor.phone)
     documents: list[dict] = []
 
+    from app.models.investments import PlanAgreement
+    for agreement in db.query(PlanAgreement).filter(PlanAgreement.investor_id == investor.id).all():
+        documents.append({"id": f"agreement:{agreement.id}", "kind": "agreement",
+            "title": f"{agreement.snapshot['title']} · {agreement.id}",
+            "subtitle": f"מסלול {agreement.plan_id or 'ממתין לפתיחה'} · " + ("חתום" if agreement.status == "signed" else "בוטל" if agreement.status == "cancelled" else "ממתין לחתימה"),
+            "issued_at": agreement.signed_at or agreement.created_at, "source_id": agreement.id,
+            "period": str((agreement.signed_at or agreement.created_at).year),
+            "amount": agreement.snapshot["terms"].get("transfer_total", agreement.snapshot["terms"].get("principal"))})
+
     requests = (
         db.query(InvestmentTopupRequest)
         .options(joinedload(InvestmentTopupRequest.investor))
@@ -3403,7 +3387,7 @@ def list_document_vault(db: Session, *, investor: Investor) -> dict:
         )
 
     grouped: list[dict] = []
-    for kind in ("contract", "quote", "yearly", "monthly"):
+    for kind in ("agreement", "contract", "quote", "yearly", "monthly"):
         bucket = [row for row in documents if row["kind"] == kind]
 
         def _stamp(row: dict) -> datetime:

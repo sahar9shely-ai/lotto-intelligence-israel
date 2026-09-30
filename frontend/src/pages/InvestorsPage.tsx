@@ -2,6 +2,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } 
 import { Link, useSearchParams } from "react-router-dom";
 import { Panel } from "../components/Panel";
 import { AvailableBalancePanel } from "../components/AvailableBalancePanel";
+import { AgreementPanel, AgreementShare, AgreementContent } from "../components/AgreementPanel";
+import type { PlanAgreement } from "../types/investments";
 import { RevealSecret } from "../components/RevealSecret";
 import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
@@ -62,6 +64,7 @@ export function InvestorsPage() {
   const [reportPlanId, setReportPlanId] = useState<number | null>(null);
   const [showNewInvestor, setShowNewInvestor] = useState(false);
   const [showNewPlan, setShowNewPlan] = useState(false);
+  const [issuedAgreement, setIssuedAgreement] = useState<PlanAgreement | null>(null);
   const [showTopupCreate, setShowTopupCreate] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
@@ -181,7 +184,9 @@ export function InvestorsPage() {
     e.preventDefault();
     if (!selected) return;
     const fd = new FormData(e.currentTarget);
-    const plan = await api.createPlan({
+    const notice = await api.createNotice(selected.id, {purpose: "new", requested_on: String(fd.get("notice_requested_on"))});
+    const agreement = await api.openAgreement({
+      notice_id: notice.id,
       investor_id: selected.id,
       principal: Number(fd.get("principal") || 0),
       additional_funds: Number(fd.get("additional_funds") || 0),
@@ -197,7 +202,8 @@ export function InvestorsPage() {
       generate_schedule: true,
     });
     setShowNewPlan(false);
-    setMessage(`מסלול ל-${plan.investor_name} נוצר עם לוח תשלומים`);
+    setIssuedAgreement(agreement);
+    setMessage("הסכם המסלול הוכן. המסלול יופעל רק לאחר חתימת המשקיע");
     refreshAll();
   }
 
@@ -581,6 +587,7 @@ export function InvestorsPage() {
           </Panel>
 
           <AvailableBalancePanel key={`${selected.id}:${selected.available_balance}`} investorId={selected.id} canManage={isManager} onChanged={refreshAll} onNewPlan={() => setShowNewPlan(true)} />
+          <AgreementPanel key={`agreements:${selected.id}:${showNewPlan}`} investorId={selected.id} canManage={isManager} phone={selected.phone} onChanged={refreshAll} />
 
           {selectedPlans.length === 0 ? (
             <Panel title="אין מסלול עדיין">
@@ -745,6 +752,7 @@ export function InvestorsPage() {
         <p className="empty">בחרו משקיע מהרשימה למעלה.</p>
       )}
 
+      {issuedAgreement ? <Modal title="הסכם הוכן לחתימת המשקיע" onClose={() => setIssuedAgreement(null)}><div className="modal__body"><AgreementContent row={issuedAgreement}/><AgreementShare row={issuedAgreement} phone={selected?.phone}/></div></Modal> : null}
       {showNewInvestor ? (
         <Modal title="משקיע חדש" onClose={() => setShowNewInvestor(false)}>
           <form className="form modal__form" autoComplete="off" onSubmit={onCreateInvestor}>
@@ -1007,7 +1015,7 @@ export function PlanForm({settings, investor, onSubmit}: {
   const [operationKey, setOperationKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [review, setReview] = useState<{start: string; duration: string; notes: string} | null>(null);
+  const [review, setReview] = useState<{start: string; requested: string; duration: string; notes: string} | null>(null);
   const available = investor.available_balance ?? 0;
   const principal = Math.round((available + Number(additional || 0)) * 100) / 100;
   const cash = Number(cashRate || 0), savings = Number(savingsRate || 0);
@@ -1018,7 +1026,7 @@ export function PlanForm({settings, investor, onSubmit}: {
     if (busy) return;
     if (!review) {
       const values = new FormData(e.currentTarget);
-      setReview({start: String(values.get("start_date")), duration: String(values.get("duration_months")), notes: String(values.get("notes") || "")});
+      setReview({start: String(values.get("start_date")), requested: String(values.get("notice_requested_on")), duration: String(values.get("duration_months")), notes: String(values.get("notes") || "")});
       return;
     }
     setBusy(true); setError(null);
@@ -1056,7 +1064,9 @@ export function PlanForm({settings, investor, onSubmit}: {
       </fieldset>
       <fieldset disabled={busy} className="plan-opening__section"><legend>4 · תקופה וסיכום לפני שמירה</legend>
         <div className="form__grid" hidden={Boolean(review)}>
-          <label>תאריך התחלה<input name="start_date" type="date" defaultValue={new Date().toLocaleDateString("en-CA")} required /></label>
+          <label>מועד קבלת הבקשה מהמשקיע<input name="notice_requested_on" type="date" max={new Date().toLocaleDateString("en-CA")} defaultValue={new Date().toLocaleDateString("en-CA")} required /></label>
+          <p className="hint">יש לתעד את מועד קבלת הבקשה בפועל. התחלת המסלול תהיה לפחות חודש אחריו ורק לאחר חתימה.</p>
+          <label>תאריך התחלה מוצע<input name="start_date" type="date" defaultValue={(() => {const d=new Date();d.setMonth(d.getMonth()+1);return d.toLocaleDateString("en-CA");})()} required /></label>
           <label>משך בחודשים<input name="duration_months" type="number" min="1" max="120" defaultValue={settings?.default_duration_months ?? 12} required /></label>
           <label>הערות<input name="notes" placeholder="אופציונלי" /></label>
         </div>
@@ -1071,11 +1081,11 @@ export function PlanForm({settings, investor, onSubmit}: {
           <dt>חיסכון למנהל בחודש</dt><dd>{formatPercent(Number(managerSavings))} · {formatMoney(monthly(managerSavings))}</dd>
           <dt>יתרה זמינה לאחר פתיחה</dt><dd>{formatMoney(0)}</dd>
         </dl>
-        {review ? <p className="hint">תאריך התחלה: {review.start} · משך: {review.duration} חודשים{review.notes ? ` · הערות: ${review.notes}` : ""}</p> : null}
+        {review ? <p className="hint">בקשה התקבלה: {review.requested} · תאריך התחלה מוצע: {review.start} · משך: {review.duration} חודשים{review.notes ? ` · הערות: ${review.notes}` : ""}</p> : null}
       </fieldset>
       {error ? <p role="alert" className="form-error">{error}</p> : null}
     </div>
-    <div className="modal__actions">{review ? <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setReview(null)}>חזרה לעריכה</button> : null}<button type="submit" className="btn btn--primary" disabled={busy || principal <= 0}>{busy ? "יוצר מסלול..." : review ? "אישור ופתיחת מסלול" : "בדיקת הנתונים לפני פתיחה"}</button></div>
+    <div className="modal__actions">{review ? <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setReview(null)}>חזרה לעריכה</button> : null}<button type="submit" className="btn btn--primary" disabled={busy || principal <= 0}>{busy ? "מכין הסכם..." : review ? "הכנת הסכם לחתימת המשקיע" : "בדיקת הנתונים לפני הכנת הסכם"}</button></div>
   </form>;
 }
 

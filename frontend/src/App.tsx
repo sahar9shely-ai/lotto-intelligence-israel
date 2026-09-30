@@ -6,6 +6,7 @@ import { RequireAuth, RequireManager } from "./components/RequireAuth";
 import { WelcomeSplash } from "./components/WelcomeSplash";
 import { AuthProvider } from "./context/AuthContext";
 import { ActivityPage } from "./pages/ActivityPage";
+import { AgreementSigningPage } from "./pages/AgreementSigningPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
@@ -35,6 +36,7 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={isPublicAuth ? location.pathname : "app"}>
+        <Route path="/sign" element={<AgreementSigningPage />} />
         <Route
           path="/login"
           element={

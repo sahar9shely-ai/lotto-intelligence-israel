@@ -8648,3 +8648,28 @@ body {
 .plan-opening-summary dd { margin: 0; text-align: end; font-weight: 600; }
 .plan-opening__total { display: flex; justify-content: space-between; gap: 1rem; padding: 1rem 0; font-size: 1.1rem; }
 .plan-opening [hidden] { display: none !important; }
+.agreement-panel { border-top: 3px solid #2ccf96; box-shadow: 0 12px 32px #103d2810; }
+.agreement-history-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:16px 0; border-bottom:1px solid #dcebe3; }
+.agreement-history-row>div { flex:1; min-width:180px; }
+.agreement-document { line-height:1.8; }
+.agreement-clauses { padding-inline-start:24px; }
+.agreement-clauses li { margin:10px 0; }
+.agreement-signing { max-width:760px; margin:24px auto; padding:clamp(18px,4vw,36px); background:#fff; border:1px solid #c9eadb; border-radius:24px; box-shadow:0 10px 42px #1ad39512; }
+.agreement-signing form,.agreement-share { display:grid;gap:16px;margin:22px 0; }
+.agreement-consent { display:flex; align-items:flex-start; gap:10px; line-height:1.7; }
+.agreement-consent input { width:20px; flex-shrink:0; margin-top:5px; }
+.agreement-receipt,.agreement-success { background:#e5fff0; border:1px solid #94e6bc; border-radius:14px;padding:18px; }
+.agreement-receipt img { display:block; max-width:250px; height:100px; object-fit:contain; }
+.agreement-notice { padding:14px; border:1px solid #cee4d8; border-radius:12px;margin:18px 0; }
+.agreement-notice summary { cursor:pointer; font-weight:700; }
+.savings-investor-card__hero-value { color:#086c48; text-shadow:0 0 18px #46f5a62b; }
+.savings-grand-total { border-color:#a5e6c4; background:linear-gradient(110deg,#e8fff0,#f6fff9); box-shadow:inset 3px 0 0 #2dcc8b; }
+.btn--primary { background:linear-gradient(135deg,#076854,#064e44); border-color:#08765d; box-shadow:0 3px 12px #0b956522; }
+.btn--primary:focus-visible { outline:3px solid #43d8a4; outline-offset:3px; }
+.agreement-signing input:focus-visible,.agreement-panel select:focus-visible { outline:2px solid #169b72; outline-offset:2px; }
+@media (max-width:560px) {
+  .plan-opening-summary { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:.65rem; }
+  .plan-opening-summary dd { overflow-wrap:anywhere; }
+  .agreement-document h2 { font-size:1.25rem; }
+  .agreement-share a { text-align:center; white-space:normal; }
+}

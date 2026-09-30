@@ -1,3 +1,4 @@
+from portfolio_fixtures import with_notice
 from datetime import date
 from uuid import uuid4
 
@@ -126,7 +127,7 @@ def test_vault_lists_signed_contract_quote_and_reports_per_investor():
     converted = client.post(
         f"/api/v1/investments/quotes/{quote_id}/convert",
         headers=manager,
-        json={"start_date": date.today().isoformat()},
+        json=with_notice({"start_date": date.today().isoformat()}),
     )
     assert converted.status_code == 200, converted.text
 
@@ -138,8 +139,9 @@ def test_vault_lists_signed_contract_quote_and_reports_per_investor():
     assert body["investor_name"] == "נויה כספת"
     kinds = _kinds(body)
     assert "quote" in kinds
-    assert "yearly" in kinds
-    assert "monthly" in kinds
+    assert "agreement" in kinds
+    assert "yearly" not in kinds
+    assert "monthly" not in kinds
     quote_row = next(row for row in body["documents"] if row["kind"] == "quote")
     assert quote_row["source_id"] == quote_id
     assert "40,000" in (quote_row["subtitle"] or "")

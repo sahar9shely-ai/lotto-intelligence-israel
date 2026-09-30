@@ -7,6 +7,7 @@ import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { VaultDocument, VaultDocumentKind } from "../types/investments";
 import { contractPdfFile } from "../utils/contractPdf";
+import { agreementPdfFile } from "../utils/agreementPdf";
 import { formatDate } from "../utils/format";
 import { monthlyReportPdfFile } from "../utils/monthlyReportPdf";
 import { openPdfBlob, savePdfBlob } from "../utils/pdfDocument";
@@ -14,9 +15,10 @@ import { yearlyPaymentsPdfFile } from "../utils/paymentsPdf";
 import { quotePdfFile } from "../utils/quotePdf";
 import { isAdminAccount, isAdminShellInvestor } from "../utils/roles";
 
-const KIND_ORDER: VaultDocumentKind[] = ["contract", "quote", "yearly", "monthly"];
+const KIND_ORDER: VaultDocumentKind[] = ["agreement", "contract", "quote", "yearly", "monthly"];
 
 const KIND_SECTION: Record<VaultDocumentKind, string> = {
+  agreement: "הסכמי פתיחה וסיום",
   contract: "חוזים",
   quote: "הצעות",
   yearly: "דוחות שנתיים",
@@ -24,7 +26,7 @@ const KIND_SECTION: Record<VaultDocumentKind, string> = {
 };
 
 function kindGlyph(kind: VaultDocumentKind) {
-  if (kind === "contract") return "חתימה";
+  if (kind === "contract" || kind === "agreement") return "חתימה";
   if (kind === "quote") return "הצעה";
   if (kind === "yearly") return "שנתי";
   return "חודשי";
@@ -38,7 +40,12 @@ export function DocumentsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const { data: investors } = useAsync(
+  const {
+    data: investors,
+    loading: investorsLoading,
+    error: investorsError,
+    reload: reloadInvestors,
+  } = useAsync(
     () => (isManager ? api.investors() : Promise.resolve([])),
     [isManager],
   );
@@ -76,6 +83,10 @@ export function DocumentsPage() {
     "תיק פרטי";
 
   async function buildPdf(doc: VaultDocument): Promise<File> {
+    if (doc.kind === "agreement") {
+      if (!doc.source_id) throw new Error("ההסכם לא נמצא");
+      return agreementPdfFile(await api.agreement(doc.source_id));
+    }
     if (doc.kind === "contract") {
       if (!doc.source_id) throw new Error("החוזה לא נמצא");
       const req = await api.topupRequest(doc.source_id);
@@ -142,6 +153,11 @@ export function DocumentsPage() {
         <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
           <div>
             <h1 className="page-intro__title">כספת מסמכים</h1>
+            <p className="hint">
+              {isManager && filterId == null
+                ? "חוזים, הצעות ודוחות לפי משקיע. בחרו משקיע להצגת המסמכים שלו."
+                : `המסמכים של ${investorName} · צפייה והורדה כ־PDF`}
+            </p>
           </div>
         </header>
       </ScrollReveal>
@@ -163,7 +179,19 @@ export function DocumentsPage() {
         </div>
       ) : null}
 
-      {isManager && filterId == null ? (
+      {isManager && investorsLoading ? (
+        <div className="state state--loading" role="status">טוען את רשימת המשקיעים...</div>
+      ) : isManager && investorsError ? (
+        <div className="state state--error" role="alert">
+          <p>לא ניתן לטעון את רשימת המשקיעים. {investorsError}</p>
+          <button type="button" className="btn" onClick={reloadInvestors}>נסה שוב</button>
+        </div>
+      ) : isManager && investorOptions.length === 0 ? (
+        <div className="vault-empty">
+          <p>אין עדיין משקיעים להצגת מסמכים.</p>
+          <span>לאחר הוספת משקיע במסך המשקיעים, ניתן יהיה לבחור אותו כאן.</span>
+        </div>
+      ) : isManager && filterId == null ? (
         <div className="vault-empty">
           <p>בחרו משקיע כדי לראות את כספת המסמכים שלו.</p>
         </div>

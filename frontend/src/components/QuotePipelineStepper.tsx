@@ -6,8 +6,8 @@ import {
 
 const STEPS: { key: QuoteLifecycleStatus; label: string; hint: string }[] = [
   { key: "pending", label: "ממתין", hint: "הצעה בתהליך" },
-  { key: "approved", label: "אושר", hint: "ממתין להעברת כסף" },
-  { key: "converted", label: "הושלם", hint: "מסלול פעיל" },
+  { key: "approved", label: "אושר", hint: "ממתין להכנת הסכם" },
+  { key: "converted", label: "נקלט", hint: "הסכם בתיק המשקיע" },
 ];
 
 type Props = {
@@ -64,10 +64,10 @@ export function quoteNextStepHint(status: string): string | null {
     return "שלחו PDF למועמד/ת. כשמאשרים — לחצו «סימון כאושר».";
   }
   if (step === "approved") {
-    return "אחרי העברת הכסף בפועל — «הכנס כמשקיע חדש» לפתיחת מסלול.";
+    return "«הכנס כמשקיע חדש» להכנת הסכם. המסלול יופעל רק לאחר חתימת המשקיע.";
   }
   if (step === "converted") {
-    return "המסלול פעיל. שלחו פרטי כניסה והמשיכו במסך משקיעים.";
+    return "המשקיע נקלט. שלחו פרטי כניסה וקישור לחתימה; מצב המסלול בתיק המשקיע.";
   }
   return null;
 }

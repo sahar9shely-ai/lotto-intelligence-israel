@@ -4,13 +4,14 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { FlowFunnel } from "../components/FlowFunnel";
 import { QuotePipelineStepper, quoteNextStepHint } from "../components/QuotePipelineStepper";
 import { Panel } from "../components/Panel";
+import { AgreementContent, AgreementShare } from "../components/AgreementPanel";
 import { RevealSecret } from "../components/RevealSecret";
 import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
 import { PlanTrackFields } from "../components/PlanTrackFields";
 import { Toast } from "../components/Toast";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
-import type { Quote } from "../types/investments";
+import type { Quote, PlanAgreement } from "../types/investments";
 import { suggestPassword, suggestUsername } from "../utils/quoteAccess";
 import { buildMonthSchedule, downloadQuotePdf, quotePdfDisplayLabel, quotePdfFile, saveQuotePdfFile } from "../utils/quotePdf";
 import { formatDate, formatMoney, todayISO } from "../utils/format";
@@ -51,6 +52,7 @@ export function QuotesPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<number | null>(null);
   const [converting, setConverting] = useState<Quote | null>(null);
+  const [issuedAgreement,setIssuedAgreement] = useState<PlanAgreement | null>(null);
   const [whatsappSend, setWhatsappSend] = useState<{ quote: Quote; file: File } | null>(null);
   const [whatsappShareBusy, setWhatsappShareBusy] = useState(false);
   const [convertError, setConvertError] = useState<string | null>(null);
@@ -237,16 +239,18 @@ export function QuotesPage() {
     setConvertError(null);
     setBusy(true);
     try {
-      const plan = await api.convertQuote(converting.id, {
+      const agreement = await api.convertQuote(converting.id, {
         start_date,
         username,
         password,
         phone: converting.phone || undefined,
+        notice_requested_on: String(fd.get("notice_requested_on")),
       });
+      setIssuedAgreement(agreement);
       setConverting(null);
       setViewTab("completed");
       setMessage(
-        `${plan.investor_name} נוסף למשקיעים עם מסלול פעיל. כניסה: ${username}`,
+        `${agreement.snapshot.investor_name} נוסף למשקיעים. הסכם המסלול ממתין לחתימה. כניסה: ${username}`,
       );
       reload();
     } catch (err) {
@@ -928,6 +932,7 @@ export function QuotesPage() {
         )}
       </div>
 
+      {issuedAgreement ? <div className="modal" role="dialog" aria-modal="true"><button className="modal__backdrop" aria-label="סגירה" onClick={()=>setIssuedAgreement(null)}/><div className="modal__sheet"><header className="modal__head"><h2>הסכם ממתין לחתימה</h2><button className="btn btn--ghost" onClick={()=>setIssuedAgreement(null)}>סגירה</button></header><div className="modal__body"><AgreementContent row={issuedAgreement}/><AgreementShare row={issuedAgreement}/></div></div></div>:null}
       {converting ? (
         <div className="modal" role="dialog" aria-modal="true">
           <button
@@ -949,6 +954,7 @@ export function QuotesPage() {
             <form className="request-form modal__form" onSubmit={convertQuote}>
               <div className="modal__body">
                 {convertError ? <p className="form-error">{convertError}</p> : null}
+                <label>מועד קבלת בקשת המשקיע<input name="notice_requested_on" type="date" required max={todayISO()} defaultValue={todayISO()}/><span className="hint">יש לתעד את המועד בפועל. המסלול מתחיל לפחות חודש לאחר הבקשה ורק לאחר חתימה.</span></label>
                 <label>
                   תחילת המסלול
                   <input
@@ -956,7 +962,7 @@ export function QuotesPage() {
                     type="date"
                     dir="ltr"
                     required
-                    defaultValue={converting.start_date ?? todayISO()}
+                    defaultValue={converting.start_date ?? (()=>{const d=new Date();d.setMonth(d.getMonth()+1);return d.toLocaleDateString("en-CA");})()}
                   />
                 </label>
                 <label>

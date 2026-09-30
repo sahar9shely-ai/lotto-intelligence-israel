@@ -110,6 +110,19 @@ export async function renderHtmlToPdfBlob(html: string, styles: string): Promise
   return canvasToPdfBlob(canvas);
 }
 
+/** Explicit document pages keep contractual clauses and signatures together. */
+export async function renderHtmlPagesToPdfBlob(pages: string[], styles: string): Promise<Blob> {
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  for (let index = 0; index < pages.length; index++) {
+    const canvas = await htmlToCanvas(pages[index], styles);
+    if (index) pdf.addPage();
+    const scale = Math.min(194 / canvas.width, 281 / canvas.height);
+    const width = canvas.width * scale;
+    pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 8 + (194 - width) / 2, 8, width, canvas.height * scale, undefined, "FAST");
+  }
+  return pdf.output("blob");
+}
+
 export function savePdfBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

@@ -1,3 +1,5 @@
+from portfolio_fixtures import with_notice
+from portfolio_fixtures import seed_legacy_plan
 from datetime import date
 
 from fastapi.testclient import TestClient
@@ -72,11 +74,11 @@ def test_quote_lifecycle_open_and_closed():
     convert_before = client.post(
         f"/api/v1/investments/quotes/{quote_id}/convert",
         headers=headers,
-        json={
+        json=with_notice({
             "start_date": date.today().isoformat(),
             "username": "cycleuser",
             "password": "CyclePass1!",
-        },
+        }),
     )
     assert convert_before.status_code == 400
     assert "לאשר" in convert_before.json()["detail"]
@@ -131,8 +133,8 @@ def test_plan_payment_and_quote_flow():
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     bar = next(i for i in investors if i["name"] == "בר")
 
-    plan_res = client.post(
-        "/api/v1/investments/plans",
+    plan_res = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": bar["id"],
@@ -182,14 +184,15 @@ def test_plan_payment_and_quote_flow():
     converted = client.post(
         f"/api/v1/investments/quotes/{quote_body['id']}/convert",
         headers=headers,
-        json={
+        json=with_notice({
             "start_date": date.today().isoformat(),
             "username": "noa",
             "password": "NoaPass12!",
-        },
+        }),
     )
     assert converted.status_code == 200
-    assert converted.json()["investor_name"] == "נועה"
+    assert converted.json()["snapshot"]["investor_name"] == "נועה"
+    assert converted.json()["status"] == "pending"
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     noa = next(i for i in investors if i["name"] == "נועה")
     assert noa["phone"] == "050-1234567"
@@ -224,18 +227,18 @@ def test_convert_quote_uses_stored_login_and_creates_user():
     converted = client.post(
         f"/api/v1/investments/quotes/{body['id']}/convert",
         headers=headers,
-        json={},
+        json=with_notice({}),
     )
     assert converted.status_code == 200, converted.text
     plan = converted.json()
-    assert plan["investor_name"] == "רויטל"
-    assert plan["status"] == "active"
-    assert plan["start_date"] == start
-    assert plan["monthly_investor_payout"] == 500
+    assert plan["snapshot"]["investor_name"] == "רויטל"
+    assert plan["status"] == "pending"
+    assert plan["snapshot"]["terms"]["start_date"] == start
+    assert plan["snapshot"]["terms"]["monthly_cash"] == 500
     payments = client.get(
-        f"/api/v1/investments/payments?plan_id={plan['id']}", headers=headers
+        f"/api/v1/investments/payments?investor_id={plan['investor_id']}", headers=headers
     ).json()
-    assert len(payments) == 12
+    assert len(payments) == 0
 
     login = client.post(
         "/api/v1/auth/login",
@@ -267,7 +270,7 @@ def test_convert_quote_uses_stored_login_and_creates_user():
     again = client.post(
         f"/api/v1/investments/quotes/{body['id']}/convert",
         headers=headers,
-        json={"username": "revitalq2", "password": "Revital1234!"},
+        json=with_notice({"username": "revitalq2", "password": "Revital1234!"}),
     )
     assert again.status_code == 400
 
@@ -297,7 +300,7 @@ def test_investor_access_password_falls_back_to_converted_quote():
     converted = client.post(
         f"/api/v1/investments/quotes/{quote_id}/convert",
         headers=headers,
-        json={},
+        json=with_notice({}),
     )
     assert converted.status_code == 200, converted.text
 
@@ -341,11 +344,11 @@ def test_convert_quote_rejects_hebrew_or_taken_username():
     hebrew = client.post(
         f"/api/v1/investments/quotes/{quote_id}/convert",
         headers=headers,
-        json={
+        json=with_notice({
             "start_date": date.today().isoformat(),
             "username": "רויטל",
             "password": "Revital1234!",
-        },
+        }),
     )
     assert hebrew.status_code == 400, hebrew.text
     assert "אנגלית" in hebrew.json()["detail"]
@@ -357,11 +360,11 @@ def test_convert_quote_rejects_hebrew_or_taken_username():
     taken = client.post(
         f"/api/v1/investments/quotes/{quote_id}/convert",
         headers=headers,
-        json={
+        json=with_notice({
             "start_date": date.today().isoformat(),
             "username": "sahar",
             "password": "Revital1234!",
-        },
+        }),
     )
     assert taken.status_code == 400, taken.text
     assert "תפוס" in taken.json()["detail"]
@@ -399,7 +402,7 @@ def test_convert_quote_rejects_hebrew_or_taken_username():
     missing_date = client.post(
         f"/api/v1/investments/quotes/{no_date.json()['id']}/convert",
         headers=headers,
-        json={"username": "nodateuser", "password": "NoDate1234!"},
+        json=with_notice({"username": "nodateuser", "password": "NoDate1234!"}),
     )
     assert missing_date.status_code == 400
     assert "תאריך" in missing_date.json()["detail"]
@@ -427,8 +430,8 @@ def test_align_calendar_year_moves_midyear_plans():
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     ofek = next(i for i in investors if i["name"] == "אופק")
     year = date.today().year
-    plan_res = client.post(
-        "/api/v1/investments/plans",
+    plan_res = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": ofek["id"],
@@ -452,30 +455,30 @@ def test_align_calendar_year_moves_midyear_plans():
     aligned = client.post(
         f"/api/v1/investments/align-calendar-year?year={year}", headers=headers
     )
-    assert aligned.status_code == 200
-    assert aligned.json()["count"] >= 1
+    assert aligned.status_code == 409
 
     plans = client.get("/api/v1/investments/plans", headers=headers).json()
     plan = next(p for p in plans if p["id"] == plan_id)
-    assert plan["start_date"] == f"{year}-01-01"
+    assert plan["start_date"] == f"{year}-08-04"
 
     year_payments = client.get(
         f"/api/v1/investments/payments?plan_id={plan_id}&year={year}", headers=headers
     ).json()
-    assert year_payments[0]["due_date"] == f"{year}-01-01"
+    assert year_payments[0]["due_date"] == f"{year}-08-04"
     assert year_payments[-1]["due_date"].startswith(f"{year}-12")
 
 
 def test_open_calendar_year_and_payment_report():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     report_year = 2025
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    bar = next(i for i in investors if i["name"] == "בר")
+    seed_legacy_plan(json={"investor_id":bar["id"],"principal":10000,"monthly_rate_percent":2,"manager_fee_percent":0,"start_date":"2025-01-01","duration_months":12})
 
     opened = client.post(
         f"/api/v1/investments/open-calendar-year?year={report_year}", headers=headers
     )
-    assert opened.status_code == 200, opened.text
-    body = opened.json()
-    assert body["created_count"] >= 1
+    assert opened.status_code == 409, opened.text
 
     payments = client.get(
         f"/api/v1/investments/payments?year={report_year}", headers=headers
@@ -511,8 +514,8 @@ def test_open_calendar_year_and_payment_report():
     # Opening again should not duplicate plans.
     again = client.post(
         f"/api/v1/investments/open-calendar-year?year={report_year}", headers=headers
-    ).json()
-    assert again["created_count"] == 0
+    )
+    assert again.status_code == 409
 
 
 def test_delete_plan_and_remove_from_year():
@@ -520,12 +523,14 @@ def test_delete_plan_and_remove_from_year():
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     bar = next(i for i in investors if i["name"] == "בר")
     year = 2024
+    seed_legacy_plan(json={"investor_id":bar["id"],"principal":10000,"monthly_rate_percent":2,"manager_fee_percent":0,"start_date":"2024-01-01","duration_months":12})
+    other = next(i for i in investors if i["id"] != bar["id"])
+    seed_legacy_plan(json={"investor_id":other["id"],"principal":10000,"monthly_rate_percent":2,"manager_fee_percent":0,"start_date":"2024-01-01","duration_months":12})
 
     opened = client.post(
         f"/api/v1/investments/open-calendar-year?year={year}", headers=headers
     )
-    assert opened.status_code == 200
-    assert opened.json()["created_count"] >= 1
+    assert opened.status_code == 409
 
     before = client.get(
         f"/api/v1/investments/payments?year={year}&investor_id={bar['id']}",
@@ -566,8 +571,8 @@ def test_payment_requires_investor_confirmation():
     bar = next(i for i in investors if i["name"] == "בר")
     year = 2031  # isolated future year — avoids colliding with live schedules
 
-    plan_res = client.post(
-        "/api/v1/investments/plans",
+    plan_res = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": bar["id"],
@@ -623,8 +628,8 @@ def test_regenerate_after_start_change_does_not_duplicate_due_dates():
     bar = next(i for i in investors if i["name"] == "בר")
     year = 2032
 
-    plan_res = client.post(
-        "/api/v1/investments/plans",
+    plan_res = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": bar["id"],
@@ -678,8 +683,8 @@ def test_separate_plans_keep_separate_payment_histories_on_same_dates():
     bar = next(i for i in investors if i["name"] == "בר")
     year = 2033
 
-    first = client.post(
-        "/api/v1/investments/plans",
+    first = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": bar["id"],
@@ -695,8 +700,8 @@ def test_separate_plans_keep_separate_payment_histories_on_same_dates():
     assert first.status_code == 201
     first_id = first.json()["id"]
 
-    second = client.post(
-        "/api/v1/investments/plans",
+    second = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": bar["id"],
@@ -784,23 +789,23 @@ def test_hybrid_and_savings_plan_types_available_without_seeding():
     converted = client.post(
         f"/api/v1/investments/quotes/{body['id']}/convert",
         headers=headers,
-        json={
+        json=with_notice({
             "start_date": date.today().isoformat(),
             "username": "hybriddemo",
             "password": "HybridPass1!",
-        },
+        }),
     )
     assert converted.status_code == 200, converted.text
     plan = converted.json()
-    assert plan["plan_type"] == "hybrid"
-    assert plan["monthly_investor_payout"] == 1000
-    assert plan["projected_savings_balance"] == 12000
+    assert plan["status"] == "pending"
+    assert plan["snapshot"]["terms"]["plan_type"] == "hybrid"
+    assert plan["snapshot"]["terms"]["monthly_cash"] == 1000
+    assert plan["snapshot"]["terms"]["planned_savings_total"] == 12000
 
     payments = client.get(
-        f"/api/v1/investments/payments?plan_id={plan['id']}", headers=headers
+        f"/api/v1/investments/payments?investor_id={plan['investor_id']}", headers=headers
     ).json()
-    assert len(payments) == 12
-    assert all(p["investor_amount"] == 1000 for p in payments)
+    assert payments == []
 
     # Cleanup quote leftover
     client.delete(f"/api/v1/investments/quotes/{savings_quote.json()['id']}", headers=headers)
@@ -945,121 +950,26 @@ def test_reporting_board_savings_do_not_overlap_next_year():
         db.close()
 
 
-def test_withdraw_and_transfer_savings_to_principal():
-    """Withdraw shrinks pot; transfer boosts קרן without changing accrual base."""
+def test_active_savings_cannot_be_withdrawn_or_capitalized_without_signed_agreement():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
-
-    create_inv = client.post(
-        "/api/v1/investments/investors",
-        headers=headers,
-        json={
-            "name": "בדיקת משיכת חיסכון",
-            "username": "savingsredeem",
-            "password": "Password1!",
-        },
-    )
-    assert create_inv.status_code == 201, create_inv.text
-    inv_id = create_inv.json()["id"]
-
-    # 100k @ 1% savings, started 6 months ago → ~6k accrued
-    start = date.today().replace(day=1)
-    # go back 5 months so months_elapsed_inclusive ≈ 6
-    month = start.month - 5
-    year = start.year
-    while month <= 0:
-        month += 12
-        year -= 1
-    start = start.replace(year=year, month=month)
-
-    create_plan = client.post(
-        "/api/v1/investments/plans",
-        headers=headers,
-        json={
-            "investor_id": inv_id,
-            "principal": 100000,
-            "plan_type": "hybrid",
-            "monthly_rate_percent": 1,
-            "savings_rate_percent": 1,
-            "manager_fee_percent": 0.5,
-            "start_date": start.isoformat(),
-            "duration_months": 12,
-            "generate_schedule": True,
-        },
-    )
-    assert create_plan.status_code == 201, create_plan.text
-    plan = create_plan.json()
-    plan_id = plan["id"]
-    available_before = float(plan["current_savings_balance"])
-    assert available_before >= 5000, plan
-    accrual_before = float(plan.get("accrual_principal") or plan["principal"])
-    assert accrual_before == 100000
-
-    # Partial withdraw
-    withdraw = client.post(
-        f"/api/v1/investments/plans/{plan_id}/savings/withdraw",
-        headers=headers,
-        json={"amount": 1000},
-    )
-    assert withdraw.status_code == 200, withdraw.text
-    w = withdraw.json()
-    assert w["action"]["action_type"] == "withdraw"
-    assert abs(w["action"]["amount"] - 1000) < 0.01
-    assert abs(w["plan"]["principal"] - 100000) < 0.01
-    assert abs(w["plan"]["current_savings_balance"] - (available_before - 1000)) < 0.05
-    assert abs(float(w["plan"]["accrual_principal"]) - 100000) < 0.01
-
-    after_withdraw = float(w["plan"]["current_savings_balance"])
-
-    # Transfer rest of a chunk into קרן
-    transfer_amt = 2000
-    transfer = client.post(
-        f"/api/v1/investments/plans/{plan_id}/savings/transfer-to-principal",
-        headers=headers,
-        json={"amount": transfer_amt},
-    )
-    assert transfer.status_code == 200, transfer.text
-    t = transfer.json()
-    assert t["action"]["action_type"] == "transfer_to_principal"
-    assert abs(t["plan"]["principal"] - 102000) < 0.01
-    assert abs(float(t["plan"]["accrual_principal"]) - 100000) < 0.01
-    assert abs(t["plan"]["current_savings_balance"] - (after_withdraw - transfer_amt)) < 0.05
-    # Cash payout should rise with new principal (1% of 102k)
-    assert abs(t["plan"]["monthly_investor_payout"] - 1020) < 0.01
-    # Monthly savings accrual stays on accrual principal (1% of 100k)
-    assert abs(t["plan"]["monthly_savings_accrual"] - 1000) < 0.01
-
-    # Cannot withdraw more than available
-    too_much = client.post(
-        f"/api/v1/investments/plans/{plan_id}/savings/withdraw",
-        headers=headers,
-        json={"amount": 999999},
-    )
-    assert too_much.status_code == 400
-
-    # Investor must not withdraw / transfer — manager only
-    inv_headers = _auth_headers("savingsredeem", "Password1!")
-    # _auth_headers maps email→username; pass username via email-like fallback
-    forbidden_w = client.post(
-        f"/api/v1/investments/plans/{plan_id}/savings/withdraw",
-        headers=inv_headers,
-        json={"amount": 100},
-    )
-    assert forbidden_w.status_code == 403, forbidden_w.text
-    forbidden_t = client.post(
-        f"/api/v1/investments/plans/{plan_id}/savings/transfer-to-principal",
-        headers=inv_headers,
-        json={"amount": 100},
-    )
-    assert forbidden_t.status_code == 403, forbidden_t.text
-
-    client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
+    investors = client.get("/api/v1/investments/investors", headers=headers).json()
+    bar = next(i for i in investors if i["name"] == "בר")
+    record = seed_legacy_plan(json={"investor_id":bar["id"], "principal":10000, "plan_type":"hybrid",
+        "monthly_rate_percent":2, "savings_rate_percent":2, "manager_fee_percent":0,
+        "start_date":"2025-01-01", "duration_months":12}).json()
+    for action in ("withdraw", "transfer-to-principal"):
+        response = client.post(f"/api/v1/investments/plans/{record['id']}/savings/{action}", headers=headers, json={"amount":100})
+        assert response.status_code == 409
+    current = next(p for p in client.get("/api/v1/investments/plans", headers=headers).json() if p["id"] == record["id"])
+    assert current["principal"] == 10000
+    assert current["savings_redeemed_total"] == 0
 
 
 def test_legacy_settlement_requires_available_account_flow():
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     investors = client.get("/api/v1/investments/investors", headers=headers).json()
     investor = next(row for row in investors if not row["is_manager"])
-    created = client.post("/api/v1/investments/plans", headers=headers, json={
+    created = seed_legacy_plan( headers=headers, json={
         "investor_id": investor["id"], "principal": 10000, "plan_type": "hybrid",
         "monthly_rate_percent": 2, "savings_rate_percent": 2, "manager_fee_percent": 0,
         "start_date": date.today().isoformat(), "duration_months": 12,
@@ -1147,18 +1057,18 @@ def test_closed_track_savings_roll_to_active_plan():
         db.refresh(closed)
         db.refresh(active)
 
-        assert result["rolled_amount"] > 0
-        assert svc.plan_metrics(closed, today)["current_savings_balance"] < 0.02
+        assert result["rolled_amount"] == 0
+        assert svc.plan_metrics(closed, today)["current_savings_balance"] == before_closed
         after_active = svc.plan_metrics(active, today)["current_savings_balance"]
-        assert abs(after_active - (before_active + before_closed)) < 0.05
-        assert float(active.rollover_savings_balance or 0) > 0
-        assert "חיסכון הועבר" in (closed.notes or "")
+        assert after_active == before_active
+        assert float(active.rollover_savings_balance or 0) == 0
+        assert "חיסכון הועבר" not in (closed.notes or "")
     finally:
         db.close()
 
 
-def test_auto_extend_active_plan_at_term_end():
-    """An active track auto-extends by 12 months once its term ends."""
+def test_active_plan_does_not_extend_without_new_signature():
+    """The agreed term stays fixed until a new investor-signed agreement."""
     headers = _auth_headers("sahar9shely@gmail.com", "ManagerPass1!")
     created = client.post(
         "/api/v1/investments/investors",
@@ -1180,8 +1090,8 @@ def test_auto_extend_active_plan_at_term_end():
         year -= 1
     start = start.replace(year=year, month=month)
 
-    create_plan = client.post(
-        "/api/v1/investments/plans",
+    create_plan = seed_legacy_plan(
+
         headers=headers,
         json={
             "investor_id": inv_id,
@@ -1204,9 +1114,9 @@ def test_auto_extend_active_plan_at_term_end():
     )
     assert listed.status_code == 200, listed.text
     plan = listed.json()[0]
-    assert plan["duration_months"] == 24
-    assert plan["months_remaining"] > 0
-    assert "המשך אוטומטי" in (plan.get("notes") or "")
+    assert plan["duration_months"] == 12
+    assert plan["months_remaining"] == 0
+    assert "המשך אוטומטי" not in (plan.get("notes") or "")
 
     client.delete(f"/api/v1/investments/plans/{plan_id}", headers=headers)
 

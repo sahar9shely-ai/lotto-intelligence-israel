@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.investment_base import InvestmentBase as Base
@@ -212,6 +212,41 @@ class InvestmentTopupRequest(Base):
         back_populates="source_request",
         foreign_keys=[created_plan_id],
     )
+
+
+class PlanNotice(Base):
+    __tablename__ = "plan_notices"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), index=True)
+    purpose: Mapped[str] = mapped_column(String(16))
+    requested_on: Mapped[date] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    actor_user_id: Mapped[int] = mapped_column(Integer)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class PlanAgreement(Base):
+    __tablename__ = "plan_agreements"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    investor_id: Mapped[int] = mapped_column(ForeignKey("investors.id"), index=True)
+    plan_id: Mapped[Optional[int]] = mapped_column(ForeignKey("investment_plans.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    private_terms: Mapped[dict] = mapped_column(JSON)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    document_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    actor_user_id: Mapped[int] = mapped_column(Integer)
+    notice_id: Mapped[int] = mapped_column(ForeignKey("plan_notices.id"))
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    signer_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    signed_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    signature_png: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    execution_details: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 
 class AppSettings(Base):
