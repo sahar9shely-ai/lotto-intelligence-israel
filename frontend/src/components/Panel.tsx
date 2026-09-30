@@ -20,7 +20,7 @@ export function Panel({
   children,
   className = "",
   delay = 0,
-  tilt = true,
+  tilt = false,
 }: PanelProps) {
   return (
     <TiltCard

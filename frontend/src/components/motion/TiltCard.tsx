@@ -20,7 +20,7 @@ export function TiltCard({
   id,
   as = "div",
   style,
-  enabled = true,
+  enabled = false,
 }: TiltCardProps) {
   const { allowTilt } = useMotionPrefs();
   const active = enabled && allowTilt;
@@ -48,12 +48,12 @@ export function TiltCard({
   return (
     <Comp
       id={id}
-      className={["tilt-card", className].filter(Boolean).join(" ")}
+      className={[active ? "tilt-card" : undefined, className].filter(Boolean).join(" ")}
       style={{
         ...style,
-        rotateX: active ? springX : 0,
-        rotateY: active ? springY : 0,
-        transformPerspective: 900,
+        rotateX: active ? springX : undefined,
+        rotateY: active ? springY : undefined,
+        transformPerspective: active ? 900 : undefined,
       }}
       onPointerMove={active ? onPointerMove : undefined}
       onPointerLeave={active ? resetTilt : undefined}
