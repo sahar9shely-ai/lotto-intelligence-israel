@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.auth import LoginAlert, PasswordResetRequest, User
 from app.models.investments import Investor, InvestmentPlan, Payment, utcnow
-from app.security.auth import create_access_token, hash_password, is_manager, verify_password
+from app.security.auth import create_access_token, enforce_maintenance_access, hash_password, is_manager, verify_password
 from app.services.email_service import send_email
 
 
@@ -697,6 +697,7 @@ def login_user(db: Session, username: str, password: str) -> dict:
     if not verify_password(password, user.password_hash):
         raise ValueError("שם משתמש או סיסמה שגויים")
 
+    enforce_maintenance_access(user)
     user.last_login_at = utcnow()
     notify_manager_login(db, user)
     db.commit()

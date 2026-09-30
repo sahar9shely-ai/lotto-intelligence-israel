@@ -14,6 +14,8 @@ class Settings(BaseSettings):
 
     jwt_secret: str = "tazrim-dev-secret-change-me-32chars!"
     jwt_expire_hours: int = 72
+    admin_only_maintenance: bool = False
+    maintenance_admin_username: str = "admin"
     app_public_url: str = "http://localhost:5173"
     reset_token_hours: int = 48
 

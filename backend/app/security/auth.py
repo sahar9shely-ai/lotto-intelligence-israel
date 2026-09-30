@@ -18,6 +18,16 @@ from app.models.auth import User
 _bearer = HTTPBearer(auto_error=False)
 
 
+def enforce_maintenance_access(user: User) -> None:
+    if settings.admin_only_maintenance and not (
+        user.username == settings.maintenance_admin_username and is_manager(user)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="המערכת בעבודות תחזוקה. הגישה למשתמשים תיפתח מחדש בסיום העדכון.",
+        )
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000)
@@ -78,6 +88,7 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="אין סיסמה לחשבון זה עדיין. פנו למנהל להגדרת סיסמה.",
         )
+    enforce_maintenance_access(user)
     return user
 
 
