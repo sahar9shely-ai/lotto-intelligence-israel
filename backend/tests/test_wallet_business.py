@@ -59,6 +59,14 @@ class WalletBusinessTests(unittest.TestCase):
         self.assertEqual(svc.completed_months(date(2026,1,31),date(2026,2,28),cap=12),1)
         self.assertEqual(svc.completed_months(date(2026,1,31),date(2026,3,30),cap=12),1)
 
+    def test_investor_and_plan_use_same_israeli_day_at_utc_midnight_boundary(self):
+        with patch.object(svc,"israel_today",return_value=date(2026,2,1)), patch.object(svc,"date",wraps=date) as server_date:
+            server_date.today.return_value=date(2026,1,31)
+            investor=svc.serialize_investor(self.investor)
+            plan=svc.serialize_plan(self.plan)
+        self.assertEqual(investor["current_savings_balance"],28600)
+        self.assertEqual(plan["current_savings_balance"],28600)
+
     def test_close_credits_once_stops_savings_preserves_paid_and_old_debt(self):
         self.close()
         self.assertEqual(self.investor.available_balance_cents,8860000)

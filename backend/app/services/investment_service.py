@@ -773,7 +773,7 @@ def settle_savings_action(
         if duration < 1 or duration > 120:
             raise ValueError("משך מסלול לא תקין")
 
-        start = new_start_date or date.today().replace(day=1)
+        start = new_start_date or israel_today().replace(day=1)
         fee = (
             float(manager_fee_percent)
             if manager_fee_percent is not None
@@ -980,7 +980,7 @@ def sync_track_continuity(
     today: Optional[date] = None,
 ) -> dict:
     """Apply savings rollover + auto-extension for one or all investors."""
-    today = today or date.today()
+    today = today or israel_today()
     query = db.query(Investor).options(
         joinedload(Investor.plans).joinedload(InvestmentPlan.payments)
     )
@@ -1097,7 +1097,7 @@ def serialize_investor(
     monthly_savings = accrual only from *active* plans (not cash in hand).
     current_savings_balance = lifetime accrued across all tracks, without overlap.
     """
-    today = today or date.today()
+    today = today or israel_today()
     all_plans = list(investor.plans or [])
     active_plans = [p for p in all_plans if p.status == "active"]
     active_principal = 0.0
@@ -1890,7 +1890,7 @@ def available_payment_years(
     if investor_id is not None:
         query = query.filter(Payment.investor_id == investor_id)
     years = {row[0].year for row in query.all() if row[0] is not None}
-    today_year = date.today().year
+    today_year = israel_today().year
     years.update({today_year, today_year - 1, today_year - 2})
     return sorted(years, reverse=True)
 
@@ -2009,7 +2009,7 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
     If their start is mid-year, the board starts that month — never backfills
     January–prior months. Duration follows the template track (not truncated to Dec).
     """
-    if year < 2000 or year > date.today().year + 1:
+    if year < 2000 or year > israel_today().year + 1:
         raise ValueError("שנה לא תקינה")
 
     investors = db.query(Investor).options(joinedload(Investor.plans)).order_by(Investor.id).all()
@@ -2017,7 +2017,7 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
     skipped: list[dict] = []
     year_start = date(year, 1, 1)
     year_end = date(year, 12, 31)
-    plan_status = "completed" if year < date.today().year else "active"
+    plan_status = "completed" if year < israel_today().year else "active"
 
     for investor in investors:
         plans = sorted(
@@ -2340,7 +2340,7 @@ def request_payment_confirmation(
     )
     if same_person:
         payment.status = "paid"
-        payment.paid_at = date.today()
+        payment.paid_at = israel_today()
         payment.confirmation_requested_at = None
         if commit:
             db.commit()
@@ -2371,7 +2371,7 @@ def confirm_payment(db: Session, *, payment: Payment, actor) -> dict:
     if payment.status != "awaiting_confirmation":
         raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "paid"
-    payment.paid_at = date.today()
+    payment.paid_at = israel_today()
     payment.confirmation_requested_at = None
     _notify_payment_confirmed(db, payment)
     db.commit()
@@ -2503,7 +2503,7 @@ def get_dashboard(db: Session, *, investor_id: Optional[int] = None) -> dict:
     monthly_savings_accruals = savings accrual only (separate ledger line).
     Paid YTD / lifetime come from payment rows (cash only) — no double count.
     """
-    today = date.today()
+    today = israel_today()
     investors_query = (
         db.query(Investor)
         .options(
