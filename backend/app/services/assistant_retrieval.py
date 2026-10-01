@@ -10,6 +10,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.auth import User
+from app.security.auth import is_system_admin
 from app.models.investments import (
     InvestmentPlan,
     InvestmentTopupRequest,
@@ -907,7 +908,8 @@ def execute_tool(
     args = arguments or {}
     own_id = user.investor_id
 
-    if role != "manager":
+    # A model-provided role is never an authorization source.
+    if not is_system_admin(user):
         if name == "lookup_own_portfolio":
             if not own_id:
                 return {"error": "אין תיק מקושר"}

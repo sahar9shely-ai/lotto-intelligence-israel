@@ -12,6 +12,8 @@ import httpx
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.auth import User
+from app.security.auth import is_system_admin
+from app.services.israel_business_days import israel_today
 from app.models.investments import (
     AppSettings,
     InvestmentPlan,
@@ -94,10 +96,8 @@ def _llm_credentials(settings: AppSettings) -> tuple[str, str]:
 
 
 def _user_is_manager(user: User) -> bool:
-    if getattr(user, "role", None) == "manager":
-        return True
-    inv = getattr(user, "investor", None)
-    return bool(inv and getattr(inv, "is_manager", False))
+    # Assistant-wide access belongs only to the authenticated system admin.
+    return is_system_admin(user)
 
 
 def _he_month(day: date | None) -> str:
@@ -108,6 +108,10 @@ def _he_month(day: date | None) -> str:
 
 def _money(value: Any) -> str:
     return f"₪{float(value or 0):,.0f}"
+
+
+def _percent(value: Any) -> str:
+    return f"{float(value or 0):.2f}".rstrip("0").rstrip(".") + "%"
 
 
 def _payment_brief(payment: Payment, *, include_name: bool = False) -> dict[str, Any]:
@@ -152,7 +156,7 @@ def build_investor_context(db: Session, *, investor_id: int) -> dict[str, Any]:
     if not investor:
         raise ValueError("משקיע לא נמצא")
 
-    today = date.today()
+    today = israel_today()
     plans_out = []
     for plan in investor.plans or []:
         metrics = inv_svc.plan_metrics(plan, today)
@@ -340,6 +344,8 @@ def what_if_add_principal(
 
 def build_manager_context(db: Session, *, user: User) -> dict[str, Any]:
     """Full live snapshot for the manager — every book investor, no admin shell, no fees."""
+    if not is_system_admin(user):
+        raise PermissionError("מידע על כלל המשקיעים זמין לאדמין בלבד")
     name = user.investor.name if getattr(user, "investor", None) else user.username
     own_id = user.investor_id
     own = build_investor_context(db, investor_id=own_id) if own_id else {}
@@ -834,7 +840,7 @@ def asks_about_fees(text: str) -> bool:
 def asks_about_others(text: str) -> bool:
     return bool(
         re.search(
-            r"משקיע(ים)?\s+אחר|של\s+(בר|אופק|אלמוג|שושי|סהר)|כמה\s+יש\s+ל|תיק\s+של\s+",
+            r"משקיע(ים)?\s+אחר|של\s+(בר|אופק|אלמוג|שושי|סהר)|כמה\s+(?:כסף\s+)?יש\s+ל(?!י\b)|תיק\s+של\s+(?!שלי\b)",
             text,
         )
     )
@@ -844,6 +850,8 @@ def _intent(message: str) -> str:
     t = message.strip()
     if _is_greeting(t):
         return "greeting"
+    if re.search(r"אחוז|תשואה|percentage|\brate\b", t, re.IGNORECASE):
+        return "rates"
     if re.search(r"מה\s+המצב\s+בלוח|תשומת\s+לב|מה\s+דורש", t):
         return "ops"
     if re.search(
@@ -905,7 +913,9 @@ def chat(
 
     manager = _user_is_manager(user)
 
-    if asks_about_fees(message):
+    if asks_about_fees(message) or (not manager and re.search(
+        r"אדמין|\badmin\b|מנהל|\bmanager\b|משקיעים|משקיע(?:ים)?\s+אחר", message, re.IGNORECASE
+    )):
         return {
             "reply": FORBIDDEN_REPLY,
             "pdf_suggested": False,
@@ -916,27 +926,17 @@ def chat(
         }
 
     retrieval: dict[str, Any] = {}
-    if not _is_greeting(message):
+    if manager and not _is_greeting(message):
         retrieval = retr.retrieve_named_investors(
             db, message=message, build_portfolio=build_investor_context
         )
 
     if not manager:
-        others = [
-            row
-            for row in (retrieval.get("retrieved_investors") or [])
-            if row.get("id") != investor_id
-        ]
-        named_other = bool(
-            asks_about_others(message)
-            and not re.search(r"התיק\s+שלי|שלי\s+|אצלי|עבורי", message)
-            and re.search(r"של\s+(בר|אופק|אלמוג|שושי)|משקיע(ים)?\s+אחר", message)
-        )
-        own_named = any(
-            row.get("id") == investor_id
-            for row in (retrieval.get("retrieved_investors") or [])
-        )
-        if others or (named_other and not own_named):
+        # Only names are inspected for refusal; no other portfolio is loaded.
+        own_name = user.investor.name if user.investor else ""
+        scoped_message = message.replace(own_name, "שלי") if own_name else message
+        scoped_message = scoped_message.replace("של שלי", "שלי")
+        if asks_about_others(scoped_message):
             return {
                 "reply": "אני יכול לעזור רק לגבי התיק שלך — לא לגבי משקיעים אחרים.",
                 "pdf_suggested": False,
@@ -949,18 +949,6 @@ def chat(
     context = build_assistant_context(db, user=user)
     if manager and retrieval:
         context = {**context, **retrieval}
-    elif not manager and retrieval:
-        own_hits = [
-            row
-            for row in (retrieval.get("retrieved_investors") or [])
-            if row.get("id") == investor_id
-        ]
-        if own_hits:
-            context = {
-                **context,
-                "name_query": retrieval.get("name_query"),
-                "retrieved_investors": own_hits,
-            }
 
     what_if = None
     amount = detect_what_if_amount(message)
@@ -1011,6 +999,12 @@ def chat(
             arguments=arguments,
             build_portfolio=build_investor_context,
         )
+
+    if not manager:
+        # Investor replies are rendered from the authenticated portfolio only.
+        # Client-supplied assistant history cannot introduce private numbers,
+        # elevate roles, or be replayed by an external model.
+        return _pack(_local_reply(context, message, what_if, history=[]), configured=bool(api_key))
 
     if not api_key:
         reply = _local_reply(context, message, what_if, history=history)
@@ -1097,6 +1091,13 @@ def _format_retrieved_investors(context: dict, history: list | None) -> str:
             f"צבירת חיסכון חודשית {_money(sav)} · "
             f"יתרת חיסכון {_money(savings_bal)}."
         )
+        for plan in port.get("plans") or hit.get("plans") or []:
+            if plan.get("status") == "active":
+                lines.append(
+                    f"מסלול {plan.get('plan_id')}: "
+                    f"מזומן חודשי {_percent(plan.get('cash_rate_percent'))} · "
+                    f"חיסכון חודשי {_percent(plan.get('savings_rate_percent'))}."
+                )
         if not port.get("has_active_plan") and float(principal or 0) == 0:
             lines.append(f"ל{name} אין מסלול פעיל כרגע.")
     return _with_disclaimer("\n".join(lines), history)
@@ -1279,6 +1280,15 @@ def _local_reply(
     if role == "manager" and context.get("name_query"):
         return _format_retrieved_investors(context, history)
 
+    if intent == "rates":
+        if role == "manager" and not has_personal:
+            return "של איזה משקיע תרצה לראות את אחוזי המסלול? אפשר לציין שם."
+        return (
+            f"{name}, האחוזים בתיק שלך בלבד: "
+            f"החזר חודשי במזומן {_percent(context.get('cash_rate_percent'))}, "
+            f"חיסכון חודשי {_percent(context.get('savings_rate_percent'))}."
+        )
+
     if role == "manager" and intent == "totals":
         return _format_totals(context, history)
     if role == "manager" and intent == "missing_month":
@@ -1433,7 +1443,7 @@ def notify_manager_of_summary(db: Session, *, summary: str, investor_name: str) 
         manager = (
             db.query(AuthUser)
             .join(Investor, AuthUser.investor_id == Investor.id)
-            .filter(Investor.is_manager.is_(True))
+            .filter(AuthUser.username == "admin", AuthUser.is_active.is_(True))
             .first()
         )
         if manager and manager.email:

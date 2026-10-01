@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.investment_session import get_investment_db
 from app.models.auth import User
-from app.security.auth import get_current_user, is_manager, require_manager
+from app.security.auth import get_current_user, is_system_admin
 from app.services import assistant_service as asst
 from app.services import investment_service as inv_svc
 
@@ -72,7 +72,7 @@ def assistant_status(
     settings = inv_svc.ensure_settings(db)
     provider, key = asst._llm_credentials(settings)
     hint = None
-    if key and is_manager(user):
+    if key and is_system_admin(user):
         hint = f"…{key[-4:]}" if len(key) >= 4 else "****"
     return {
         "configured": bool(key),
@@ -141,10 +141,13 @@ def end_session(
     investor = user.investor
     name = investor.name if investor else user.username
     history = [m.model_dump() for m in body.history]
+    if not is_system_admin(user):
+        # Browser-supplied assistant replies are not a verified server transcript.
+        history = [m for m in history if m["role"] == "user"]
     summary = asst.summarize_conversation(db, investor_name=name, messages=history)
 
     # Investors' chats always notify manager. Manager's own chat is stored lightly.
-    if is_manager(user):
+    if is_system_admin(user):
         return {
             "summary": summary,
             "notified": False,
@@ -157,7 +160,7 @@ def end_session(
     return {
         "summary": summary,
         "notified": bool(result.get("sent_slack")),
-        "detail": result.get("detail") or "",
+        "detail": "השיחה הסתיימה",
     }
 
 
