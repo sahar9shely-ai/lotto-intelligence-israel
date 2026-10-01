@@ -60,7 +60,7 @@ export function AvailableBalancePanel({investorId, canManage, canDeposit, onChan
         <label>סכום להוספה ליתרה (₪)<input type="number" min="0.01" max={20000000 - data.available_balance} step="0.01" required value={amount} disabled={busy} onChange={e => {setAmount(e.target.value); setReceived(false); setOperationKey(crypto.randomUUID());}} /></label>
         <p className="hint">יתרה לאחר התוספת: {formatMoney(data.available_balance + Number(amount || 0))}. התוספת תישמר בהיסטוריה ותהיה זמינה למסלול הבא.</p>
         <p className="hint">זהו רישום כסף שכבר התקבל. הכסף נשאר ביתרה הזמינה ואינו צובר תשואה עד לפתיחת מסלול חתום.</p>
-        <label><input type="checkbox" required checked={received} disabled={busy} onChange={e => setReceived(e.target.checked)} /> אני מאשר שהכסף התקבל ושסכום התוספת נכון.</label>
+        <label className="closure-review-check"><input type="checkbox" required checked={received} disabled={busy} onChange={e => setReceived(e.target.checked)} /> אני מאשר שהכסף התקבל ושסכום התוספת נכון.</label>
         {failure ? <p role="alert" className="form-error">{failure}</p> : null}
         <div className="page-head__actions"><button className="btn btn--primary" disabled={busy || !received}>{busy ? "רושם תוספת..." : "אישור רישום תוספת"}</button><button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setShowDeposit(false)}>ביטול</button></div>
       </form> : null}
