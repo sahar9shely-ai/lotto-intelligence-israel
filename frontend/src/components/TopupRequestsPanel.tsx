@@ -254,6 +254,8 @@ export function TopupRequestsPanel({
   onMessage,
   onFocusInvestor,
   createOpen = false,
+  showHistory = true,
+  onOpenDocuments,
   onCreateOpenChange,
 }: {
   isManager: boolean;
@@ -264,6 +266,8 @@ export function TopupRequestsPanel({
   onMessage: (text: string) => void;
   onFocusInvestor?: (investorId: number) => void;
   createOpen?: boolean;
+  showHistory?: boolean;
+  onOpenDocuments?: () => void;
   onCreateOpenChange?: (open: boolean) => void;
 }) {
   const [internalCreate, setInternalCreate] = useState(false);
@@ -443,7 +447,7 @@ export function TopupRequestsPanel({
   }
 
   const showInvestorCta = !isManager && !hasOpenForInvestor && !onCreateOpenChange;
-  const showBoard = openRows.length > 0 || cooling.length > 0 || history.length > 0;
+  const showBoard = openRows.length > 0 || cooling.length > 0 || (showHistory && history.length > 0);
 
   if (!showBoard && !showInvestorCta && !showCreate && !offerTarget && !contract) {
     return null;
@@ -573,8 +577,8 @@ export function TopupRequestsPanel({
             </div>
           ) : null}
 
-          {history.length > 0 ? (
-            <div className="topup-history topup-history--past">
+          {showHistory && history.length > 0 ? (
+            <details className="topup-history topup-history--past"><summary>היסטוריית בקשות ({history.length})</summary>
               {history.map((req) => (
                 <article key={req.id} className={`topup-card topup-card--${req.status}`}>
                   <div>
@@ -595,14 +599,14 @@ export function TopupRequestsPanel({
                   <div className="topup-card__aside">
                     <span className={`badge badge--${req.status}`}>{statusLabel(req.status)}</span>
                     {req.status === "contract" || isExecuted(req.status) ? (
-                      <button type="button" className="btn btn--small btn--ghost" onClick={() => openContract(req)}>
-                        חוזה
+                      <button type="button" className="btn btn--small btn--ghost" onClick={() => onOpenDocuments ? onOpenDocuments() : openContract(req)}>
+                        {onOpenDocuments ? "למסמכי המשקיע" : "חוזה"}
                       </button>
                     ) : null}
                   </div>
                 </article>
               ))}
-            </div>
+            </details>
           ) : null}
         </section>
       ) : null}

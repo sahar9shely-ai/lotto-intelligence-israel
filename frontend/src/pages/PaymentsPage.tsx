@@ -4,7 +4,6 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { Panel } from "../components/Panel";
 import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
 import { PlanStatusReportPanel } from "../components/PlanStatusReportPanel";
-import { SavingsActions } from "../components/SavingsActions";
 import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Stat } from "../components/Stat";
 import { Toast } from "../components/Toast";
@@ -1314,16 +1313,7 @@ export function PaymentsPage() {
                           </div>
                         </div>
 
-                        <SavingsActions
-                          plan={p}
-                          canManage={isManager}
-                          onDone={() => {
-                            reloadPlans();
-                            reload();
-                            reloadReport();
-                            reloadYearAll();
-                          }}
-                        />
+                        <Link className="btn btn--small btn--ghost" to={`/investors?investor_id=${p.investor_id}&plan_id=${p.id}`}>לניהול מסלול #{p.id}</Link>
                       </div>
                     );
                   })}

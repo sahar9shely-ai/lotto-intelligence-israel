@@ -32,7 +32,7 @@ function kindGlyph(kind: VaultDocumentKind) {
   return "חודשי";
 }
 
-export function DocumentsPage() {
+export function DocumentsPage({investorId, embedded = false, excludeAgreements = false}: {investorId?: number; embedded?: boolean; excludeAgreements?: boolean}) {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
   const isAdmin = isAdminAccount(user);
@@ -46,8 +46,8 @@ export function DocumentsPage() {
     error: investorsError,
     reload: reloadInvestors,
   } = useAsync(
-    () => (isManager ? api.investors() : Promise.resolve([])),
-    [isManager],
+    () => (isManager && !embedded ? api.investors() : Promise.resolve([])),
+    [isManager, embedded],
   );
 
   const investorOptions = useMemo(
@@ -55,7 +55,7 @@ export function DocumentsPage() {
     [investors],
   );
 
-  const scopedId = isManager ? filterId : null;
+  const scopedId = isManager ? investorId ?? filterId : null;
   const canLoad = !isManager || scopedId != null;
 
   const { data, error, loading, reload } = useAsync(
@@ -67,13 +67,13 @@ export function DocumentsPage() {
   );
 
   const groups = useMemo(() => {
-    const docs = data?.documents ?? [];
+    const docs = (data?.documents ?? []).filter(doc => !excludeAgreements || doc.kind !== "agreement");
     return KIND_ORDER.map((kind) => ({
       kind,
       title: KIND_SECTION[kind],
       items: docs.filter((row) => row.kind === kind),
     })).filter((group) => group.items.length > 0);
-  }, [data]);
+  }, [data, excludeAgreements]);
 
   const investorName =
     data?.investor_name ||
@@ -147,9 +147,9 @@ export function DocumentsPage() {
   }
 
   return (
-    <div className="page">
+    <div className={embedded ? "stack document-archive" : "page"}>
       <Toast message={message} onClear={() => setMessage(null)} />
-      <ScrollReveal>
+      {!embedded ? <ScrollReveal>
         <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>
           <div>
             <h1 className="page-intro__title">כספת מסמכים</h1>
@@ -160,9 +160,9 @@ export function DocumentsPage() {
             </p>
           </div>
         </header>
-      </ScrollReveal>
+      </ScrollReveal> : <h3 className="workspace-archive-title">מסמכים נוספים ודוחות</h3>}
 
-      {isManager && investorOptions.length > 0 ? (
+      {!embedded && isManager && investorOptions.length > 0 ? (
         <div className="scope-bar" role="tablist" aria-label="בחירת משקיע">
           {investorOptions.map((inv) => (
             <button
@@ -179,19 +179,19 @@ export function DocumentsPage() {
         </div>
       ) : null}
 
-      {isManager && investorsLoading ? (
+      {!embedded && isManager && investorsLoading ? (
         <div className="state state--loading" role="status">טוען את רשימת המשקיעים...</div>
-      ) : isManager && investorsError ? (
+      ) : !embedded && isManager && investorsError ? (
         <div className="state state--error" role="alert">
           <p>לא ניתן לטעון את רשימת המשקיעים. {investorsError}</p>
           <button type="button" className="btn" onClick={reloadInvestors}>נסה שוב</button>
         </div>
-      ) : isManager && investorOptions.length === 0 ? (
+      ) : !embedded && isManager && investorOptions.length === 0 ? (
         <div className="vault-empty">
           <p>אין עדיין משקיעים להצגת מסמכים.</p>
           <span>לאחר הוספת משקיע במסך המשקיעים, ניתן יהיה לבחור אותו כאן.</span>
         </div>
-      ) : isManager && filterId == null ? (
+      ) : isManager && scopedId == null ? (
         <div className="vault-empty">
           <p>בחרו משקיע כדי לראות את כספת המסמכים שלו.</p>
         </div>
@@ -206,8 +206,8 @@ export function DocumentsPage() {
         </div>
       ) : !data || groups.length === 0 ? (
         <div className="vault-empty">
-          <p>עדיין אין מסמכים בתיק{data?.investor_name ? ` של ${data.investor_name}` : ""}.</p>
-          <span>חוזה חתום, הצעה ודוח חודשי או שנתי יופיעו כאן ברגע שיהיו במערכת.</span>
+          <p>{excludeAgreements ? "אין מסמכים נוספים או דוחות בתיק." : `עדיין אין מסמכים בתיק${data?.investor_name ? ` של ${data.investor_name}` : ""}.`}</p>
+          <span>{excludeAgreements ? "הסכמי פתיחה וסיום מוצגים באזור החתימות למעלה." : "חוזה חתום, הצעה ודוח חודשי או שנתי יופיעו כאן ברגע שיהיו במערכת."}</span>
         </div>
       ) : (
         groups.map((group) => (

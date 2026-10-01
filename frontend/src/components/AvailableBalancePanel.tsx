@@ -6,8 +6,8 @@ import { Panel } from "./Panel";
 
 const labels: Record<string, string> = {plan_close: "סגירת מסלול", withdraw: "משיכה", deposit: "תוספת כסף", plan_funding: "פתיחת מסלול"};
 
-export function AvailableBalancePanel({investorId, canManage, onChanged, onNewPlan}: {
-  investorId: number; canManage: boolean; onChanged: () => void; onNewPlan: () => void;
+export function AvailableBalancePanel({investorId, canManage, onChanged}: {
+  investorId: number; canManage: boolean; onChanged: () => void;
 }) {
   const {data, error, loading, reload} = useAsync(() => api.wallet(investorId), [investorId]);
   const [showWithdrawal, setShowWithdrawal] = useState(false);
@@ -30,14 +30,14 @@ export function AvailableBalancePanel({investorId, canManage, onChanged, onNewPl
   }
   return <Panel title="חשבון יתרה זמינה">
     {loading ? <p role="status">טוען יתרה...</p> : error || !data ? <p role="alert">{error || "לא ניתן לטעון יתרה"} <button type="button" className="btn" onClick={reload}>נסה שוב</button></p> : <>
-      <div className="money-ledger"><div className="money-ledger__item money-ledger__item--accent">
+      <div className="investor-overview investor-overview--balance"><div className="investor-overview__item">
         <span>זמין למשיכה או להשקעה</span><strong>{formatMoney(data.available_balance)}</strong>
         <em>היתרה אינה צוברת תשואה</em>
       </div></div>
       {canManage ? <div className="page-head__actions">
         <button type="button" className="btn btn--ghost" disabled={data.available_balance <= 0 || busy} onClick={() => setShowWithdrawal(true)}>משיכה</button>
-        <button type="button" className="btn btn--primary" onClick={onNewPlan}>פתיחת מסלול חדש</button>
       </div> : null}
+      <p className="hint">לפתיחת מסלול השתמשו בכפתור ״מסלול חדש״ בראש תיק המשקיע. כל היתרה שתישאר תיכלל בקרן החדשה.</p>
       {showWithdrawal ? <form className="form" onSubmit={withdraw}>
         <label>מועד קבלת בקשת המשיכה<input type="date" required max={new Date().toLocaleDateString("en-CA")} value={requestedOn} disabled={busy} onChange={e=>setRequestedOn(e.target.value)}/><span className="hint">יש לתעד את מועד הבקשה בפועל. נדרש חודש מראש לפני משיכת הכספים.</span></label>
         <label>סכום למשיכה (₪)<input type="number" min="0.01" max={data.available_balance} step="0.01" required value={amount} disabled={busy} onChange={e => {setAmount(e.target.value); setOperationKey(crypto.randomUUID());}} /></label>

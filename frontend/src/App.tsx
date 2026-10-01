@@ -9,7 +9,6 @@ import { ActivityPage } from "./pages/ActivityPage";
 import { AgreementSigningPage } from "./pages/AgreementSigningPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { DocumentsPage } from "./pages/DocumentsPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { InvestorsPage } from "./pages/InvestorsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -60,7 +59,7 @@ function AnimatedRoutes() {
             <Route index element={<DashboardPage />} />
             <Route path="investors" element={<InvestorsPage />} />
             <Route path="payments" element={<PaymentsPage />} />
-            <Route path="documents" element={<DocumentsPage />} />
+            <Route path="documents" element={<DocumentsRedirect />} />
             <Route path="account" element={<PersonalAreaPage />} />
             <Route element={<RequireManager />}>
               <Route path="activity" element={<ActivityPage />} />
@@ -75,4 +74,11 @@ function AnimatedRoutes() {
       </Routes>
     </AnimatePresence>
   );
+}
+
+function DocumentsRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set("section", "documents");
+  return <Navigate to={`/investors?${params.toString()}`} replace/>;
 }
