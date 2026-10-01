@@ -8710,3 +8710,6 @@ body {
   .workspace-filters label:first-child {grid-column:1/-1;}
   .workspace-contact__body {align-items:flex-start;flex-direction:column;gap:12px;}
 }
+
+.closure-review-check {display:flex;align-items:flex-start;gap:10px;padding:14px;background:var(--accent-soft);border-radius:12px;line-height:1.65;}
+.closure-review-check input {flex:none;width:20px;height:20px;margin-top:3px;}

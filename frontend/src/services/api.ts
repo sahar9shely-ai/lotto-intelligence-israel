@@ -21,6 +21,7 @@ import type {
   TopupRequest,
   DocumentVault,
   PlanAgreement,
+  ClosingAgreementPreview,
 } from "../types/investments";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -133,7 +134,8 @@ export const api = {
   cancelAgreement: (id: number) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}/cancel`, {method: "POST"}),
   createNotice: (id: number, body: {purpose: string; requested_on?: string; notes?: string}) => request<{id: number; eligible_on: string}>(`/api/v1/investments/investors/${id}/notices`, {method: "POST", body: JSON.stringify(body)}),
   openAgreement: (body: Record<string, unknown>) => request<PlanAgreement>("/api/v1/investments/agreements/open", {method: "POST", body: JSON.stringify(body)}),
-  closingAgreement: (id: number, noticeId: number) => request<PlanAgreement>(`/api/v1/investments/plans/${id}/closing-agreement`, {method: "POST", body: JSON.stringify({notice_id: noticeId})}),
+  previewClosingAgreement: (id: number, requestedOn: string) => request<ClosingAgreementPreview>(`/api/v1/investments/plans/${id}/closing-preview`, {method: "POST", body: JSON.stringify({requested_on: requestedOn})}),
+  closingAgreement: (id: number, noticeId: number, reviewedHash: string) => request<PlanAgreement>(`/api/v1/investments/plans/${id}/closing-agreement`, {method: "POST", body: JSON.stringify({notice_id: noticeId, reviewed_document_hash: reviewedHash})}),
   publicAgreement: (token: string) => request<PlanAgreement>("/api/v1/investments/agreement-public/read", {method: "POST", body: JSON.stringify({token})}),
   signAgreement: (body: {token: string; password: string; typed_name: string; signature_png: string; accepted_terms: boolean; document_hash: string}) => request<PlanAgreement>("/api/v1/investments/agreement-public/sign", {method: "POST", body: JSON.stringify(body)}),
   login: (username: string, password: string) =>

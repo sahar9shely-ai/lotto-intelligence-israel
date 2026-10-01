@@ -38,6 +38,15 @@ export type PlanAgreement = {
   execution_details?: Record<string, string | number> | null;
 };
 
+export type ClosingAgreementPreview = {
+  kind: "close";
+  snapshot: PlanAgreement["snapshot"];
+  document_hash: string;
+  eligible_on: string;
+  can_prepare: boolean;
+  calculated_on: string;
+};
+
 export type VaultDocument = {
   id: string;
   kind: VaultDocumentKind;

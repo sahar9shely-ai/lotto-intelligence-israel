@@ -9,7 +9,8 @@ from app.api.v1.agreements import router as agreements_router
 from app.api.v1.investments import router as investments_router
 from app.core.config import settings
 from app.db.investment_session import get_investment_db
-from app.models.investments import PlanAgreement, PlanNotice, InvestmentPlan, WalletEntry, utcnow
+from app.models.investments import Investor, PlanAgreement, PlanNotice, InvestmentPlan, WalletEntry, utcnow
+from app.models.auth import User
 from app.security.auth import get_current_user, require_manager, hash_password
 from app.services import agreement_service as agreements, wallet_service as wallet, investment_service as svc
 import test_wallet_business as wallet_test_helpers
@@ -164,3 +165,71 @@ class AgreementTests(unittest.TestCase):
         self.assertEqual(svc.plan_effective_duration(plan),12)
         svc.repair_reporting_year_plans(self.db)
         self.assertEqual(plan.duration_months,12);self.assertEqual(len(plan.payments),12)
+
+    def test_closing_preview_preparation_and_link_controls_are_admin_only(self):
+        notice = self.notice()
+        manager_investor = Investor(name="Synthetic manager", is_manager=True)
+        self.db.add(manager_investor); self.db.flush()
+        manager = User(username="another-manager", role="manager", investor_id=manager_investor.id)
+        self.db.add(manager); self.db.commit()
+        self.app.dependency_overrides.pop(require_manager)
+        for actor in (manager, self.user):
+            self.current_user = actor
+            self.assertEqual(self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-preview", json={"requested_on":"2026-01-01"}).status_code, 403)
+            self.assertEqual(self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-agreement", json={"notice_id":notice.id, "reviewed_document_hash":"0"*64}).status_code, 403)
+        self.current_user = self.admin
+        preview = self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-preview", json={"requested_on":"2026-01-01"})
+        self.assertEqual(preview.status_code, 200)
+        self.assertTrue(preview.json()["can_prepare"])
+        self.assertEqual(self.db.query(PlanAgreement).count(), 0)
+        self.assertEqual(self.db.query(PlanNotice).count(), 1)
+        self.assertEqual(self.db.query(WalletEntry).count(), 0)
+        self.assertNotIn("manager_fee_percent", str(preview.json()))
+        response = self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-agreement", json={"notice_id":notice.id, "reviewed_document_hash":preview.json()["document_hash"]})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["snapshot"], preview.json()["snapshot"])
+        self.assertEqual(self.plan.status, "active")
+        self.assertEqual(self.investor.available_balance_cents, 0)
+        self.current_user = manager
+        row_id = response.json()["id"]
+        for action in ("link", "cancel"):
+            self.assertEqual(self.client.post(f"/api/v1/investments/agreements/{row_id}/{action}").status_code, 403)
+        self.db.refresh(self.db.get(PlanAgreement,row_id))
+        self.assertEqual(self.db.get(PlanAgreement,row_id).status, "pending")
+
+    def test_closing_requires_review_and_changed_finances_require_new_review(self):
+        notice = self.notice()
+        endpoint = f"/api/v1/investments/plans/{self.plan.id}/closing-agreement"
+        preview_endpoint = f"/api/v1/investments/plans/{self.plan.id}/closing-preview"
+        preview = self.client.post(preview_endpoint,json={"requested_on":"2026-01-01"}).json()
+        self.assertEqual(self.client.post(endpoint,json={"notice_id":notice.id}).status_code,409)
+        self.plan.savings_redeemed_total = 100; self.db.commit()
+        self.assertEqual(self.client.post(endpoint,json={"notice_id":notice.id,"reviewed_document_hash":preview["document_hash"]}).status_code,409)
+        self.assertEqual(self.db.query(PlanAgreement).count(),0)
+        self.assertEqual(self.db.query(WalletEntry).count(),0)
+        fresh = self.client.post(preview_endpoint,json={"requested_on":"2026-01-01"}).json()
+        self.assertNotEqual(fresh["document_hash"],preview["document_hash"])
+        approved = self.client.post(endpoint,json={"notice_id":notice.id,"reviewed_document_hash":fresh["document_hash"]})
+        self.assertEqual(approved.status_code,201)
+        self.assertEqual(approved.json()["snapshot"],fresh["snapshot"])
+
+    def test_mid_month_cross_year_preview_preserves_term_and_only_completed_months(self):
+        self.plan.start_date = date(2025,7,15); self.plan.duration_months = 12; self.db.commit()
+        preview = self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-preview",json={"requested_on":"2026-01-01"})
+        self.assertEqual(preview.status_code,200)
+        self.assertFalse(preview.json()["can_prepare"])
+        self.assertEqual(preview.json()["eligible_on"],"2026-07-15")
+        self.assertEqual(preview.json()["snapshot"]["terms"]["savings"],13200)
+        self.assertEqual(preview.json()["snapshot"]["terms"]["duration_months"],12)
+        self.assertEqual(preview.json()["snapshot"]["terms"]["savings_months"],6)
+        self.assertEqual(self.db.query(PlanAgreement).count(),0)
+        self.assertEqual(self.db.query(PlanNotice).count(),0)
+        self.assertEqual(self.db.query(WalletEntry).count(),0)
+
+    def test_preexisting_pending_closing_agreement_without_months_still_signs(self):
+        row, token = self.close_offer()
+        snapshot = {**row.snapshot, "terms": dict(row.snapshot["terms"])}
+        snapshot["terms"].pop("savings_months")
+        row.snapshot = snapshot; row.document_hash = agreements.digest(snapshot); self.db.commit()
+        self.assertEqual(self.sign(row, token).status_code, 200)
+        self.assertEqual(self.investor.available_balance_cents, 8640000)

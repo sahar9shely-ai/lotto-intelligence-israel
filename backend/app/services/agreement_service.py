@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from app.models.investments import InvestmentPlan, PlanAgreement, PlanNotice, AppSettings, utcnow
+from app.models.investments import Investor, InvestmentPlan, PlanAgreement, PlanNotice, AppSettings, utcnow
 from app.services import investment_service as svc, wallet_service as wallet
 from app.services.israel_business_days import israel_today
 
@@ -21,18 +21,53 @@ def end_date(plan: InvestmentPlan) -> date:
     return svc.add_months(plan.start_date, plan.duration_months)
 
 
-def closing_terms(plan: InvestmentPlan) -> dict:
+def closing_terms(plan: InvestmentPlan, *, preview: bool = False, include_months: bool = True) -> dict:
     today = israel_today()
     if plan.status != "active" or plan.closed_on:
         raise ValueError("ניתן להכין הסכם סיום רק למסלול פעיל")
-    if today < end_date(plan):
+    if not preview and today < end_date(plan):
         raise ValueError("אין אפשרות לסגור את המסלול לפני תום התקופה שסוכמה")
-    return {"principal": wallet.cents(plan.principal) / 100,
+    terms = {"principal": wallet.cents(plan.principal) / 100,
             "savings": wallet.cents(svc.available_savings_for_plan(plan, today)) / 100,
             "paid_cash": round(sum(p.investor_amount for p in plan.payments if p.status == "paid"), 2),
             "unpaid_cash": round(sum(p.investor_amount for p in plan.payments if p.status in {"scheduled", "awaiting_confirmation"} and p.due_date <= today), 2),
             "start_date": plan.start_date.isoformat(), "end_date": end_date(plan).isoformat(),
             "duration_months": plan.duration_months, "plan_id": plan.id}
+    if include_months:
+        terms["savings_months"] = svc.completed_months(plan.start_date, today, cap=svc.plan_effective_duration(plan))
+    return terms
+
+
+CLOSING_CLAUSES = [
+    "הצדדים מאשרים את סיום המסלול בתום התקופה שסוכמה, בכפוף לחתימת המשקיע על הסכם זה.",
+    "לאחר החתימה תיסגר הצבירה במסלול, והקרן והחיסכון שנותר ייזקפו לחשבון היתרה הזמינה של המשקיע.",
+    "החיסכון מחושב על הקרן בלבד, עבור חודשים מלאים ועד תום התקופה, ללא ריבית דריבית.",
+    "תשלומי מזומן שכבר שולמו אינם נזקפים שוב. סכומי מזומן שהגיע מועד תשלומם וטרם שולמו נותרים חוב לתשלום; תשלומים עתידיים של המסלול מבוטלים.",
+    "הזיכוי בחשבון היתרה הזמינה הוא רישום במערכת ואינו אישור לביצוע העברה בנקאית או לקבלת הכסף בפועל.",
+    "היתרה הזמינה אינה צוברת תשואה. השקעתה במסלול נוסף מחייבת הסכם חדש וחתימת המשקיע.",
+    "החתימה מאשרת את הנתונים והפעולות המפורטים במסמך זה בלבד ואינה ויתור כללי על זכויות או על חובות שלא נפרעו.",
+]
+
+
+def document_snapshot(db: Session, *, investor: Investor, kind: str, terms: dict, clauses: list[str], requested_on: date) -> dict:
+    manager_settings = db.query(AppSettings).first()
+    return {"version": 1, "investor_name": investor.name,
+            "manager_name": manager_settings.manager_display_name if manager_settings else "המנהל",
+            "title": "הסכם סיום מסלול" if kind == "close" else "הסכם פתיחת מסלול",
+            "terms": terms, "clauses": clauses + ["בקשה למשיכת כספים, להמשך מסלול או לפתיחת מסלול חדש יש להגיש חודש מראש."],
+            "notice_requested_on": requested_on.isoformat()}
+
+
+def closing_preview(db: Session, plan: InvestmentPlan, requested_on: date) -> dict:
+    today = israel_today()
+    if requested_on > today:
+        raise ValueError("תאריך קבלת הבקשה אינו יכול להיות עתידי")
+    terms = closing_terms(plan, preview=True)
+    terms["transfer_total"] = round(terms["principal"] + terms["savings"], 2)
+    snapshot = document_snapshot(db, investor=plan.investor, kind="close", terms=terms, clauses=CLOSING_CLAUSES, requested_on=requested_on)
+    eligible_on = max(end_date(plan), svc.add_months(requested_on, 1))
+    return {"kind": "close", "snapshot": snapshot, "document_hash": digest(snapshot),
+            "eligible_on": eligible_on, "can_prepare": today >= eligible_on, "calculated_on": today}
 
 
 def issue(db: Session, *, investor_id: int, kind: str, actor_id: int, notice_id: int, data: dict | None = None, plan_id: int | None = None):
@@ -52,15 +87,7 @@ def issue(db: Session, *, investor_id: int, kind: str, actor_id: int, notice_id:
             raise ValueError("טרם חלף חודש ממועד הבקשה מראש")
         terms["transfer_total"] = round(terms["principal"] + terms["savings"], 2)
         private = {}
-        clauses = [
-            "הצדדים מאשרים את סיום המסלול בתום התקופה שסוכמה, בכפוף לחתימת המשקיע על הסכם זה.",
-            "לאחר החתימה תיסגר הצבירה במסלול, והקרן והחיסכון שנותר ייזקפו לחשבון היתרה הזמינה של המשקיע.",
-            "החיסכון מחושב על הקרן בלבד, עבור חודשים מלאים ועד תום התקופה, ללא ריבית דריבית.",
-            "תשלומי מזומן שכבר שולמו אינם נזקפים שוב. סכומי מזומן שהגיע מועד תשלומם וטרם שולמו נותרים חוב לתשלום; תשלומים עתידיים של המסלול מבוטלים.",
-            "הזיכוי בחשבון היתרה הזמינה הוא רישום במערכת ואינו אישור לביצוע העברה בנקאית או לקבלת הכסף בפועל.",
-            "היתרה הזמינה אינה צוברת תשואה. השקעתה במסלול נוסף מחייבת הסכם חדש וחתימת המשקיע.",
-            "החתימה מאשרת את הנתונים והפעולות המפורטים במסמך זה בלבד ואינה ויתור כללי על זכויות או על חובות שלא נפרעו.",
-        ]
+        clauses = CLOSING_CLAUSES
     else:
         if not data:
             raise ValueError("חסרים תנאי המסלול")
@@ -91,12 +118,7 @@ def issue(db: Session, *, investor_id: int, kind: str, actor_id: int, notice_id:
             "בתום התקופה לא יחודש המסלול באופן אוטומטי. סיום המסלול יושלם באמצעות הסכם סיום חתום; מסלול נוסף דורש הסכם חדש וחתימה חדשה.",
             "תנאים אלה אינם גורעים מזכויות שאין להתנות עליהן על פי דין. שינוי תנאי המשקיע מחייב הסכמה מתועדת חדשה.",
         ]
-    manager_settings = db.query(AppSettings).first()
-    snapshot = {"version": 1, "investor_name": investor.name,
-                "manager_name": manager_settings.manager_display_name if manager_settings else "המנהל",
-                "title": "הסכם סיום מסלול" if kind == "close" else "הסכם פתיחת מסלול",
-                "terms": terms, "clauses": clauses + ["בקשה למשיכת כספים, להמשך מסלול או לפתיחת מסלול חדש יש להגיש חודש מראש."],
-                "notice_requested_on": notice.requested_on.isoformat()}
+    snapshot = document_snapshot(db, investor=investor, kind=kind, terms=terms, clauses=clauses, requested_on=notice.requested_on)
     token = secrets.token_urlsafe(32)
     agreement = PlanAgreement(investor_id=investor_id, plan_id=plan_id, kind=kind,
         snapshot=snapshot, private_terms=private, token_hash=hashlib.sha256(token.encode()).hexdigest(),
@@ -149,7 +171,7 @@ def sign(db: Session, row: PlanAgreement, *, name: str, signature: str, accepted
         raise ValueError("יש לחתום בלוח החתימה")
     if row.kind == "close":
         plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == row.plan_id).with_for_update().one()
-        current = closing_terms(plan)
+        current = closing_terms(plan, include_months="savings_months" in row.snapshot["terms"])
         current["transfer_total"] = round(current["principal"] + current["savings"], 2)
         if current != row.snapshot["terms"]:
             raise ValueError("נתוני המסלול השתנו. יש לבקש מהמנהל הסכם סיום מעודכן")

@@ -10,7 +10,7 @@ from app.db.investment_session import get_investment_db
 from app.models.auth import User
 from app.models.investments import Investor, InvestmentPlan, PlanAgreement, PlanNotice
 from app.schemas.investments import PlanCreate
-from app.security.auth import get_current_user, is_manager, require_manager, verify_password
+from app.security.auth import get_current_user, is_manager, is_system_admin, require_manager, require_system_admin, verify_password
 from app.services import agreement_service as svc
 
 router = APIRouter(prefix="/api/v1/investments", tags=["agreements"])
@@ -28,6 +28,11 @@ class OpeningInput(PlanCreate):
 
 class ClosingInput(BaseModel):
     notice_id: int
+    reviewed_document_hash: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class ClosingPreviewInput(BaseModel):
+    requested_on: date
 
 
 class TokenInput(BaseModel):
@@ -84,16 +89,31 @@ def opening(payload: OpeningInput, user: User = Depends(require_manager), db: Se
 
 
 @router.post("/plans/{plan_id}/closing-agreement", status_code=201)
-def closing(plan_id: int, payload: ClosingInput, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
+def closing(plan_id: int, payload: ClosingInput, user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
     plan = db.get(InvestmentPlan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="המסלול לא נמצא")
+    if not payload.reviewed_document_hash:
+        raise HTTPException(status_code=409, detail="יש להציג ולאשר את סיכום הסיום לפני הכנת ההסכם")
     try:
         row, token = svc.issue(db, investor_id=plan.investor_id, kind="close", actor_id=user.id, notice_id=payload.notice_id, plan_id=plan_id)
+        if row.document_hash != payload.reviewed_document_hash:
+            raise ValueError("נתוני הסיום השתנו. יש לעיין בסיכום המעודכן ולאשר אותו שוב")
         db.commit()
         return {**svc.serialize(row), "token": token}
     except (ValueError, IntegrityError) as exc:
         fail(db, exc)
+
+
+@router.post("/plans/{plan_id}/closing-preview")
+def closing_preview(plan_id: int, payload: ClosingPreviewInput, user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
+    plan = db.get(InvestmentPlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="המסלול לא נמצא")
+    try:
+        return svc.closing_preview(db, plan, payload.requested_on)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/investors/{investor_id}/agreements")
@@ -118,6 +138,8 @@ def new_link(agreement_id: int, user: User = Depends(require_manager), db: Sessi
     row = db.query(PlanAgreement).filter(PlanAgreement.id == agreement_id).with_for_update().first()
     if not row or row.status != "pending":
         raise HTTPException(status_code=409, detail="אין הסכם הממתין לחתימה")
+    if row.kind == "close" and not is_system_admin(user):
+        raise HTTPException(status_code=403, detail="הסכמי סיום זמינים לניהול האדמין בלבד")
     token = secrets.token_urlsafe(32)
     row.token_hash = hashlib.sha256(token.encode()).hexdigest()
     row.failed_attempts = 0
@@ -131,6 +153,8 @@ def cancel(agreement_id: int, user: User = Depends(require_manager), db: Session
     row = db.get(PlanAgreement, agreement_id)
     if not row:
         raise HTTPException(status_code=404, detail="המסמך לא נמצא")
+    if row.kind == "close" and not is_system_admin(user):
+        raise HTTPException(status_code=403, detail="הסכמי סיום זמינים לניהול האדמין בלבד")
     svc.wallet.lock_investor(db, row.investor_id)
     db.refresh(row)
     if row.status != "pending":

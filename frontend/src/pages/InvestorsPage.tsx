@@ -51,6 +51,7 @@ function totalMonthlyOf(inv: Investor) {
 export function InvestorsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
+  const canClosePlans = isManager && user?.username === "admin";
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: investors, error, loading, reload, setData: setInvestors } = useAsync(() => api.investors(), []);
   const { data: settings } = useAsync(
@@ -537,7 +538,7 @@ export function InvestorsPage() {
           <p className="workspace-section-hint">{WORKSPACE_SECTIONS.find(s => s.id === workspaceSection)?.hint}</p>
           {workspaceSection === "balance" ? <AvailableBalancePanel key={`${selected.id}:${selected.available_balance}`} investorId={selected.id} canManage={isManager} onChanged={refreshAll}/> : null}
           {workspaceSection === "documents" ? <div className="stack" key={`documents:${selected.id}`}>
-            <AgreementPanel rows={selectedAgreements} loading={agreementsLoading || agreementsRefreshing} error={agreementsError} canManage={isManager} phone={selected.phone} onChanged={refreshAll}/>
+            <AgreementPanel rows={selectedAgreements} loading={agreementsLoading || agreementsRefreshing} error={agreementsError} canManage={isManager} canManageClosing={canClosePlans} phone={selected.phone} onChanged={refreshAll}/>
             <DocumentsPage key={`vault:${selected.id}:${agreementRevision}`} investorId={selected.id} embedded excludeAgreements/>
           </div> : null}
           {workspaceSection === "requests" ? <div className="stack" key={`requests:${selected.id}`}>
@@ -605,6 +606,7 @@ export function InvestorsPage() {
                         key={`${selected.id}:${plan.id}`}
                         plan={plan}
                         isManager={isManager}
+                        canClosePlans={canClosePlans}
                         editing={editingPlanId === plan.id}
                         showReport={reportPlanId === plan.id}
                         onToggleEdit={() =>
@@ -706,7 +708,7 @@ export function InvestorsPage() {
         <p className="empty">בחרו משקיע מהרשימה למעלה.</p>
       )}
 
-      {issuedAgreement ? <Modal title="מסמך וקישור לחתימת המשקיע" onClose={() => setIssuedAgreement(null)}><div className="modal__body"><AgreementContent row={issuedAgreement}/>{issuedAgreement.status === "pending" && isManager ? <AgreementShare key={issuedAgreement.id} row={issuedAgreement} phone={selected?.phone}/> : null}</div></Modal> : null}
+      {issuedAgreement ? <Modal title="מסמך וקישור לחתימת המשקיע" onClose={() => setIssuedAgreement(null)}><div className="modal__body"><AgreementContent row={issuedAgreement}/>{issuedAgreement.status === "pending" && isManager && (issuedAgreement.kind !== "close" || canClosePlans) ? <AgreementShare key={issuedAgreement.id} row={issuedAgreement} phone={selected?.phone}/> : null}</div></Modal> : null}
       {showNewInvestor ? (
         <Modal title="משקיע חדש" onClose={() => setShowNewInvestor(false)}>
           <form className="form modal__form" autoComplete="off" onSubmit={onCreateInvestor}>
@@ -780,6 +782,7 @@ export function InvestorsPage() {
 function PlanCard({
   plan,
   isManager,
+  canClosePlans,
   editing,
   showReport,
   onToggleEdit,
@@ -794,6 +797,7 @@ function PlanCard({
 }: {
   plan: Plan;
   isManager: boolean;
+  canClosePlans: boolean;
   editing: boolean;
   showReport: boolean;
   onToggleEdit: () => void;
@@ -832,7 +836,7 @@ function PlanCard({
               {editing ? "סגור עריכה" : "ערוך"}
             </button>
           ) : null}
-          <SavingsActions plan={plan} canManage={isManager} onPrepared={onAgreementPrepared} pendingAgreement={pendingAgreement} onOpenAgreement={onOpenAgreement} />
+          <SavingsActions plan={plan} canManage={canClosePlans} onPrepared={onAgreementPrepared} pendingAgreement={pendingAgreement} onOpenAgreement={onOpenAgreement} />
         </div>
       }
     >

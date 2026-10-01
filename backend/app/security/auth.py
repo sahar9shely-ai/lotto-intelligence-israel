@@ -100,3 +100,13 @@ def require_manager(user: User = Depends(get_current_user)) -> User:
 
 def is_manager(user: User) -> bool:
     return user.role == "manager" or bool(user.investor and user.investor.is_manager)
+
+
+def is_system_admin(user: User) -> bool:
+    return user.username == "admin" and is_manager(user)
+
+
+def require_system_admin(user: User = Depends(get_current_user)) -> User:
+    if not is_system_admin(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="סיום מסלול זמין למנהל המערכת בלבד")
+    return user
