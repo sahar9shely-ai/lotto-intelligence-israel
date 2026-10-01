@@ -17,7 +17,7 @@ import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { Investor, Plan, Settings } from "../types/investments";
-import { addMonthsISO, formatDate, formatMoney, formatPercent, yearStartISO } from "../utils/format";
+import { addMonthsISO, formatDate, formatMoney, formatPercent, todayISO, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
 import { isAdminShellInvestor } from "../utils/roles";
 import {
@@ -33,7 +33,7 @@ const WORKSPACE_SECTIONS: {id: WorkspaceSection; title: string; hint: string}[] 
   {id:"plans",title:"מסלולים",hint:"ניהול מסלולים פעילים וסגורים. סיום מסלול מתחיל בכרטיס המסלול ומתבצע רק לאחר חתימה."},
   {id:"balance",title:"יתרה זמינה",hint:"כסף שהשתחרר ממסלולים סגורים, משיכות והיסטוריית תנועות."},
   {id:"documents",title:"מסמכים וחתימות",hint:"מסמכים הממתינים לחתימה, הסכמים קודמים ודוחות המשקיע."},
-  {id:"requests",title:"בקשות",hint:"תיעוד הודעות חודש מראש וטיפול בבקשות המשקיע."},
+  {id:"requests",title:"בקשות",hint:"טיפול בבקשות המשקיע. הודעה חודש מראש נדרשת למשיכת כספים בתום המסלול בלבד."},
 ];
 
 function cashOf(inv: Investor) {
@@ -1031,8 +1031,8 @@ export function PlanForm({settings, investor, onSubmit}: {
       <fieldset disabled={busy} className="plan-opening__section"><legend>4 · תקופה וסיכום לפני שמירה</legend>
         <div className="form__grid" hidden={Boolean(review)}>
           <label>מועד קבלת הבקשה מהמשקיע<input name="notice_requested_on" type="date" max={new Date().toLocaleDateString("en-CA")} defaultValue={new Date().toLocaleDateString("en-CA")} required /></label>
-          <p className="hint">יש לתעד את מועד קבלת הבקשה בפועל. התחלת המסלול תהיה לפחות חודש אחריו ורק לאחר חתימה.</p>
-          <label>תאריך התחלה מוצע<input name="start_date" type="date" defaultValue={(() => {const d=new Date();d.setMonth(d.getMonth()+1);return d.toLocaleDateString("en-CA");})()} required /></label>
+          <p className="hint">יש לתעד את מועד קבלת הבקשה בפועל. המסלול ייפתח לאחר חתימה, ללא המתנה של חודש.</p>
+          <label>תאריך התחלה מוצע<input name="start_date" type="date" defaultValue={todayISO()} required /></label>
           <label>משך בחודשים<input name="duration_months" type="number" min="1" max="120" defaultValue={settings?.default_duration_months ?? 12} required /></label>
           <label>הערות<input name="notes" placeholder="אופציונלי" /></label>
         </div>

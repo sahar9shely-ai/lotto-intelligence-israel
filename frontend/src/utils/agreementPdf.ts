@@ -11,8 +11,10 @@ export const agreementLabels: Record<string, string> = {
   monthly_rate_percent: "אחוז מזומן חודשי למשקיע", savings_rate_percent: "אחוז חיסכון חודשי למשקיע",
   monthly_cash: "מזומן חודשי למשקיע", monthly_savings: "חיסכון חודשי למשקיע",
   plan_type: "סוג המסלול", planned_savings_total: "חיסכון מוסכם לכל התקופה", closed_on: "תאריך סגירה",
+  closing_purpose: "מטרת הסיום", calculation_date: "הסכומים מחושבים עד ליום",
 };
 export function agreementValue(key: string, value: string | number): string {
+  if (key === "closing_purpose") return value === "renew" ? "סיום ביוזמת האדמין לצורך מסלול חדש" : "משיכה בתום התקופה";
   if (key.endsWith("_date") || key === "closed_on") return formatDate(String(value));
   if (key === "plan_type") return planTypeLabel(String(value));
   if (key.endsWith("percent")) return `${value}%`;
@@ -29,7 +31,7 @@ export async function agreementPdfFile(row: PlanAgreement): Promise<File> {
   const s = row.snapshot;
   const html = `<article class="pdf-sheet" dir="rtl" lang="he"><header class="pdf-header"><h1>תזרים · ${escape(s.title)}</h1><p>מסמך ${row.id} · ${row.status === "signed" ? "חתום" : "ממתין לחתימה"}</p></header>
     <p>בין ${escape(s.manager_name)} לבין ${escape(s.investor_name)}</p>
-    <p>בקשה מראש: ${formatDate(s.notice_requested_on)} · הפקת מסמך: ${formatDate(row.created_at)}</p>
+    <p>${s.terms.closing_purpose === "renew" ? "יוזמת סיום" : "מועד הבקשה"}: ${formatDate(s.notice_requested_on)} · הפקת מסמך: ${formatDate(row.created_at)}</p>
     <table class="pdf-table"><tbody>${Object.entries(s.terms).map(([k,v])=>`<tr><td>${escape(agreementLabel(k,row.kind))}</td><td>${escape(agreementValue(k,v))}</td></tr>`).join("")}</tbody></table>
     <footer class="pdf-footer">מסמך ${row.id} · עמוד 1 מתוך 2 · התנאים והחתימה בעמוד הבא</footer></article>`;
   const termsPage = `<article class="pdf-sheet" dir="rtl" lang="he"><header class="pdf-header"><h1>${escape(s.title)} · התנאים והאישור</h1><p>מסמך ${row.id} · ${escape(s.investor_name)}</p></header>

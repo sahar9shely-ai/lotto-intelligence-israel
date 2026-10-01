@@ -233,3 +233,84 @@ class AgreementTests(unittest.TestCase):
         row.snapshot = snapshot; row.document_hash = agreements.digest(snapshot); self.db.commit()
         self.assertEqual(self.sign(row, token).status_code, 200)
         self.assertEqual(self.investor.available_balance_cents, 8640000)
+
+    def test_admin_reinvestment_closes_early_after_signature_then_opens_same_day(self):
+        self.plan.start_date=date(2025,7,15); self.plan.duration_months=12; self.db.commit()
+        preview_endpoint=f"/api/v1/investments/plans/{self.plan.id}/closing-preview"
+        payload={"requested_on":self.today.isoformat(),"purpose":"renew"}
+        preview=self.client.post(preview_endpoint,json=payload).json()
+        self.assertTrue(preview["can_prepare"]); self.assertEqual(preview["eligible_on"],self.today.isoformat())
+        self.assertEqual(preview["snapshot"]["terms"]["end_date"],"2026-07-15")
+        self.assertEqual(preview["snapshot"]["terms"]["savings_months"],6)
+        self.assertEqual(preview["snapshot"]["terms"]["savings"],13200)
+        self.assertIn("לצורך",preview["snapshot"]["clauses"][0])
+        notice=self.notice("renew",self.today)
+        response=self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-agreement",
+            json={"notice_id":notice.id,"reviewed_document_hash":preview["document_hash"]})
+        self.assertEqual(response.status_code,201)
+        self.assertEqual(response.json()["snapshot"],preview["snapshot"])
+        row=self.db.get(PlanAgreement,response.json()["id"]); token=response.json()["token"]
+        self.assertEqual(self.plan.status,"active"); self.assertEqual(self.investor.available_balance_cents,0)
+        self.assertEqual(self.sign(row,token).status_code,200)
+        self.assertEqual(self.plan.status,"completed"); self.assertEqual(self.plan.closed_on,self.today)
+        self.assertEqual(self.investor.available_balance_cents,7320000)
+        self.assertEqual(self.sign(row,token).status_code,200)
+        self.assertEqual(self.db.query(WalletEntry).count(),1)
+        self.assertEqual(self.paid.status,"paid"); self.assertEqual(self.overdue.status,"scheduled"); self.assertEqual(self.future.status,"skipped")
+        data=dict(investor_id=self.investor.id,principal=73200,additional_funds=0,plan_type="hybrid",monthly_rate_percent=3,savings_rate_percent=1,
+                  manager_fee_percent=0,manager_savings_rate_percent=0,start_date=self.today,duration_months=12)
+        opening,opening_token=agreements.issue(self.db,investor_id=self.investor.id,kind="open",actor_id=self.admin.id,
+            notice_id=self.notice("new",self.today).id,data=data)
+        self.db.commit(); self.assertEqual(self.investor.available_balance_cents,7320000)
+        self.assertEqual(self.sign(opening,opening_token).status_code,200)
+        self.assertEqual(self.investor.available_balance_cents,0)
+        new_plan=self.db.get(InvestmentPlan,opening.plan_id)
+        self.assertEqual(new_plan.start_date,self.today); self.assertEqual(new_plan.principal,73200)
+        self.assertNotEqual(new_plan.id,self.plan.id)
+        self.assertEqual(self.db.query(WalletEntry).count(),2)
+        docs=svc.list_document_vault(self.db,investor=self.investor)["documents"]
+        self.assertTrue({row.id,opening.id}.issubset({d["source_id"] for d in docs if d["kind"]=="agreement"}))
+
+    def test_reinvestment_does_not_remove_withdrawal_term_and_notice_rules(self):
+        self.plan.start_date=date(2025,7,15); self.plan.duration_months=12; self.db.commit()
+        preview=self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-preview",
+            json={"requested_on":self.today.isoformat(),"purpose":"withdraw"}).json()
+        self.assertFalse(preview["can_prepare"]); self.assertEqual(preview["eligible_on"],"2026-07-15")
+        n=self.notice("withdraw",self.today)
+        with self.assertRaisesRegex(ValueError,"לפני תום"):
+            agreements.issue(self.db,investor_id=self.investor.id,kind="close",actor_id=self.admin.id,notice_id=n.id,plan_id=self.plan.id)
+        self.assertEqual(self.investor.available_balance_cents,0)
+
+    def test_reinvestment_requires_admin_and_matching_review_purpose(self):
+        preview_endpoint=f"/api/v1/investments/plans/{self.plan.id}/closing-preview"
+        withdrawal=self.client.post(preview_endpoint,json={"requested_on":"2026-01-01"}).json()
+        n=self.notice("renew",date(2026,1,1))
+        response=self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-agreement",
+            json={"notice_id":n.id,"reviewed_document_hash":withdrawal["document_hash"]})
+        self.assertEqual(response.status_code,409); self.assertEqual(self.db.query(PlanAgreement).count(),0)
+        self.current_user=self.user
+        self.assertEqual(self.client.post(preview_endpoint,json={"requested_on":self.today.isoformat(),"purpose":"renew"}).status_code,403)
+        with self.assertRaisesRegex(ValueError,"אדמין בלבד"):
+            agreements.issue(self.db,investor_id=self.investor.id,kind="close",actor_id=self.user.id,notice_id=n.id,plan_id=self.plan.id)
+
+    def test_future_plan_cannot_be_closed_by_reinvestment(self):
+        self.plan.start_date=date(2026,3,15); self.db.commit()
+        preview=self.client.post(f"/api/v1/investments/plans/{self.plan.id}/closing-preview",
+            json={"requested_on":self.today.isoformat(),"purpose":"renew"}).json()
+        self.assertFalse(preview["can_prepare"])
+        with self.assertRaisesRegex(ValueError,"טרם התחיל"):
+            agreements.issue(self.db,investor_id=self.investor.id,kind="close",actor_id=self.admin.id,
+                notice_id=self.notice("renew",self.today).id,plan_id=self.plan.id)
+
+    def test_early_signature_on_later_day_requires_unchanged_full_month_figures(self):
+        self.plan.start_date=date(2025,7,15); self.plan.duration_months=12; self.db.commit()
+        row,token=agreements.issue(self.db,investor_id=self.investor.id,kind="close",actor_id=self.admin.id,
+            notice_id=self.notice("renew",self.today).id,plan_id=self.plan.id)
+        self.db.commit()
+        self.assertEqual(row.snapshot["terms"]["calculation_date"],self.today.isoformat())
+        with patch.object(agreements,"israel_today",return_value=date(2026,2,15)), patch.object(wallet,"israel_today",return_value=date(2026,2,15)):
+            self.assertEqual(self.sign(row,token).status_code,409)
+        self.assertEqual(self.plan.status,"active"); self.assertEqual(self.investor.available_balance_cents,0)
+        with patch.object(agreements,"israel_today",return_value=date(2026,2,2)), patch.object(wallet,"israel_today",return_value=date(2026,2,2)):
+            self.assertEqual(self.sign(row,token).status_code,200)
+        self.assertEqual(self.plan.closed_on,date(2026,2,2)); self.assertEqual(self.investor.available_balance_cents,7320000)

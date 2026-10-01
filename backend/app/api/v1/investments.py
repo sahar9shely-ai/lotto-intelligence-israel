@@ -588,7 +588,7 @@ def update_plan(
 
 @router.post("/plans/{plan_id}/close", response_model=PlanOut)
 def close_plan_to_wallet(plan_id: int, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
-    raise HTTPException(status_code=409, detail="סגירת מסלול מחייבת הסכם סיום וחתימת המשקיע בתום התקופה")
+    raise HTTPException(status_code=409, detail="סגירת מסלול מחייבת הסכם סיום וחתימת המשקיע")
 
 
 @router.post("/investors/{investor_id}/wallet/withdraw")

@@ -33,6 +33,7 @@ class ClosingInput(BaseModel):
 
 class ClosingPreviewInput(BaseModel):
     requested_on: date
+    purpose: str = Field(default="withdraw", pattern="^(withdraw|renew)$")
 
 
 class TokenInput(BaseModel):
@@ -60,7 +61,7 @@ def owned(user, investor_id):
 @router.get("/investors/{investor_id}/notices")
 def notices(investor_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
     owned(user, investor_id)
-    return [{"id": n.id, "purpose": n.purpose, "requested_on": n.requested_on, "eligible_on": svc.svc.add_months(n.requested_on, 1), "notes": n.notes}
+    return [{"id": n.id, "purpose": n.purpose, "requested_on": n.requested_on, "eligible_on": svc.svc.add_months(n.requested_on, 1) if n.purpose == "withdraw" else n.requested_on, "notes": n.notes}
             for n in db.query(PlanNotice).filter(PlanNotice.investor_id == investor_id).order_by(PlanNotice.id.desc()).all()]
 
 
@@ -74,7 +75,7 @@ def create_notice(investor_id: int, payload: NoticeInput, user: User = Depends(g
         raise HTTPException(status_code=409, detail="תאריך בקשה אינו תקין")
     row = PlanNotice(investor_id=investor_id, purpose=payload.purpose, requested_on=requested, notes=payload.notes, actor_user_id=user.id)
     db.add(row); db.commit()
-    return {"id": row.id, "purpose": row.purpose, "requested_on": row.requested_on, "eligible_on": svc.svc.add_months(row.requested_on, 1)}
+    return {"id": row.id, "purpose": row.purpose, "requested_on": row.requested_on, "eligible_on": svc.svc.add_months(row.requested_on, 1) if row.purpose == "withdraw" else row.requested_on}
 
 
 @router.post("/agreements/open", status_code=201)
@@ -111,7 +112,7 @@ def closing_preview(plan_id: int, payload: ClosingPreviewInput, user: User = Dep
     if not plan:
         raise HTTPException(status_code=404, detail="המסלול לא נמצא")
     try:
-        return svc.closing_preview(db, plan, payload.requested_on)
+        return svc.closing_preview(db, plan, payload.requested_on, purpose=payload.purpose)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

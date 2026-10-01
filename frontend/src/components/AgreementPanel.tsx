@@ -10,7 +10,7 @@ import { savePdfBlob } from "../utils/pdfDocument";
 export function AgreementContent({row}: {row: Pick<PlanAgreement, "snapshot" | "kind"> & Partial<Pick<PlanAgreement, "id" | "created_at" | "signed_at" | "signed_name" | "signature_png" | "execution_details">>}) {
   return <div className="agreement-document"><h2>{row.snapshot.title}{row.id ? ` · ${row.id}` : " · תצוגה מקדימה"}</h2>
     <p>בין {row.snapshot.manager_name} לבין {row.snapshot.investor_name}</p>
-    <p className="hint">בקשה מראש: {formatDate(row.snapshot.notice_requested_on)}{row.created_at ? ` · הופק ${formatDate(row.created_at)}` : ""}</p>
+    <p className="hint">{row.snapshot.terms.closing_purpose === "renew" ? "יוזמת סיום" : "מועד הבקשה"}: {formatDate(row.snapshot.notice_requested_on)}{row.created_at ? ` · הופק ${formatDate(row.created_at)}` : ""}</p>
     <dl className="plan-opening-summary">{Object.entries(row.snapshot.terms).map(([key,value])=><div key={key} style={{display:"contents"}}><dt>{agreementLabel(key,row.kind)}</dt><dd>{agreementValue(key,value)}</dd></div>)}</dl>
     <ol className="agreement-clauses">{row.snapshot.clauses.map((text,i)=><li key={i}>{text}</li>)}</ol>
     {row.signed_at ? <div className="agreement-receipt"><strong>נחתם על ידי {row.signed_name} · {formatDate(row.signed_at)}</strong><img alt="חתימת המשקיע" src={row.signature_png || ""}/></div> : <p className="hint">{row.id ? "המסמך ממתין לחתימת המשקיע. הכנתו אינה מבצעת פעולה כספית." : "תצוגה מקדימה בלבד. טרם נוצר הסכם לחתימה ולא בוצעה פעולה כספית."}</p>}
@@ -38,7 +38,7 @@ export function NoticePanel({investorId}: {investorId: number}) {
   const {data: notices, error, loading, reload} = useAsync(() => api.notices(investorId), [investorId]);
   const [purpose,setPurpose] = useState("withdraw"); const [message,setMessage] = useState("");
   const [busy,setBusy] = useState(false); const [failure,setFailure] = useState("");
-  return <Panel title="בקשות חודש מראש" subtitle="תיעוד בקשה למשיכה, להמשך או למסלול חדש">
+  return <Panel title="בקשות ותיעוד" subtitle="חודש מראש נדרש למשיכת כספים בתום המסלול בלבד">
     <form className="form" onSubmit={async e => {
       e.preventDefault(); if(busy)return; setBusy(true);setFailure("");
       try {const row=await api.createNotice(investorId,{purpose});setMessage(`הבקשה נשמרה. מועד מוקדם לביצוע: ${formatDate(row.eligible_on)}`);reload();}
@@ -48,7 +48,7 @@ export function NoticePanel({investorId}: {investorId: number}) {
       <p className="hint">רישום הבקשה אינו מבצע פעולה כספית. את הסכם הפתיחה או הסיום מכינים מתוך לשונית המסלולים.</p>
     </form>
     {message?<p role="status">{message}</p>:null}{failure||error?<p role="alert">{failure||error}<button className="btn btn--ghost btn--small" onClick={reload}>נסה שוב</button></p>:null}
-    {loading?<p role="status">טוען בקשות...</p>:notices?.length?<details className="agreement-notice"><summary>בקשות שנרשמו ({notices.length})</summary>{notices.map(n=><p className="hint" key={n.id}>{n.purpose==="withdraw"?"משיכה":n.purpose==="renew"?"המשך":"מסלול חדש"} · התקבלה {formatDate(n.requested_on)} · חודש מראש עד {formatDate(n.eligible_on)}</p>)}</details>:<p className="hint">אין בקשות קודמות בתיק.</p>}
+    {loading?<p role="status">טוען בקשות...</p>:notices?.length?<details className="agreement-notice"><summary>בקשות שנרשמו ({notices.length})</summary>{notices.map(n=><p className="hint" key={n.id}>{n.purpose==="withdraw"?"משיכה":n.purpose==="renew"?"המשך":"מסלול חדש"} · התקבלה {formatDate(n.requested_on)}{n.purpose === "withdraw" ? ` · חודש מראש עד ${formatDate(n.eligible_on)}` : " · ללא המתנה של חודש"}</p>)}</details>:<p className="hint">אין בקשות קודמות בתיק.</p>}
   </Panel>;
 }
 
