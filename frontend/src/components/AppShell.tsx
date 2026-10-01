@@ -179,6 +179,25 @@ export function AppShell() {
   const dockLeading = dockSideLinks.slice(0, 2);
   const dockTrailing = dockSideLinks.slice(2);
   const displayName = user?.investor_name || user?.username || "";
+  const workspaceParams = new URLSearchParams(location.search);
+  const viewingDocuments = location.pathname === "/investors" && workspaceParams.get("section") === "documents";
+  function navigationTarget(path: string) {
+    if (path !== "/documents") return path;
+    const params = new URLSearchParams({section: "documents"});
+    const investorId = workspaceParams.get("investor_id") || (!isManager ? String(user?.investor_id || "") : "");
+    if (investorId) params.set("investor_id", investorId);
+    return `/investors?${params.toString()}`;
+  }
+  function navigationActive(path: string, routeActive: boolean) {
+    if (path === "/documents") return viewingDocuments;
+    if (path === "/investors") return routeActive && !viewingDocuments;
+    return routeActive;
+  }
+  function navigationCurrent(path: string): "page" | false | undefined {
+    if (path === "/documents") return viewingDocuments ? "page" : false;
+    if (path === "/investors" && viewingDocuments) return false;
+    return undefined;
+  }
   const isAdminAccountUser = isAdminAccount(user);
   const roleLabel = isAdminAccountUser ? "מנהל מערכת" : isManager ? "מנהל" : "תיק פרטי";
   const roleChipClass = isAdminAccountUser
@@ -308,9 +327,10 @@ export function AppShell() {
               {links.map((link) => (
                 <NavLink
                   key={link.to}
-                  to={link.to}
+                  to={navigationTarget(link.to)}
                   end={link.end}
-                  className={({ isActive }) => (isActive ? "nav__link is-active" : "nav__link")}
+                  className={({ isActive }) => (navigationActive(link.to, isActive) ? "nav__link is-active" : "nav__link")}
+                  aria-current={navigationCurrent(link.to)}
                 >
                   {link.label}
                 </NavLink>
@@ -339,8 +359,9 @@ export function AppShell() {
           {dockLeading.map((link) => (
             <MotionNavLink
               key={`dock-${link.to}`}
-              to={link.to}
-              className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
+              to={navigationTarget(link.to)}
+              className={({ isActive }) => (navigationActive(link.to, isActive) ? "dock__link is-active" : "dock__link")}
+              aria-current={navigationCurrent(link.to)}
               onClick={() => setMoreOpen(false)}
               whileTap={reduceMotion ? undefined : { scale: 0.94 }}
               transition={{ type: "spring", stiffness: 520, damping: 28 }}
@@ -353,8 +374,9 @@ export function AppShell() {
           {dockTrailing.map((link) => (
             <MotionNavLink
               key={`dock-${link.to}`}
-              to={link.to}
-              className={({ isActive }) => (isActive ? "dock__link is-active" : "dock__link")}
+              to={navigationTarget(link.to)}
+              className={({ isActive }) => (navigationActive(link.to, isActive) ? "dock__link is-active" : "dock__link")}
+              aria-current={navigationCurrent(link.to)}
               onClick={() => setMoreOpen(false)}
               whileTap={reduceMotion ? undefined : { scale: 0.94 }}
               transition={{ type: "spring", stiffness: 520, damping: 28 }}
@@ -407,8 +429,9 @@ export function AppShell() {
             {moreLinks.map((link) => (
               <NavLink
                 key={`more-${link.to}`}
-                to={link.to}
-                className={({ isActive }) => (isActive ? "more-sheet__link is-active" : "more-sheet__link")}
+                to={navigationTarget(link.to)}
+                className={({ isActive }) => (navigationActive(link.to, isActive) ? "more-sheet__link is-active" : "more-sheet__link")}
+                aria-current={navigationCurrent(link.to)}
                 onClick={() => setMoreOpen(false)}
               >
                 <DockGlyph path={link.to} />
