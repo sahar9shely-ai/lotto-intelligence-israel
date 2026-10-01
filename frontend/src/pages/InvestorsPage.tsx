@@ -31,7 +31,7 @@ type TrackView = "active" | "closed";
 type WorkspaceSection = "plans" | "balance" | "documents" | "requests";
 const WORKSPACE_SECTIONS: {id: WorkspaceSection; title: string; hint: string}[] = [
   {id:"plans",title:"מסלולים",hint:"ניהול מסלולים פעילים וסגורים. סיום מסלול מתחיל בכרטיס המסלול ומתבצע רק לאחר חתימה."},
-  {id:"balance",title:"יתרה זמינה",hint:"כסף שהשתחרר ממסלולים סגורים, משיכות והיסטוריית תנועות."},
+  {id:"balance",title:"יתרה זמינה",hint:"תוספות כסף, כסף שהשתחרר ממסלולים סגורים, משיכות והיסטוריית תנועות."},
   {id:"documents",title:"מסמכים וחתימות",hint:"מסמכים הממתינים לחתימה, הסכמים קודמים ודוחות המשקיע."},
   {id:"requests",title:"בקשות",hint:"טיפול בבקשות המשקיע. הודעה חודש מראש נדרשת למשיכת כספים בתום המסלול בלבד."},
 ];
@@ -536,7 +536,7 @@ export function InvestorsPage() {
             {WORKSPACE_SECTIONS.map(section => <button key={section.id} type="button" className={workspaceSection === section.id ? "investor-workspace-nav__item is-active" : "investor-workspace-nav__item"} aria-pressed={workspaceSection === section.id} onClick={() => goToSection(section.id)}>{section.title}{section.id === "documents" && pendingAgreements.length ? <em>{pendingAgreements.length}</em> : section.id === "requests" && pendingRequests.length ? <em>{pendingRequests.length}</em> : null}</button>)}
           </nav>
           <p className="workspace-section-hint">{WORKSPACE_SECTIONS.find(s => s.id === workspaceSection)?.hint}</p>
-          {workspaceSection === "balance" ? <AvailableBalancePanel key={`${selected.id}:${selected.available_balance}`} investorId={selected.id} canManage={isManager} onChanged={refreshAll}/> : null}
+          {workspaceSection === "balance" ? <AvailableBalancePanel key={`${selected.id}:${selected.available_balance}`} investorId={selected.id} canManage={isManager} canDeposit={canClosePlans} onChanged={refreshAll}/> : null}
           {workspaceSection === "documents" ? <div className="stack" key={`documents:${selected.id}`}>
             <AgreementPanel rows={selectedAgreements} loading={agreementsLoading || agreementsRefreshing} error={agreementsError} canManage={isManager} canManageClosing={canClosePlans} phone={selected.phone} onChanged={refreshAll}/>
             <DocumentsPage key={`vault:${selected.id}:${agreementRevision}`} investorId={selected.id} embedded excludeAgreements/>

@@ -43,7 +43,7 @@ from app.schemas.investments import (
     TopupRequestOut,
     TopupRequestSign,
 )
-from app.security.auth import get_current_user, is_manager, require_manager
+from app.security.auth import get_current_user, is_manager, require_manager, require_system_admin
 from app.services import auth_service as auth_svc
 from app.services import investment_service as svc
 from app.services import wallet_service as wallet_svc
@@ -53,6 +53,11 @@ from pydantic import BaseModel, Field
 
 class WalletWithdrawalRequest(BaseModel):
     amount: float = Field(gt=0)
+    operation_key: str = Field(min_length=8, max_length=80)
+
+
+class WalletDepositRequest(BaseModel):
+    amount: float = Field(gt=0, le=20_000_000, allow_inf_nan=False)
     operation_key: str = Field(min_length=8, max_length=80)
 
 router = APIRouter(prefix="/api/v1/investments", tags=["investments"])
@@ -589,6 +594,19 @@ def update_plan(
 @router.post("/plans/{plan_id}/close", response_model=PlanOut)
 def close_plan_to_wallet(plan_id: int, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
     raise HTTPException(status_code=409, detail="סגירת מסלול מחייבת הסכם סיום וחתימת המשקיע")
+
+
+@router.post("/investors/{investor_id}/wallet/deposit")
+def deposit_available_balance(investor_id: int, payload: WalletDepositRequest, user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
+    if not db.get(Investor, investor_id):
+        raise HTTPException(status_code=404, detail="המשקיע לא נמצא")
+    try:
+        entry = wallet_svc.deposit(db, investor_id, payload.amount, payload.operation_key, user.id)
+        db.commit()
+        return {"id": entry.id, "amount": entry.amount_cents / 100, "balance_after": entry.balance_after_cents / 100}
+    except (ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
 
 
 @router.post("/investors/{investor_id}/wallet/withdraw")

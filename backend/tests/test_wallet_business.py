@@ -123,6 +123,75 @@ class WalletBusinessTests(unittest.TestCase):
         self.assertEqual([e.operation_type for e in self.db.query(WalletEntry).order_by(WalletEntry.id)], ["deposit","plan_funding"])
         self.assertEqual(new.manager_savings_start_date,date(2026,10,1))
 
+    def test_standalone_deposit_is_audited_once_and_funds_a_later_plan(self):
+        self.close()
+        entry=wallet.deposit(self.db,self.investor.id,1250.75,"standalone-deposit",self.admin.id)
+        self.db.commit()
+        again=wallet.deposit(self.db,self.investor.id,1250.75,"standalone-deposit",self.admin.id)
+        self.db.commit()
+        self.assertEqual(again.id,entry.id)
+        self.assertEqual(entry.actor_user_id,self.admin.id)
+        self.assertEqual(entry.operation_type,"deposit")
+        self.assertIsNone(entry.plan_id)
+        self.assertEqual(self.investor.available_balance_cents,8985075)
+        self.assertEqual(self.db.query(InvestmentPlan).count(),1)
+        self.assertEqual(self.plan.principal,60000)
+        self.assertEqual(self.plan.status,"completed")
+        data=dict(investor_id=self.investor.id,principal=89850.75,plan_type="monthly",monthly_rate_percent=2,
+                  savings_rate_percent=0,manager_fee_percent=0,manager_savings_rate_percent=0,
+                  start_date=date(2026,10,1),duration_months=12)
+        new=wallet.fund_plan(self.db,data,0,"after-standalone-deposit",self.admin.id); self.db.commit()
+        self.assertEqual(new.principal,89850.75)
+        self.assertEqual(self.investor.available_balance_cents,0)
+        self.assertEqual(self.db.query(WalletEntry).filter_by(operation_type="deposit").count(),1)
+
+    def test_standalone_deposit_rejects_invalid_amounts_reused_keys_and_overflow(self):
+        for amount in [0,-1,0.001,float("nan"),float("inf"),20000000.01]:
+            with self.subTest(amount=amount), self.assertRaises(ValueError):
+                wallet.deposit(self.db,self.investor.id,amount,"invalid-deposit",self.admin.id)
+        wallet.deposit(self.db,self.investor.id,10,"unique-deposit",self.admin.id); self.db.commit()
+        with self.assertRaises(ValueError):
+            wallet.deposit(self.db,self.investor.id,11,"unique-deposit",self.admin.id)
+        with self.assertRaises(ValueError):
+            wallet.deposit(self.db,self.admin_investor.id,10,"unique-deposit",self.admin.id)
+        with self.assertRaises(ValueError):
+            wallet.deposit(self.db,self.investor.id,20000000,"overflow-deposit",self.admin.id)
+        self.db.rollback()
+        self.assertEqual(self.investor.available_balance_cents,1000)
+        self.assertEqual(self.db.query(WalletEntry).count(),1)
+
+    def test_standalone_deposit_api_is_admin_only_and_visible_in_owner_history(self):
+        from app.api.v1.investments import router
+        app=FastAPI(); app.include_router(router)
+        app.dependency_overrides[get_investment_db]=lambda:self.db
+        other_investor=Investor(name="Other manager",is_manager=True)
+        self.db.add(other_investor); self.db.flush()
+        other_manager=User(username="other-manager",role="manager",investor_id=other_investor.id)
+        self.db.add(other_manager); self.db.commit()
+        url=f"/api/v1/investments/investors/{self.investor.id}/wallet/deposit"
+        body={"amount":350.25,"operation_key":"api-deposit-key"}
+        with TestClient(app) as client:
+            for actor in [self.user,other_manager]:
+                app.dependency_overrides[get_current_user]=lambda actor=actor:actor
+                self.assertEqual(client.post(url,json=body).status_code,403)
+            self.assertEqual(self.investor.available_balance_cents,0)
+            app.dependency_overrides[get_current_user]=lambda:self.admin
+            first=client.post(url,json=body)
+            self.assertEqual(first.status_code,200,first.text)
+            self.assertEqual(first.json()["balance_after"],350.25)
+            self.assertEqual(client.post(url,json=body).json(),first.json())
+            self.assertEqual(client.post(url,json={**body,"amount":351}).status_code,409)
+            self.assertEqual(client.post(url,json={**body,"amount":0}).status_code,422)
+            self.assertEqual(client.post(url,json={**body,"amount":0.001}).status_code,409)
+            self.assertEqual(client.post("/api/v1/investments/investors/999999/wallet/deposit",json=body).status_code,404)
+            app.dependency_overrides[get_current_user]=lambda:self.user
+            history=client.get(f"/api/v1/investments/investors/{self.investor.id}/wallet").json()
+            self.assertEqual(history["available_balance"],350.25)
+            self.assertEqual(len(history["entries"]),1)
+            self.assertEqual(history["entries"][0]["type"],"deposit")
+            self.assertNotIn("actor_user_id",history["entries"][0])
+            self.assertEqual(client.get(f"/api/v1/investments/investors/{self.admin_investor.id}/wallet").status_code,403)
+
     def test_investor_api_omits_manager_finances_and_cannot_operate_wallet(self):
         from app.api.v1.investments import router
         app=FastAPI(); app.include_router(router)

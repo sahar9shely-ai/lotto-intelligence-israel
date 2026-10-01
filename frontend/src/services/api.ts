@@ -349,6 +349,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
   closePlan: (id: number) => request<Plan>(`/api/v1/investments/plans/${id}/close`, { method: "POST" }),
+  depositBalance: (id: number, amount: number, operationKey: string) => request<{balance_after: number}>(`/api/v1/investments/investors/${id}/wallet/deposit`, {
+    method: "POST", body: JSON.stringify({amount, operation_key: operationKey}),
+  }),
   withdrawBalance: (id: number, amount: number, operationKey: string) => request<{balance_after: number}>(`/api/v1/investments/investors/${id}/wallet/withdraw`, {
     method: "POST", body: JSON.stringify({amount, operation_key: operationKey}),
   }),

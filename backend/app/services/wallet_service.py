@@ -100,6 +100,18 @@ def close_plan(db: Session, plan_id: int, actor_id: int):
     return plan
 
 
+def deposit(db: Session, investor_id: int, amount, operation_key: str, actor_id: int):
+    value = cents(amount)
+    if value <= 0:
+        raise ValueError("סכום התוספת חייב להיות גדול מאפס")
+    investor = lock_investor(db, investor_id)
+    digest = fingerprint({"investor_id": investor_id, "amount_cents": value, "kind": "deposit"})
+    existing = replay(db, operation_key, investor_id, digest)
+    if existing:
+        return existing
+    return movement(db, investor, value, "deposit", operation_key, digest, actor_id)
+
+
 def withdraw(db: Session, investor_id: int, amount, operation_key: str, actor_id: int):
     value = cents(amount)
     if value <= 0:

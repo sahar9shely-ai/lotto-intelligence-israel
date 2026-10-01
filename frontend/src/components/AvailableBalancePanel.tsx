@@ -6,16 +6,33 @@ import { Panel } from "./Panel";
 
 const labels: Record<string, string> = {plan_close: "סגירת מסלול", withdraw: "משיכה", deposit: "תוספת כסף", plan_funding: "פתיחת מסלול"};
 
-export function AvailableBalancePanel({investorId, canManage, onChanged}: {
-  investorId: number; canManage: boolean; onChanged: () => void;
+export function AvailableBalancePanel({investorId, canManage, canDeposit, onChanged}: {
+  investorId: number; canManage: boolean; canDeposit: boolean; onChanged: () => void;
 }) {
   const {data, error, loading, reload} = useAsync(() => api.wallet(investorId), [investorId]);
   const [showWithdrawal, setShowWithdrawal] = useState(false);
+  const [showDeposit, setShowDeposit] = useState(false);
   const [amount, setAmount] = useState("");
   const [requestedOn,setRequestedOn] = useState(new Date().toLocaleDateString("en-CA"));
   const [operationKey, setOperationKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [received, setReceived] = useState(false);
+  function openAction(kind: "deposit" | "withdraw") {
+    setShowDeposit(kind === "deposit"); setShowWithdrawal(kind === "withdraw");
+    setAmount(""); setReceived(false); setFailure(null); setOperationKey(crypto.randomUUID());
+  }
+  async function deposit(e: FormEvent) {
+    e.preventDefault();
+    if (busy || !canDeposit || !received) return;
+    setBusy(true); setFailure(null);
+    try {
+      await api.depositBalance(investorId, Number(amount), operationKey);
+      setOperationKey(crypto.randomUUID()); setShowDeposit(false); setAmount(""); setReceived(false);
+      reload(); onChanged();
+    } catch (err) { setFailure(err instanceof Error ? err.message : "רישום התוספת נכשל"); }
+    finally { setBusy(false); }
+  }
   async function withdraw(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -35,9 +52,18 @@ export function AvailableBalancePanel({investorId, canManage, onChanged}: {
         <em>היתרה אינה צוברת תשואה</em>
       </div></div>
       {canManage ? <div className="page-head__actions">
-        <button type="button" className="btn btn--ghost" disabled={data.available_balance <= 0 || busy} onClick={() => setShowWithdrawal(true)}>משיכה</button>
+        {canDeposit ? <button type="button" className="btn btn--primary" disabled={busy} onClick={() => openAction("deposit")}>תוספת כסף ליתרה</button> : null}
+        <button type="button" className="btn btn--ghost" disabled={data.available_balance <= 0 || busy} onClick={() => openAction("withdraw")}>משיכה</button>
       </div> : null}
       <p className="hint">לפתיחת מסלול השתמשו בכפתור ״מסלול חדש״ בראש תיק המשקיע. כל היתרה שתישאר תיכלל בקרן החדשה.</p>
+      {showDeposit && canDeposit ? <form className="form" aria-label="תוספת כסף ליתרה" onSubmit={deposit}>
+        <label>סכום להוספה ליתרה (₪)<input type="number" min="0.01" max={20000000 - data.available_balance} step="0.01" required value={amount} disabled={busy} onChange={e => {setAmount(e.target.value); setReceived(false); setOperationKey(crypto.randomUUID());}} /></label>
+        <p className="hint">יתרה לאחר התוספת: {formatMoney(data.available_balance + Number(amount || 0))}. התוספת תישמר בהיסטוריה ותהיה זמינה למסלול הבא.</p>
+        <p className="hint">זהו רישום כסף שכבר התקבל. הכסף נשאר ביתרה הזמינה ואינו צובר תשואה עד לפתיחת מסלול חתום.</p>
+        <label><input type="checkbox" required checked={received} disabled={busy} onChange={e => setReceived(e.target.checked)} /> אני מאשר שהכסף התקבל ושסכום התוספת נכון.</label>
+        {failure ? <p role="alert" className="form-error">{failure}</p> : null}
+        <div className="page-head__actions"><button className="btn btn--primary" disabled={busy || !received}>{busy ? "רושם תוספת..." : "אישור רישום תוספת"}</button><button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setShowDeposit(false)}>ביטול</button></div>
+      </form> : null}
       {showWithdrawal ? <form className="form" onSubmit={withdraw}>
         <label>מועד קבלת בקשת המשיכה<input type="date" required max={new Date().toLocaleDateString("en-CA")} value={requestedOn} disabled={busy} onChange={e=>setRequestedOn(e.target.value)}/><span className="hint">יש לתעד את מועד הבקשה בפועל. נדרש חודש מראש לפני משיכת הכספים.</span></label>
         <label>סכום למשיכה (₪)<input type="number" min="0.01" max={data.available_balance} step="0.01" required value={amount} disabled={busy} onChange={e => {setAmount(e.target.value); setOperationKey(crypto.randomUUID());}} /></label>
