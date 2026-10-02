@@ -99,6 +99,7 @@ class FirstPaymentPolicyTests(unittest.TestCase):
         self.assertEqual(dues[0], date(2026, 11, 2)); self.assertEqual(dues[-1], date(2027, 10, 2))
         self.assertEqual(len(dues), 12); self.assertTrue(all(p.investor_amount == 2019 for p in plan.payments))
         self.assertEqual(row.execution_details["first_payment_date"], "2026-11-02")
+        self.assertEqual(svc.serialize_plan(plan)["track_end_date"], date(2027,10,2))
 
     def test_future_start_and_delayed_signature_use_actual_full_month(self):
         row, _ = self.offer(date(2026, 11, 10))

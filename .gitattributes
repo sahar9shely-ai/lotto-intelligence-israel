@@ -1,2 +1,2 @@
 # Tutorial manifests approve exact asset bytes; preserve them across platforms.
-backend/tutorial-media/** -text
+backend/tutorial-media/** -text whitespace=cr-at-eol

@@ -423,7 +423,7 @@ def seed_defaults(db: Session) -> dict:
 
 
 def plan_track_end_date(plan: InvestmentPlan) -> date:
-    """Last calendar month of the track (start + effective duration − 1)."""
+    """Last payment date; preserve the initial-month convention for legacy tracks."""
     duration = plan_effective_duration(plan) or max(plan.duration_months, 1)
     if getattr(plan, "first_payment_date", None) is not None:
         return payment_due_date(plan, max(duration, 1))
