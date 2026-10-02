@@ -970,7 +970,7 @@ export function PaymentsPage() {
             <option value="skipped">דולג / בוטל</option>
           </select>
         </label>
-        <label>
+        <label className="payment-history-toggle">
           <input type="checkbox" checked={showCancellationHistory || allYears || status === "skipped"}
             disabled={allYears || status === "skipped"}
             onChange={(e) => setShowCancellationHistory(e.target.checked)} />
