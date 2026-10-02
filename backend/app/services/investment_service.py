@@ -2132,7 +2132,12 @@ def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
     """Remove an investor, login user, and all related financial history."""
     from app.models.auth import ActivityEvent, LoginAlert, PasswordResetRequest, PasswordResetToken, User
 
-    investor = db.query(Investor).filter(Investor.id == investor_id).first()
+    from app.services.wallet_service import begin_wallet_write
+
+    # Serialize the zero-balance check with wallet credits, including transfers.
+    begin_wallet_write(db)
+    investor = (db.query(Investor).filter(Investor.id == investor_id)
+                .with_for_update().populate_existing().first())
     if not investor:
         raise ValueError("משקיע לא נמצא")
     from app.models.investments import PlanAgreement, PlanNotice
@@ -2145,6 +2150,9 @@ def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
     from app.models.investments import WalletEntry
     db.query(WalletEntry).filter(WalletEntry.investor_id == investor_id).update(
         {"investor_id": None, "plan_id": None}, synchronize_session=False
+    )
+    db.query(WalletEntry).filter(WalletEntry.counterparty_investor_id == investor_id).update(
+        {"counterparty_investor_id": None}, synchronize_session=False
     )
 
     user = db.query(User).filter(User.investor_id == investor_id).first()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, JSON
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.investment_base import InvestmentBase as Base
@@ -79,8 +79,27 @@ class InvestmentPlan(Base):
     )
 
 
+class WalletTransfer(Base):
+    """Immutable receipt; historical IDs survive deletion of an empty investor."""
+
+    __tablename__ = "investor_wallet_transfers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation_key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_investor_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    recipient_investor_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_balance_after_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    recipient_balance_after_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class WalletEntry(Base):
     __tablename__ = "investor_wallet_entries"
+    __table_args__ = (
+        Index("uq_wallet_entries_transfer_direction", "transfer_id", "operation_type", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("investors.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -92,6 +111,10 @@ class WalletEntry(Base):
     balance_after_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    transfer_id: Mapped[Optional[str]] = mapped_column(ForeignKey("investor_wallet_transfers.id"), nullable=True)
+    counterparty_investor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("investors.id", ondelete="SET NULL"), nullable=True)
+    counterparty_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    admin_notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

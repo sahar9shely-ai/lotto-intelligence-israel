@@ -67,6 +67,13 @@ def ensure_schema(engine: Engine) -> None:
 
     for table, additions in {
         "investors": {"available_balance_cents": "INTEGER NOT NULL DEFAULT 0"},
+        "investor_wallet_entries": {
+            # Nullable additions leave all historical ledger entries intact.
+            "transfer_id": "VARCHAR(36) REFERENCES investor_wallet_transfers(id)",
+            "counterparty_investor_id": "INTEGER REFERENCES investors(id) ON DELETE SET NULL",
+            "counterparty_name": "VARCHAR(120)",
+            "admin_notes": "VARCHAR(500)",
+        },
         "investment_plans": {
             "manager_savings_rate_percent": "FLOAT NOT NULL DEFAULT 0",
             "manager_savings_start_date": "DATE",
@@ -81,6 +88,13 @@ def ensure_schema(engine: Engine) -> None:
             for name, definition in additions.items():
                 if name not in columns:
                     _add_column(conn, table, f"{name} {definition}")
+
+    # create_all skips indexes on an already-existing table; cover upgrades too.
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_wallet_entries_transfer_direction "
+            "ON investor_wallet_entries(transfer_id, operation_type)"
+        ))
 
     # Activity / notification stream indexes (create_all covers the table).
     if _table_exists(engine, "activity_events"):

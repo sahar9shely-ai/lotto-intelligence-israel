@@ -115,11 +115,14 @@ class WalletBusinessTests(unittest.TestCase):
         data=dict(investor_id=self.investor.id,principal=1000,plan_type="monthly",monthly_rate_percent=5,
                   savings_rate_percent=0,manager_fee_percent=1,manager_savings_rate_percent=1,
                   start_date=date(2026,10,1),duration_months=12)
-        wallet.fund_plan(self.db,dict(data),1000,"deposit-fund-key",self.admin.id)
+        with patch.object(wallet, "israel_today", return_value=date(2026,10,1)):
+            wallet.fund_plan(self.db,dict(data),1000,"deposit-fund-key",self.admin.id)
         self.db.rollback()
         self.assertEqual(self.db.query(WalletEntry).count(),0)
         self.assertEqual(self.db.query(InvestmentPlan).count(),1)
-        new=wallet.fund_plan(self.db,dict(data),1000,"deposit-fund-key",self.admin.id); self.db.commit()
+        with patch.object(wallet, "israel_today", return_value=date(2026,10,1)):
+            new=wallet.fund_plan(self.db,dict(data),1000,"deposit-fund-key",self.admin.id)
+        self.db.commit()
         self.assertEqual([e.operation_type for e in self.db.query(WalletEntry).order_by(WalletEntry.id)], ["deposit","plan_funding"])
         self.assertEqual(new.manager_savings_start_date,date(2026,10,1))
 

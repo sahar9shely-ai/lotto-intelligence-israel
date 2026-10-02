@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -43,12 +44,12 @@ from app.schemas.investments import (
     TopupRequestOut,
     TopupRequestSign,
 )
-from app.security.auth import get_current_user, is_manager, require_manager, require_system_admin
+from app.security.auth import get_current_user, is_manager, is_system_admin, require_manager, require_system_admin
 from app.services import auth_service as auth_svc
 from app.services import investment_service as svc
 from app.services import wallet_service as wallet_svc
-from sqlalchemy.exc import IntegrityError
-from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError, OperationalError
+from pydantic import BaseModel, Field, StrictBool, StrictInt, field_validator
 
 
 class WalletWithdrawalRequest(BaseModel):
@@ -59,6 +60,29 @@ class WalletWithdrawalRequest(BaseModel):
 class WalletDepositRequest(BaseModel):
     amount: float = Field(gt=0, le=20_000_000, allow_inf_nan=False)
     operation_key: str = Field(min_length=8, max_length=80)
+
+
+class WalletTransferRequest(BaseModel):
+    recipient_investor_id: StrictInt = Field(gt=0)
+    amount: Decimal = Field(gt=0, le=20_000_000, decimal_places=2, allow_inf_nan=False)
+    operation_key: str = Field(min_length=8, max_length=80)
+    request_confirmed: StrictBool
+    expected_source_balance: Decimal = Field(ge=0, le=20_000_000, decimal_places=2, allow_inf_nan=False)
+    notes: str | None = Field(default=None, max_length=500)
+
+    @field_validator("request_confirmed")
+    @classmethod
+    def confirmation_required(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("יש לאשר שהעברת הכספים התבקשה")
+        return value
+
+    @field_validator("operation_key")
+    @classmethod
+    def nonblank_operation_key(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("מזהה הפעולה לא תקין")
+        return value
 
 router = APIRouter(prefix="/api/v1/investments", tags=["investments"])
 
@@ -624,6 +648,37 @@ def withdraw_available_balance(investor_id: int, payload: WalletWithdrawalReques
         raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
 
 
+@router.post("/investors/{source_id}/wallet/transfer")
+def transfer_available_balance(source_id: int, payload: WalletTransferRequest,
+                               user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
+    try:
+        receipt = wallet_svc.transfer(db, source_id, payload.recipient_investor_id, payload.amount,
+                                      payload.operation_key, user.id, request_confirmed=payload.request_confirmed,
+                                      expected_source_balance=payload.expected_source_balance, notes=payload.notes)
+        db.commit()
+        return {"transfer_id": receipt.id, "source_investor_id": receipt.source_investor_id,
+                "recipient_investor_id": receipt.recipient_investor_id, "amount": receipt.amount_cents / 100,
+                "source_balance_after": receipt.source_balance_after_cents / 100,
+                "recipient_balance_after": receipt.recipient_balance_after_cents / 100}
+    except wallet_svc.InvestorNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "מזהה הפעולה כבר שימש. רעננו ונסו שוב") from exc
+    except OperationalError as exc:
+        db.rollback()
+        # SQLite write contention / PostgreSQL retryable transaction conflicts.
+        code = getattr(exc.orig, "sqlite_errorcode", None)
+        sqlstate = getattr(exc.orig, "sqlstate", None)
+        if code in {5, 6, 517} or sqlstate in {"40001", "40P01", "55P03"}:
+            raise HTTPException(status_code=409, detail="היתרה מתעדכנת בפעולה אחרת. רעננו ונסו שוב") from exc
+        raise
+
+
 @router.get("/investors/{investor_id}/wallet")
 def investor_wallet_history(investor_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
     if not is_manager(user) and investor_id != user.investor_id:
@@ -636,7 +691,9 @@ def investor_wallet_history(investor_id: int, user: User = Depends(get_current_u
     return {"available_balance": (investor.available_balance_cents or 0) / 100, "entries": [
         {"id": row.id, "plan_id": row.plan_id, "type": row.operation_type,
          "amount": row.amount_cents / 100, "balance_after": row.balance_after_cents / 100,
-         "created_at": row.created_at} for row in entries
+         "created_at": row.created_at, "transfer_id": row.transfer_id,
+         "counterparty_investor_id": row.counterparty_investor_id, "counterparty_name": row.counterparty_name,
+         **({"notes": row.admin_notes} if is_system_admin(user) else {})} for row in entries
     ]}
 
 

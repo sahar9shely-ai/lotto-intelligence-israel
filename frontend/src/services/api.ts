@@ -22,6 +22,9 @@ import type {
   DocumentVault,
   PlanAgreement,
   ClosingAgreementPreview,
+  AvailableBalance,
+  BalanceTransferRequest,
+  BalanceTransferResult,
 } from "../types/investments";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -355,7 +358,10 @@ export const api = {
   withdrawBalance: (id: number, amount: number, operationKey: string) => request<{balance_after: number}>(`/api/v1/investments/investors/${id}/wallet/withdraw`, {
     method: "POST", body: JSON.stringify({amount, operation_key: operationKey}),
   }),
-  wallet: (id: number) => request<{available_balance: number; entries: {id: number; plan_id: number | null; type: string; amount: number; balance_after: number; created_at: string}[]}>(`/api/v1/investments/investors/${id}/wallet`),
+  transferBalance: (id: number, body: BalanceTransferRequest) => request<BalanceTransferResult>(`/api/v1/investments/investors/${id}/wallet/transfer`, {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  wallet: (id: number) => request<AvailableBalance>(`/api/v1/investments/investors/${id}/wallet`),
   planStatusReport: (id: number, params?: { year?: number }) => {
     const q =
       params?.year != null ? `?year=${encodeURIComponent(String(params.year))}` : "";

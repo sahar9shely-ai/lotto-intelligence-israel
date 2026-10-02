@@ -26,6 +26,42 @@ export type Investor = {
   has_login?: boolean;
 };
 
+export type AvailableBalanceEntry = {
+  id: number;
+  plan_id: number | null;
+  type: string;
+  amount: number;
+  balance_after: number;
+  created_at: string;
+  counterparty_name?: string | null;
+  counterparty_investor_id?: number | null;
+  transfer_id?: string | null;
+  notes?: string | null;
+};
+
+export type AvailableBalance = {
+  available_balance: number;
+  entries: AvailableBalanceEntry[];
+};
+
+export type BalanceTransferRequest = {
+  recipient_investor_id: number;
+  amount: number;
+  operation_key: string;
+  request_confirmed: true;
+  expected_source_balance: number;
+  notes?: string;
+};
+
+export type BalanceTransferResult = {
+  transfer_id: string;
+  source_investor_id: number;
+  recipient_investor_id: number;
+  amount: number;
+  source_balance_after: number;
+  recipient_balance_after: number;
+};
+
 export type VaultDocumentKind = "contract" | "agreement" | "quote" | "monthly" | "yearly";
 
 export type PlanAgreement = {

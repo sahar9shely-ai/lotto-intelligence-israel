@@ -8743,3 +8743,28 @@ body {
   .assistant-panel {bottom:calc(176px + env(safe-area-inset-bottom,0px));max-height:min(58dvh,440px);}
 }
 @media(prefers-reduced-motion:reduce) {.assistant-fab,.assistant-fab:hover,.assistant-fab.is-open {transition:none;transform:none;}}
+
+/* Reviewed internal transfers use the current investor's available balance. */
+.wallet-transfer {margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--panel-strong);}
+.wallet-transfer__source {display:flex;flex-direction:column;gap:4px;padding-bottom:14px;border-bottom:1px solid var(--line);}
+.wallet-transfer__source > span {color:var(--ink-soft);font-size:.85rem;}
+.wallet-transfer__source > strong {font-size:1.15rem;overflow-wrap:anywhere;}
+.wallet-transfer__review {padding:16px;border:1px solid color-mix(in srgb,var(--accent) 25%,var(--line));border-radius:12px;background:var(--accent-soft);}
+.wallet-transfer__review h3 {margin:0 0 14px;font-size:1rem;}
+.wallet-transfer__summary {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:10px 16px;margin:0 0 16px;}
+.wallet-transfer__summary dt {color:var(--ink-soft);font-size:.85rem;}
+.wallet-transfer__summary dd {margin:0;font-weight:600;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;}
+.wallet-transfer .closure-review-check {display:flex;margin-top:14px;padding:0;background:transparent;font-size:.9rem;}
+.wallet-transfer__note,.wallet-transfer__history-note {white-space:pre-wrap;overflow-wrap:anywhere;}
+.wallet-transfer__note {font-size:.85rem;margin:0 0 14px;}
+.wallet-transfer__history-note {display:block;margin-top:5px;color:var(--ink-soft);font-size:.8rem;}
+.wallet-transfer-success {padding:12px 16px;border-radius:12px;background:var(--accent-soft);color:var(--accent-strong);}
+@media(max-width:560px) {
+  .wallet-transfer {padding:14px 12px;}
+  .wallet-transfer .form__grid {grid-template-columns:minmax(0,1fr);}
+  .wallet-transfer__review {padding:14px 12px;}
+  .wallet-transfer__summary {grid-template-columns:minmax(0,1fr);gap:4px;}
+  .wallet-transfer__summary dd {margin-bottom:10px;}
+  .wallet-transfer .page-head__actions {display:flex;flex-wrap:wrap;}
+  .wallet-transfer .page-head__actions .btn {flex:1 1 140px;}
+}
