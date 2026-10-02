@@ -64,16 +64,30 @@ export function UsersPage() {
   const [savingId, setSavingId] = useState<number | "create" | "fulfill" | null>(null);
   const [cardErrors, setCardErrors] = useState<Record<number, string>>({});
   const [formRev, setFormRev] = useState<Record<number, number>>({});
+  const [openEditors, setOpenEditors] = useState<Record<number, boolean>>({});
   const [focusPasswordUserId, setFocusPasswordUserId] = useState<number | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
   const publicUrl = siteStatus?.public_url || window.location.origin;
 
+  function isEditorOpen(user: AuthUser) {
+    return openEditors[user.id] ?? !user.has_password;
+  }
+
+  function toggleUserEditor(user: AuthUser) {
+    const nextOpen = !isEditorOpen(user);
+    setOpenEditors((prev) => ({ ...prev, [user.id]: nextOpen }));
+    if (nextOpen) {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`user-name-${user.id}`)?.focus();
+      });
+    }
+  }
+
   function jumpToUserPassword(userId: number) {
     setFocusPasswordUserId(userId);
+    setOpenEditors((prev) => ({ ...prev, [userId]: true }));
     window.requestAnimationFrame(() => {
       const card = document.getElementById(`user-card-${userId}`);
-      const details = card?.querySelector("details.user-editor");
-      if (details instanceof HTMLDetailsElement) details.open = true;
       const input = document.getElementById(`new-password-${userId}`);
       const target = input ?? card;
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -412,6 +426,17 @@ export function UsersPage() {
         <Panel
           className="user-card"
           title={u.investor_name}
+          action={
+            <button
+              type="button"
+              className="btn btn--small btn--admin"
+              aria-expanded={isEditorOpen(u)}
+              aria-controls={`user-editor-${u.id}`}
+              onClick={() => toggleUserEditor(u)}
+            >
+              {isEditorOpen(u) ? "סגור עריכה" : "עריכה"}
+            </button>
+          }
         >
           <p className="user-card__meta">
             <span>
@@ -431,7 +456,15 @@ export function UsersPage() {
               {cardErrors[u.id]}
             </p>
           ) : null}
-          <details className="user-editor" {...(!u.has_password ? { open: true } : {})}>
+          <details
+            id={`user-editor-${u.id}`}
+            className="user-editor"
+            open={isEditorOpen(u)}
+            onToggle={(e) => {
+              const open = e.currentTarget.open;
+              setOpenEditors((prev) => prev[u.id] === open ? prev : { ...prev, [u.id]: open });
+            }}
+          >
             <summary className="user-editor__summary">
               <span>{u.has_password ? "עריכת פרטים וסיסמה" : "הגדרת סיסמה ופרטים"}</span>
             </summary>
@@ -444,7 +477,7 @@ export function UsersPage() {
               <div className="form__grid">
                 <label>
                   שם
-                  <input name="investor_name" defaultValue={u.investor_name} required autoComplete="off" />
+                  <input id={`user-name-${u.id}`} name="investor_name" defaultValue={u.investor_name} required autoComplete="off" />
                 </label>
                 <label>
                   שם משתמש
