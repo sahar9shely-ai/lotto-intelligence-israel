@@ -75,6 +75,14 @@ export type PlanAgreement = {
   execution_details?: Record<string, string | number | boolean> | null;
 };
 
+export type AgreementSignatureInput = {
+  password: string;
+  typed_name: string;
+  signature_png: string;
+  accepted_terms: boolean;
+  document_hash: string;
+};
+
 export type ClosingAgreementPreview = {
   kind: "close";
   snapshot: PlanAgreement["snapshot"];

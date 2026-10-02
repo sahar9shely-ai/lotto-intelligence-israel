@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Panel } from "./Panel";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
@@ -7,8 +8,10 @@ import { agreementLabel, agreementValue, agreementPdfFile, visibleAgreementEntri
 import { formatDate } from "../utils/format";
 import { savePdfBlob } from "../utils/pdfDocument";
 import { DateAmendmentAction } from "./DateAmendmentAction";
+import { useAuth } from "../context/AuthContext";
+import { isAgreementExpired } from "../utils/agreementSigning";
 
-export function AgreementContent({row}: {row: Pick<PlanAgreement, "snapshot" | "kind"> & Partial<Pick<PlanAgreement, "id" | "created_at" | "signed_at" | "signed_name" | "signature_png" | "execution_details">>}) {
+export function AgreementContent({row}: {row: Pick<PlanAgreement, "snapshot" | "kind"> & Partial<Pick<PlanAgreement, "id" | "created_at" | "signed_at" | "signed_name" | "signature_png" | "execution_details" | "status">>}) {
   return <div className="agreement-document"><h2>{row.snapshot.title}{row.id ? ` · ${row.id}` : " · תצוגה מקדימה"}</h2>
     <p>בין {row.snapshot.manager_name} לבין {row.snapshot.investor_name}</p>
     <p className="hint">{row.snapshot.terms.closing_purpose === "renew" ? "יוזמת סיום" : "מועד הבקשה"}: {formatDate(row.snapshot.notice_requested_on)}{row.created_at ? ` · הופק ${formatDate(row.created_at)}` : ""}</p>
@@ -16,7 +19,7 @@ export function AgreementContent({row}: {row: Pick<PlanAgreement, "snapshot" | "
     {row.snapshot.amendment_notes || row.snapshot.replacement_notes ? <p>הערה להסכם: {row.snapshot.amendment_notes || row.snapshot.replacement_notes}</p> : null}
     <dl className="plan-opening-summary">{visibleAgreementEntries(row.snapshot.terms).map(([key,value])=><div key={key} style={{display:"contents"}}><dt>{agreementLabel(key,row.kind)}</dt><dd>{agreementValue(key,value)}</dd></div>)}</dl>
     <ol className="agreement-clauses">{row.snapshot.clauses.map((text,i)=><li key={i}>{text}</li>)}</ol>
-    {row.signed_at ? <div className="agreement-receipt"><strong>נחתם על ידי {row.signed_name} · {formatDate(row.signed_at)}</strong><img alt="חתימת המשקיע" src={row.signature_png || ""}/></div> : <p className="hint">{row.id ? "המסמך ממתין לחתימת המשקיע. הכנתו אינה מבצעת פעולה כספית." : "תצוגה מקדימה בלבד. טרם נוצר הסכם לחתימה ולא בוצעה פעולה כספית."}</p>}
+    {row.signed_at ? <div className="agreement-receipt"><strong>נחתם על ידי {row.signed_name} · {formatDate(row.signed_at)}</strong><img alt="חתימת המשקיע" src={row.signature_png || ""}/></div> : <p className="hint">{row.status === "cancelled" ? "מסמך זה בוטל ואינו זמין לחתימה." : row.id ? "המסמך ממתין לחתימת המשקיע. הכנתו אינה מבצעת פעולה כספית." : "תצוגה מקדימה בלבד. טרם נוצר הסכם לחתימה ולא בוצעה פעולה כספית."}</p>}
     {row.execution_details ? <><h3>רישום ביצוע לפי ההסכם</h3><dl className="plan-opening-summary">{visibleAgreementEntries(row.execution_details).map(([k,v])=><div key={k} style={{display:"contents"}}><dt>{agreementLabel(k,row.kind,true)}</dt><dd>{agreementValue(k,v)}</dd></div>)}</dl></>:null}
   </div>;
 }
@@ -58,6 +61,8 @@ export function NoticePanel({investorId}: {investorId: number}) {
 export function AgreementPanel({rows,loading,error,canManage,canManageClosing=false,phone,onChanged}: {
   rows:PlanAgreement[];loading:boolean;error?:string|null;canManage:boolean;canManageClosing?:boolean;phone?:string|null;onChanged:()=>void;
 }) {
+  const {user}=useAuth();
+  const ownsAgreement=(row:PlanAgreement)=>Boolean(user&&!user.is_manager&&row.investor_id===user.investor_id);
   const [selected,setSelected]=useState<PlanAgreement|null>(null);const [year,setYear]=useState("");
   const [planFilter,setPlanFilter]=useState("");const [status,setStatus]=useState("pending");
   const [failure,setFailure]=useState("");const [busyId,setBusyId]=useState<number|null>(null);
@@ -72,14 +77,15 @@ export function AgreementPanel({rows,loading,error,canManage,canManageClosing=fa
     </div>
     {failure||error?<p role="alert">{failure||error}<button className="btn btn--ghost btn--small" onClick={onChanged}>נסה שוב</button></p>:null}
     {loading?<p role="status">טוען הסכמים...</p>:visible.map(row=><article key={row.id} className="agreement-history-row">
-      <div><strong>{row.snapshot.title} · {row.plan_id?`מסלול #${row.plan_id}`:"מסלול שטרם הופעל"}</strong><p className="hint">{formatDate(row.created_at)} · {row.status==="signed"?"חתום ובוצע":row.status==="cancelled"?"בוטל":"ממתין לחתימה"}</p></div>
-      <button className="btn btn--ghost" onClick={()=>setSelected(row)}>{row.status==="pending"?"מסמך וקישור לחתימה":"צפייה במסמך"}</button>
+      <div><strong>{row.snapshot.title} · {row.plan_id?`מסלול #${row.plan_id}`:"מסלול שטרם הופעל"}</strong><p className="hint">{formatDate(row.created_at)} · {row.status==="signed"?"חתום ובוצע":row.status==="cancelled"?"בוטל":isAgreementExpired(row)?"פג תוקף לחתימה":"ממתין לחתימה"}</p></div>
+      <button className="btn btn--ghost" onClick={()=>setSelected(row)}>{canManage&&row.status==="pending"?"מסמך וקישור לחתימה":"צפייה במסמך"}</button>
+      {ownsAgreement(row)&&row.status==="pending"&&!isAgreementExpired(row)?<Link className="btn btn--primary" to={`/agreements/${row.id}/sign`}>קריאת ההסכם וחתימה</Link>:null}
       {canManageClosing && row.kind === "open" && row.status === "pending" ? <DateAmendmentAction mode="pending" sourceId={row.id} sourceName={row.snapshot.investor_name} currentStart={String(row.snapshot.terms.start_date || "")} sourceVersion={row.document_hash} canManage={canManageClosing} onPrepared={replacement => {setSelected(replacement); onChanged();}}/> : null}
       {canManage&&(row.kind==="open"||canManageClosing)&&row.status==="pending"?<button className="btn btn--ghost" disabled={busyId!==null} onClick={async()=>{
         setBusyId(row.id);setFailure("");try{await api.cancelAgreement(row.id);setSelected(null);onChanged();}catch(e){setFailure(e instanceof Error?e.message:"ביטול נכשל");}finally{setBusyId(null);}
       }}>{busyId===row.id?"מבטל...":"ביטול טיוטה"}</button>:null}
     </article>)}
     {!loading&&!visible.length&&!error?<p className="empty">{status==="pending"?"אין הסכמים הממתינים לחתימה. לצפייה בהסכמים קודמים שנו את מצב ההסכם למעלה.":"אין הסכמים התואמים לסינון."}</p>:null}
-    {selected?<div className="modal" role="dialog" aria-modal="true" aria-label={`הסכם ${selected.id}`}><button className="modal__backdrop" aria-label="סגירה" onClick={()=>setSelected(null)}/><div className="modal__sheet"><header className="modal__head"><h2>הסכם {selected.id}</h2><button className="btn btn--ghost" onClick={()=>setSelected(null)}>סגירה</button></header><div className="modal__body"><AgreementContent row={selected}/>{canManage&&(selected.kind==="open"||canManageClosing)&&selected.status==="pending"?<AgreementShare row={selected} phone={phone}/>:null}</div><div className="modal__actions"><button className="btn btn--primary" onClick={async()=>{try{const f=await agreementPdfFile(selected);savePdfBlob(f,f.name);}catch(e){setFailure(e instanceof Error?e.message:"הפקת המסמך נכשלה");}}}>הורדת PDF</button></div></div></div>:null}
+    {selected&&(user?.is_manager||ownsAgreement(selected))?<div className="modal" role="dialog" aria-modal="true" aria-label={`הסכם ${selected.id}`}><button className="modal__backdrop" aria-label="סגירה" onClick={()=>setSelected(null)}/><div className="modal__sheet"><header className="modal__head"><h2>הסכם {selected.id}</h2><button className="btn btn--ghost" onClick={()=>setSelected(null)}>סגירה</button></header><div className="modal__body"><AgreementContent row={selected}/>{canManage&&(selected.kind==="open"||canManageClosing)&&selected.status==="pending"?<AgreementShare row={selected} phone={phone}/>:null}</div><div className="modal__actions">{ownsAgreement(selected)&&selected.status==="pending"&&!isAgreementExpired(selected)?<Link className="btn btn--primary" to={`/agreements/${selected.id}/sign`}>קריאת ההסכם וחתימה</Link>:null}<button className="btn btn--ghost" onClick={async()=>{try{const f=await agreementPdfFile(selected);savePdfBlob(f,f.name);}catch(e){setFailure(e instanceof Error?e.message:"הפקת המסמך נכשלה");}}}>הורדת PDF</button></div></div></div>:null}
   </Panel>;
 }

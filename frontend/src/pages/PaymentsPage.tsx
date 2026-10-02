@@ -22,6 +22,7 @@ import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
 import { downloadYearlyPaymentsPdf } from "../utils/paymentsPdf";
 import { planTypeLabel } from "../utils/planTypes";
 import { isAdminShellInvestor } from "../utils/roles";
+import { buildPaymentDisplayRows, isClosedPaymentPlan } from "../utils/paymentDisplay";
 import {
   hasPaymentsFocus,
   parsePaymentsFocusSearch,
@@ -114,6 +115,7 @@ export function PaymentsPage() {
   const [focusPaymentId, setFocusPaymentId] = useState<number | null>(incomingFocus.paymentId);
   const [focusMonth, setFocusMonth] = useState<string | null>(incomingFocus.month);
   const [allYears, setAllYears] = useState(false);
+  const [showCancellationHistory, setShowCancellationHistory] = useState(false);
   const appliedSearchRef = useRef<string | null>(null);
   const scrolledFocusRef = useRef("");
   const [detailFocus, setDetailFocus] = useState<DetailFocus | null>(null);
@@ -207,6 +209,19 @@ export function PaymentsPage() {
       a.due_date === b.due_date ? a.id - b.id : a.due_date < b.due_date ? -1 : 1,
     );
   }, [data]);
+
+  const displayedRows = useMemo(() => buildPaymentDisplayRows(payments, plans ?? [], {
+    year: allYears ? undefined : year,
+    investorId: investorFilter ?? (!isManager ? user?.investor_id ?? undefined : undefined),
+    status,
+    showCancelled: showCancellationHistory || allYears || status === "skipped",
+  }), [payments, plans, allYears, year, investorFilter, isManager, user?.investor_id, status, showCancellationHistory]);
+  const closedPlanIds = useMemo(() => new Set((plans ?? []).filter(isClosedPaymentPlan).map((p) => p.id)), [plans]);
+
+  function paymentDisplayStatus(payment: (typeof payments)[number]) {
+    return payment.status === "skipped" && closedPlanIds.has(payment.plan_id)
+      ? "בוטל בסיום המסלול" : statusLabel(payment.status);
+  }
 
   const yearScopePayments = (yearAll ?? []).filter(
     (p) => !investorFilter || p.investor_id === investorFilter,
@@ -952,8 +967,14 @@ export function PaymentsPage() {
             <option value="scheduled">מתוכנן</option>
             <option value="awaiting_confirmation">ממתין לאישור</option>
             <option value="paid">בוצע</option>
-            <option value="skipped">דולג</option>
+            <option value="skipped">דולג / בוטל</option>
           </select>
+        </label>
+        <label>
+          <input type="checkbox" checked={showCancellationHistory || allYears || status === "skipped"}
+            disabled={allYears || status === "skipped"}
+            onChange={(e) => setShowCancellationHistory(e.target.checked)} />
+          הצגת היסטוריית ביטולים
         </label>
         {isManager ? (
           <label>
@@ -1403,9 +1424,12 @@ export function PaymentsPage() {
                 {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)}
                 {" · "}
                 {formatCalendarMonth(p.start_date)} →{" "}
-                {formatCalendarMonth(planTrackEnd(p))} ({p.duration_months} ח׳)
+                {p.closed_on ? `סיום בפועל ${formatDate(p.closed_on)}` : `${formatCalendarMonth(planTrackEnd(p))} (${p.duration_months} ח׳ מוסכמים)`}
               </h3>
-              <PlanStatusReportPanel planId={p.id} />
+              {isClosedPaymentPlan(p) ? <details>
+                <summary>היסטוריית מסלול #{p.id}{p.closed_on ? ` · הסתיים ב־${formatDate(p.closed_on)}` : " · סגור"}</summary>
+                <PlanStatusReportPanel planId={p.id} />
+              </details> : <PlanStatusReportPanel planId={p.id} />}
             </div>
           ))}
         </Panel>
@@ -1447,7 +1471,7 @@ export function PaymentsPage() {
         }
       >
         {frozenYearBatch && isManager && !allYears ? <p className="hint" role="status">שליחה לכל השנה ממתינה לחתימה או לביטול הסכם עדכון מועדים. ניתן לשלוח בנפרד תשלומים ממסלולים אחרים.</p> : null}
-        {payments.length === 0 ? (
+        {displayedRows.length === 0 ? (
           <div className="empty-block">
             <p className="empty">
               {detailFocus
@@ -1502,7 +1526,18 @@ export function PaymentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {payments.map((p) => (
+                {displayedRows.map((row) => {
+                  if (row.kind === "closure") return (
+                  <tr key={`closure-${row.plan.id}`} className="payment-row" data-payment-month={row.date.slice(0, 7)} data-investor-id={row.plan.investor_id}>
+                    {isManager ? <td>{row.plan.investor_name}</td> : null}
+                    {allYears ? <td>{row.date.slice(0, 4)}</td> : null}
+                    <td>{formatCalendarMonth(row.date)}</td><td>{formatDate(row.date)}</td>
+                    <td>—</td>{isManager ? <td>—</td> : null}
+                    <td><strong>סיום מסלול #{row.plan.id}</strong></td><td />
+                  </tr>
+                  );
+                  const p = row.payment;
+                  return (
                   <tr
                     key={p.id}
                     className="payment-row"
@@ -1537,17 +1572,28 @@ export function PaymentsPage() {
                       </td>
                     ) : null}
                     <td>
-                      <span className={`badge badge--${p.status}`}>{statusLabel(p.status)}</span>
+                      <span className={`badge badge--${p.status}`}>{paymentDisplayStatus(p)}</span>
                       {p.date_amendment_pending ? <p className="hint">ממתין לחתימת הסכם עדכון מועדים</p> : null}
                     </td>
                     <td className="table__actions">{paymentRowActions(p)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
           <ul className="pay-cards">
-            {payments.map((p) => (
+            {displayedRows.map((row) => {
+              if (row.kind === "closure") return (
+              <li key={`closure-card-${row.plan.id}`} className="pay-card" data-payment-month={row.date.slice(0, 7)} data-investor-id={row.plan.investor_id}>
+                <div className="pay-card__top"><div><strong className="pay-card__title">סיום מסלול #{row.plan.id}</strong>
+                  <span className="muted">{isManager ? `${row.plan.investor_name} · ` : ""}{formatCalendarMonth(row.date)} · {formatDate(row.date)}</span>
+                </div></div>
+                <p className="hint">המסלול נסגר בתאריך זה. תשלומים שבוטלו נשמרים בהיסטוריית הביטולים.</p>
+              </li>
+              );
+              const p = row.payment;
+              return (
               <li
                 key={`card-${p.id}`}
                 className={`pay-card pay-card--${p.status}`}
@@ -1566,7 +1612,7 @@ export function PaymentsPage() {
                         : formatDate(p.due_date)}
                     </span>
                   </div>
-                  <span className={`badge badge--${p.status}`}>{statusLabel(p.status)}</span>
+                  <span className={`badge badge--${p.status}`}>{paymentDisplayStatus(p)}</span>
                 </div>
                 <div className="pay-card__amount">
                   <span>{isManager ? "סכום למשקיע" : "הסכום שלך"}</span>
@@ -1576,7 +1622,8 @@ export function PaymentsPage() {
                 {p.date_amendment_pending ? <p className="hint">התשלום ממתין לחתימת הסכם עדכון מועדי המסלול. הפעולות ייפתחו לאחר חתימה או ביטול ההסכם.</p> : null}
                 <div className="pay-card__actions">{paymentRowActions(p)}</div>
               </li>
-            ))}
+              );
+            })}
           </ul>
           </>
         )}

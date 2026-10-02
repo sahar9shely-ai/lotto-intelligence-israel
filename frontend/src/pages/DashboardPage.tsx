@@ -5,6 +5,7 @@ import { InvestorHeroCard } from "../components/InvestorHeroCard";
 import { ManagerIncomePanel } from "../components/ManagerIncomePanel";
 import { Panel } from "../components/Panel";
 import { PaymentCeremonyCard } from "../components/PaymentCeremonyCard";
+import { PendingAgreementsPanel } from "../components/PendingAgreementsPanel";
 import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Stat } from "../components/Stat";
 import { Toast } from "../components/Toast";
@@ -136,6 +137,7 @@ export function DashboardPage() {
   return (
     <div className={`page${!isManager ? " page--investor-home" : ""}`}>
       <Toast message={dashMessage} onClear={() => setDashMessage(null)} />
+      {!isManager ? <PendingAgreementsPanel /> : null}
       {isManager ? (
         <ScrollReveal>
           <header className={`page-intro${isAdmin ? " page-intro--admin" : ""}`}>

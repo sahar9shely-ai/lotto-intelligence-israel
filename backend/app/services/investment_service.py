@@ -1429,20 +1429,27 @@ def build_plan_status_report(
     cumulative_cash = 0.0
     for month in range(1, duration + 1):
         payment = payments_by_month.get(month)
-        cash = float(payment.investor_amount) if payment is not None else cash_monthly
-        if kind == "savings":
-            cash = 0.0 if payment is None else float(payment.investor_amount or 0)
-        cumulative_cash = round(cumulative_cash + cash, 2)
-        sav = savings_rows.get(month) or {
-            "savings_accrual": 0.0,
-            "cumulative_savings": 0.0,
-            "compounded": False,
-        }
         due = (
             payment.due_date
             if payment is not None and payment.due_date is not None
             else payment_due_date(plan, month)
         )
+        status = payment.status if payment is not None else (
+            "skipped" if plan.closed_on and due > plan.closed_on else "scheduled"
+        )
+        cash = float(payment.investor_amount) if payment is not None else cash_monthly
+        if payment is None and status == "skipped":
+            cash = 0.0
+        if kind == "savings":
+            cash = 0.0 if payment is None else float(payment.investor_amount or 0)
+        # Cancelled payments remain in history but never increase payable cash.
+        if status != "skipped":
+            cumulative_cash = round(cumulative_cash + cash, 2)
+        sav = savings_rows.get(month) or {
+            "savings_accrual": 0.0,
+            "cumulative_savings": 0.0,
+            "compounded": False,
+        }
         if year is not None and due.year != year:
             continue
         months.append(
@@ -1452,12 +1459,12 @@ def build_plan_status_report(
                 "cash_amount": cash,
                 "manager_amount": float(payment.manager_amount)
                 if payment is not None
-                else manager_monthly,
+                else (0.0 if status == "skipped" else manager_monthly),
                 "savings_accrual": sav["savings_accrual"],
                 "cumulative_cash": cumulative_cash,
                 "cumulative_savings": sav["cumulative_savings"],
                 "compounded": sav["compounded"],
-                "status": payment.status if payment is not None else "scheduled",
+                "status": status,
                 "payment_id": payment.id if payment is not None else None,
             }
         )
@@ -1868,10 +1875,11 @@ def _payment_totals(payments: list[Payment]) -> dict:
     scheduled = [p for p in payments if p.status == "scheduled"]
     awaiting = [p for p in payments if p.status == "awaiting_confirmation"]
     skipped = [p for p in payments if p.status == "skipped"]
+    payable = [p for p in payments if p.status != "skipped"]
     return {
-        "planned_investor": round(sum(p.investor_amount for p in payments), 2),
+        "planned_investor": round(sum(p.investor_amount for p in payable), 2),
         "paid_investor": round(sum(p.investor_amount for p in paid), 2),
-        "planned_manager": round(sum(p.manager_amount for p in payments), 2),
+        "planned_manager": round(sum(p.manager_amount for p in payable), 2),
         "paid_manager": round(sum(p.manager_amount for p in paid), 2),
         "paid_count": len(paid),
         "scheduled_count": len(scheduled),

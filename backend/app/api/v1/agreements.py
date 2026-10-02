@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import date, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.db.investment_session import get_investment_db
@@ -51,12 +51,16 @@ class TokenInput(BaseModel):
     token: str = Field(min_length=40, max_length=100)
 
 
-class SigningInput(TokenInput):
+class AuthenticatedSigningInput(BaseModel):
     password: str = Field(min_length=1, max_length=128)
     typed_name: str = Field(min_length=2, max_length=80)
     signature_png: str = Field(max_length=500000)
     accepted_terms: bool
     document_hash: str = Field(min_length=64, max_length=64)
+
+
+class SigningInput(AuthenticatedSigningInput):
+    token: str = Field(min_length=40, max_length=100)
 
 
 def fail(db, exc):
@@ -220,6 +224,47 @@ def public_enabled():
         raise HTTPException(status_code=503, detail="המערכת בעדכון. החתימה תהיה זמינה לאחר סיום התחזוקה")
 
 
+@router.post("/agreements/{agreement_id}/sign")
+def authenticated_sign(agreement_id: int, payload: AuthenticatedSigningInput,
+                        user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
+    public_enabled()
+    if not user.is_active or is_manager(user) or user.investor_id is None:
+        raise HTTPException(status_code=403, detail="חתימה זמינה רק למשקיע המחובר לתיק שלו")
+    row = db.get(PlanAgreement, agreement_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="המסמך לא נמצא")
+    if row.investor_id != user.investor_id:
+        raise HTTPException(status_code=403, detail="ניתן לחתום רק על הסכם בתיק שלך")
+    try:
+        svc.wallet.begin_wallet_write(db)
+        svc.wallet.lock_investor(db, row.investor_id)
+        row = db.query(PlanAgreement).filter(PlanAgreement.id == row.id).with_for_update().populate_existing().one()
+        # Authenticate the session identity itself, never an arbitrary account
+        # selected by investor_id. Refresh after waiting for financial locks.
+        signer = db.query(User).options(joinedload(User.investor)).filter(User.id == user.id).populate_existing().first()
+        if not signer or not signer.is_active or is_manager(signer) or signer.investor_id != row.investor_id:
+            db.rollback()
+            raise HTTPException(status_code=403, detail="ניתן לחתום רק מתוך חשבון המשקיע הפעיל של התיק")
+        if row.status not in {"pending", "signed"} or row.expires_at.replace(tzinfo=timezone.utc) < svc.utcnow():
+            raise ValueError("המסמך בוטל או פג תוקפו. יש לבקש הסכם עדכני מהמנהל")
+        if row.failed_attempts >= 5:
+            db.rollback()
+            raise HTTPException(status_code=429, detail="החתימה ננעלה לאחר ניסיונות אימות. יש לפנות למנהל")
+        if not verify_password(payload.password, signer.password_hash):
+            row.failed_attempts += 1
+            db.commit()
+            raise HTTPException(status_code=403, detail="סיסמת המשקיע אינה תקינה")
+        already_signed = row.status == "signed"
+        result = svc.sign(db, row, name=payload.typed_name, signature=payload.signature_png,
+                          accepted=payload.accepted_terms, document_hash=payload.document_hash)
+        if not already_signed:
+            result.signer_user_id = signer.id
+        db.commit()
+        return svc.serialize(result)
+    except (ValueError, IntegrityError) as exc:
+        fail(db, exc)
+
+
 @router.post("/agreement-public/read")
 def public_read(payload: TokenInput, db: Session = Depends(get_investment_db)):
     public_enabled()
@@ -234,6 +279,7 @@ def public_sign(payload: SigningInput, db: Session = Depends(get_investment_db))
     public_enabled()
     try:
         row = svc.by_token(db, payload.token)
+        svc.wallet.begin_wallet_write(db)
         svc.wallet.lock_investor(db, row.investor_id)
         row = db.query(PlanAgreement).filter(PlanAgreement.id == row.id).with_for_update().populate_existing().one()
         import hashlib
@@ -246,9 +292,11 @@ def public_sign(payload: SigningInput, db: Session = Depends(get_investment_db))
             row.failed_attempts += 1
             db.commit()
             raise HTTPException(status_code=403, detail="סיסמת המשקיע אינה תקינה")
+        already_signed = row.status == "signed"
         result = svc.sign(db, row, name=payload.typed_name, signature=payload.signature_png,
                           accepted=payload.accepted_terms, document_hash=payload.document_hash)
-        result.signer_user_id = signer.id
+        if not already_signed:
+            result.signer_user_id = signer.id
         db.commit()
         return svc.serialize(result)
     except (ValueError, IntegrityError) as exc:

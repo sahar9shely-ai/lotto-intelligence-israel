@@ -7,6 +7,7 @@ import { WelcomeSplash } from "./components/WelcomeSplash";
 import { AuthProvider } from "./context/AuthContext";
 import { ActivityPage } from "./pages/ActivityPage";
 import { AgreementSigningPage } from "./pages/AgreementSigningPage";
+import { AuthenticatedAgreementSigningPage } from "./pages/AuthenticatedAgreementSigningPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
@@ -58,6 +59,7 @@ function AnimatedRoutes() {
           <Route path="change-password" element={<ChangePasswordPage />} />
           <Route element={<AppShell />}>
             <Route index element={<DashboardPage />} />
+            <Route path="agreements/:id/sign" element={<AuthenticatedAgreementSigningPage />} />
             <Route path="investors" element={<InvestorsPage />} />
             <Route path="payments" element={<PaymentsPage />} />
             <Route path="documents" element={<DocumentsRedirect />} />
