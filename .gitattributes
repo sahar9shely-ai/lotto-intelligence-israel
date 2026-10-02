@@ -1,0 +1,2 @@
+# Tutorial manifests approve exact asset bytes; preserve them across platforms.
+backend/tutorial-media/** -text

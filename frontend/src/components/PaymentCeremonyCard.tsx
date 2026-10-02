@@ -23,11 +23,12 @@ export function PaymentCeremonyCard({
             <p className="payment-ceremony__month">{formatCalendarMonth(p.due_date)}</p>
             <p className="payment-ceremony__amount">{formatMoney(p.investor_amount)}</p>
             <p className="payment-ceremony__date">מועד {formatDate(p.due_date)}</p>
+            {p.date_amendment_pending ? <p className="hint" role="status">התשלום ממתין לחתימת הסכם עדכון מועדי המסלול. ניתן לאשר אותו לאחר החתימה או ביטול ההסכם.</p> : null}
             <div className="payment-ceremony__actions">
               <button
                 type="button"
                 className="btn btn--gold"
-                disabled={busyId === p.id}
+                disabled={busyId === p.id || p.date_amendment_pending}
                 onClick={() => onReceived(p.id)}
               >
                 {busyId === p.id ? "רושם..." : "קיבלתי את ההעברה"}
@@ -35,7 +36,7 @@ export function PaymentCeremonyCard({
               <button
                 type="button"
                 className="btn btn--ghost"
-                disabled={busyId === p.id}
+                disabled={busyId === p.id || p.date_amendment_pending}
                 onClick={() => onNotYet(p.id)}
               >
                 עדיין לא הגיע

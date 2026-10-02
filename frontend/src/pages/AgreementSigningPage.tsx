@@ -15,12 +15,12 @@ export function AgreementSigningPage(){
   return <main className="page agreement-signing" dir="rtl"><header><h1>תזרים · אישור הסכם</h1><p>קישור אישי למשקיע בלבד. יש לקרוא את כל התנאים לפני החתימה.</p></header>
     {error ? <p role="alert" className="form-error">{error}</p>:null}
     {!row && !error ? <p role="status">טוען הסכם...</p>:null}
-    {row ? <><AgreementContent row={row}/>{row.status==="signed" ? <p role="status" className="agreement-success">ההסכם נחתם ונשמר בתיק המסמכים שלך. {row.kind==="close" ? "המסלול נסגר והסכום נזקף ליתרה הזמינה." : "המסלול נפתח בהתאם לתנאים המוסכמים."}</p> : <form onSubmit={e=>{e.preventDefault();void sign();}}>
+    {row ? <><AgreementContent row={row}/>{row.status==="signed" ? <p role="status" className="agreement-success">ההסכם נחתם ונשמר בתיק המסמכים שלך. {row.kind==="close" ? "המסלול נסגר והסכום נזקף ליתרה הזמינה." : row.kind === "amend_dates" ? "מועדי המסלול הקיים עודכנו לפי ההסכם. לא נפתח מסלול נוסף." : "המסלול נפתח בהתאם לתנאים המוסכמים."}</p> : <form onSubmit={e=>{e.preventDefault();void sign();}}>
       <label>שם מלא של המשקיע<input required minLength={2} maxLength={80} value={name} onChange={e=>setName(e.target.value)} disabled={busy}/></label>
       <label>סיסמת החשבון שלך<input type="password" required autoComplete="current-password" maxLength={128} value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/><span className="hint">האימות משייך את החתימה לחשבון המשקיע. הסיסמה אינה נשמרת במסמך.</span></label>
       <SignaturePad onChange={setPng} disabled={busy}/>
       <label className="agreement-consent"><input type="checkbox" checked={accepted} onChange={e=>setAccepted(e.target.checked)} disabled={busy}/>אני המשקיע הנקוב בהסכם; קראתי את התנאים והסכומים, אני מאשר אותם וחותם מרצוני.</label>
-      <button className="btn btn--primary" disabled={busy || !png || !accepted || name.trim().length<2}>{busy ? "שומר חתימה..." : row.kind==="close" ? "חתימה ואישור סיום המסלול" : "חתימה ואישור פתיחת המסלול"}</button>
+      <button className="btn btn--primary" disabled={busy || !png || !accepted || name.trim().length<2}>{busy ? "שומר חתימה..." : row.kind==="close" ? "חתימה ואישור סיום המסלול" : row.kind === "amend_dates" ? "חתימה ואישור עדכון מועדי המסלול" : "חתימה ואישור פתיחת המסלול"}</button>
     </form>}
     <button className="btn btn--ghost" onClick={async()=>{try{const f=await agreementPdfFile(row);savePdfBlob(f,f.name);}catch(e){setError(e instanceof Error?e.message:"הפקת המסמך נכשלה");}}}>הורדת עותק PDF</button></>:null}
   </main>;

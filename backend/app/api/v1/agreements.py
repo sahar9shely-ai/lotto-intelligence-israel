@@ -12,6 +12,7 @@ from app.models.investments import Investor, InvestmentPlan, PlanAgreement, Plan
 from app.schemas.investments import PlanCreate
 from app.security.auth import get_current_user, is_manager, is_system_admin, require_manager, require_system_admin, verify_password
 from app.services import agreement_service as svc
+from app.services import agreement_amendment_service as amendments
 
 router = APIRouter(prefix="/api/v1/investments", tags=["agreements"])
 
@@ -34,6 +35,16 @@ class ClosingInput(BaseModel):
 class ClosingPreviewInput(BaseModel):
     requested_on: date
     purpose: str = Field(default="withdraw", pattern="^(withdraw|renew)$")
+
+
+class DateAmendmentInput(BaseModel):
+    start_date: date
+    first_payment_date: date | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class ReviewedDateAmendmentInput(DateAmendmentInput):
+    reviewed_document_hash: str = Field(min_length=64, max_length=64)
 
 
 class TokenInput(BaseModel):
@@ -83,6 +94,46 @@ def opening(payload: OpeningInput, user: User = Depends(require_manager), db: Se
     try:
         row, token = svc.issue(db, investor_id=payload.investor_id, kind="open", actor_id=user.id, notice_id=payload.notice_id,
                                data=payload.model_dump(exclude={"notice_id"}))
+        db.commit()
+        return {**svc.serialize(row), "token": token}
+    except (ValueError, IntegrityError) as exc:
+        fail(db, exc)
+
+
+@router.post("/plans/{plan_id}/date-amendment-preview")
+def date_amendment_preview(plan_id: int, payload: DateAmendmentInput,
+                           user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
+    try:
+        return amendments.date_amendment_preview(db, plan_id, payload.start_date, payload.first_payment_date, payload.notes)
+    except (ValueError, IntegrityError) as exc:
+        fail(db, exc)
+
+
+@router.post("/plans/{plan_id}/date-amendment", status_code=201)
+def date_amendment(plan_id: int, payload: ReviewedDateAmendmentInput,
+                   user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
+    try:
+        row, token = amendments.issue_date_amendment(db, plan_id, actor_id=user.id, **payload.model_dump())
+        db.commit()
+        return {**svc.serialize(row), "token": token}
+    except (ValueError, IntegrityError) as exc:
+        fail(db, exc)
+
+
+@router.post("/agreements/{agreement_id}/replacement-preview")
+def opening_replacement_preview(agreement_id: int, payload: DateAmendmentInput,
+                                 user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
+    try:
+        return amendments.opening_replacement_preview(db, agreement_id, payload.start_date, payload.first_payment_date, payload.notes)
+    except (ValueError, IntegrityError) as exc:
+        fail(db, exc)
+
+
+@router.post("/agreements/{agreement_id}/replacement", status_code=201)
+def opening_replacement(agreement_id: int, payload: ReviewedDateAmendmentInput,
+                         user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
+    try:
+        row, token = amendments.issue_opening_replacement(db, agreement_id, actor_id=user.id, **payload.model_dump())
         db.commit()
         return {**svc.serialize(row), "token": token}
     except (ValueError, IntegrityError) as exc:
@@ -139,7 +190,7 @@ def new_link(agreement_id: int, user: User = Depends(require_manager), db: Sessi
     row = db.query(PlanAgreement).filter(PlanAgreement.id == agreement_id).with_for_update().first()
     if not row or row.status != "pending":
         raise HTTPException(status_code=409, detail="אין הסכם הממתין לחתימה")
-    if row.kind == "close" and not is_system_admin(user):
+    if row.kind in {"close", "amend_dates"} and not is_system_admin(user):
         raise HTTPException(status_code=403, detail="הסכמי סיום זמינים לניהול האדמין בלבד")
     token = secrets.token_urlsafe(32)
     row.token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -154,7 +205,7 @@ def cancel(agreement_id: int, user: User = Depends(require_manager), db: Session
     row = db.get(PlanAgreement, agreement_id)
     if not row:
         raise HTTPException(status_code=404, detail="המסמך לא נמצא")
-    if row.kind == "close" and not is_system_admin(user):
+    if row.kind in {"close", "amend_dates"} and not is_system_admin(user):
         raise HTTPException(status_code=403, detail="הסכמי סיום זמינים לניהול האדמין בלבד")
     svc.wallet.lock_investor(db, row.investor_id)
     db.refresh(row)

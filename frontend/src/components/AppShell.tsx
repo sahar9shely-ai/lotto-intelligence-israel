@@ -68,6 +68,9 @@ function DockGlyph({ path }: { path: string }) {
       </svg>
     );
   }
+  if (path === "/tutorials") {
+    return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="3" /><path d="m10 9 5 3-5 3z" /></svg>;
+  }
   if (path === "/quotes") {
     return (
       <svg {...common}>
@@ -132,6 +135,10 @@ export function AppShell() {
     () => api.siteStatus(),
     [user?.id],
   );
+  const { data: tutorials } = useAsync(
+    () => user && !isManager ? api.tutorials() : Promise.resolve({available: false, lessons: []}),
+    [user?.id, isManager],
+  );
   const [copied, setCopied] = useState(false);
   const [shared, setShared] = useState(false);
   const [slackBusy, setSlackBusy] = useState(false);
@@ -157,6 +164,7 @@ export function AppShell() {
     },
     { to: "/payments", label: "תשלומים", dockLabel: "תשלומים", managerOnly: false, investorOnly: false },
     { to: "/documents", label: "מסמכים", dockLabel: "מסמכים", managerOnly: false, investorOnly: false },
+    ...(tutorials?.available ? [{to: "/tutorials", label: "הדרכה", dockLabel: "הדרכה", managerOnly: false, investorOnly: true}] : []),
     { to: "/activity", label: "מעקב", dockLabel: "מעקב", managerOnly: true, investorOnly: false },
     { to: "/quotes", label: "הצעות", dockLabel: "הצעות", managerOnly: true, investorOnly: false },
     { to: "/users", label: "משתמשים", dockLabel: "משתמשים", managerOnly: true, investorOnly: false },

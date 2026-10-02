@@ -70,6 +70,7 @@ class PlanCreate(BaseModel):
     manager_fee_percent: float = Field(ge=0)
     manager_savings_rate_percent: float = Field(ge=0, default=0)
     start_date: date
+    first_payment_date: Optional[date] = None
     duration_months: int = Field(ge=1, le=120, default=12)
     notes: Optional[str] = None
     generate_schedule: bool = True
@@ -83,6 +84,7 @@ class PlanUpdate(BaseModel):
     manager_fee_percent: Optional[float] = Field(default=None, ge=0)
     manager_savings_rate_percent: Optional[float] = Field(default=None, ge=0)
     start_date: Optional[date] = None
+    first_payment_date: Optional[date] = None
     duration_months: Optional[int] = Field(default=None, ge=1, le=120)
     status: Optional[PlanStatus] = None
     notes: Optional[str] = None
@@ -106,6 +108,10 @@ class PlanOut(BaseModel):
     closing_principal: Optional[float] = None
     closing_savings: Optional[float] = None
     start_date: date
+    first_payment_date: Optional[date] = None
+    date_terms_locked: bool = False
+    can_amend_dates: bool = False
+    date_amendment_pending: bool = False
     track_end_date: Optional[date] = None
     duration_months: int
     status: str
@@ -231,6 +237,7 @@ class PaymentOut(PrivateFinancialOut):
     status: str
     paid_at: Optional[date] = None
     confirmation_requested_at: Optional[datetime] = None
+    date_amendment_pending: bool = False
     notes: Optional[str] = None
 
     model_config = {"from_attributes": True}
@@ -312,6 +319,7 @@ class QuoteOut(BaseModel):
     access_username: Optional[str] = None
     access_password: Optional[str] = None
     start_date: Optional[date] = None
+    first_payment_date: Optional[date] = None
     principal: float
     plan_type: str = "monthly"
     monthly_rate_percent: float
@@ -479,6 +487,7 @@ class TopupRequestOut(BaseModel):
     contract_number: Optional[str] = None
     manager_party_name: Optional[str] = None
     start_date: Optional[date] = None
+    first_payment_date: Optional[date] = None
     end_date: Optional[date] = None
     duration_months: Optional[int] = None
     offered_notes: Optional[str] = None

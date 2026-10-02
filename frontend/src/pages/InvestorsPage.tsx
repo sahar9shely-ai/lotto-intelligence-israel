@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { DocumentsPage } from "./DocumentsPage";
 import { Panel } from "../components/Panel";
 import { AvailableBalancePanel } from "../components/AvailableBalancePanel";
+import { FirstPaymentPreview } from "../components/FirstPaymentPreview";
+import { DateAmendmentAction } from "../components/DateAmendmentAction";
 import { AgreementPanel, AgreementShare, AgreementContent, NoticePanel } from "../components/AgreementPanel";
 import type { PlanAgreement } from "../types/investments";
 import { RevealSecret } from "../components/RevealSecret";
@@ -833,14 +835,17 @@ function PlanCard({
             {showReport ? "הסתר דוח" : "דוח מצב"}
           </button>
           {isManager ? (
-            <button type="button" className="btn btn--small btn--ghost" onClick={onToggleEdit}>
+            <button type="button" className="btn btn--small btn--ghost" disabled={plan.date_amendment_pending && !editing} onClick={onToggleEdit}>
               {editing ? "סגור עריכה" : "ערוך"}
             </button>
           ) : null}
           <SavingsActions plan={plan} canManage={canClosePlans} onPrepared={onAgreementPrepared} pendingAgreement={pendingAgreement} onOpenAgreement={onOpenAgreement} />
+          {canClosePlans && plan.can_amend_dates && !plan.date_amendment_pending ? <DateAmendmentAction mode="plan" sourceId={plan.id} sourceName={plan.investor_name} currentStart={plan.start_date} sourceVersion={JSON.stringify([plan.start_date, plan.first_payment_date, plan.principal, plan.monthly_rate_percent, plan.savings_rate_percent, plan.status, plan.paid_count])} canManage={canClosePlans} onPrepared={onAgreementPrepared}/> : null}
         </div>
       }
     >
+      {plan.first_payment_date && plan.plan_type !== "savings" && plan.monthly_rate_percent > 0 ? <p className="hint">תאריך תשלום מזומן ראשון: <strong>{formatDate(plan.first_payment_date)}</strong></p> : null}
+      {plan.date_amendment_pending ? <p className="hint" role="status">הסכם עדכון מועדי המסלול ממתין לחתימת המשקיע. עד לחתימה או ביטול ההסכם, לא ניתן לשלוח, לאשר או לשנות את תשלומי המסלול. התאריכים המוצגים כעת הם התאריכים הקיימים.</p> : null}
       <div className="money-ledger money-ledger--compact">
         <div className="money-ledger__item">
           <span>קרן</span>
@@ -932,7 +937,8 @@ function PlanCard({
             <label>אחוז חיסכון מנהל<input name="manager_savings_rate_percent" type="number" min="0" step="0.01" defaultValue={plan.manager_savings_rate_percent ?? 0} /></label>
             <label>
               תאריך התחלה
-              <input name="start_date" type="date" defaultValue={plan.start_date} />
+              {plan.date_terms_locked ? <input key="signed-date" name="start_date" type="date" value={plan.start_date} readOnly /> : <input key="legacy-date" name="start_date" type="date" defaultValue={plan.start_date} />}
+              {plan.date_terms_locked ? <span className="hint">מועדי המסלול נקבעו בהסכם חתום. שינוי מועד מחייב הסכם מעודכן וחתימת המשקיע.</span> : null}
             </label>
             <label>
               משך (חודשים)
@@ -953,7 +959,7 @@ function PlanCard({
             </label>
           </div>
           <div className="page-head__actions">
-            <button type="submit" className="btn btn--primary">
+            <button type="submit" className="btn btn--primary" disabled={plan.date_amendment_pending}>
               שמור שינויים
             </button>
             <button
@@ -979,6 +985,7 @@ export function PlanForm({settings, investor, onSubmit}: {
   const [savingsRate, setSavingsRate] = useState("0");
   const [managerCash, setManagerCash] = useState(String(settings?.default_manager_fee_percent ?? 0));
   const [managerSavings, setManagerSavings] = useState("0");
+  const [startDate, setStartDate] = useState(todayISO);
   const [operationKey, setOperationKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1033,10 +1040,11 @@ export function PlanForm({settings, investor, onSubmit}: {
         <div className="form__grid" hidden={Boolean(review)}>
           <label>מועד קבלת הבקשה מהמשקיע<input name="notice_requested_on" type="date" max={new Date().toLocaleDateString("en-CA")} defaultValue={new Date().toLocaleDateString("en-CA")} required /></label>
           <p className="hint">יש לתעד את מועד קבלת הבקשה בפועל. המסלול ייפתח לאחר חתימה, ללא המתנה של חודש.</p>
-          <label>תאריך התחלה מוצע<input name="start_date" type="date" defaultValue={todayISO()} required /></label>
+          <label>תאריך התחלה מוצע<input name="start_date" type="date" value={startDate} onInput={e => setStartDate(e.currentTarget.value)} onChange={e => setStartDate(e.target.value)} required /></label>
           <label>משך בחודשים<input name="duration_months" type="number" min="1" max="120" defaultValue={settings?.default_duration_months ?? 12} required /></label>
           <label>הערות<input name="notes" placeholder="אופציונלי" /></label>
         </div>
+        <FirstPaymentPreview startDate={review?.start ?? startDate} hasCash={cash > 0} />
         <dl className="plan-opening-summary">
           <dt>משקיע</dt><dd>{investor.name}</dd>
           <dt>קרן חדשה</dt><dd>{formatMoney(principal)}</dd>

@@ -22,10 +22,13 @@ import type {
   DocumentVault,
   PlanAgreement,
   ClosingAgreementPreview,
+  DateAgreementInput,
+  DateAgreementPreview,
   AvailableBalance,
   BalanceTransferRequest,
   BalanceTransferResult,
 } from "../types/investments";
+import type { TutorialCatalogue } from "../types/tutorials";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const TOKEN_KEY = "tazrim_token";
@@ -130,6 +133,7 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
 }
 
 export const api = {
+  tutorials: () => request<TutorialCatalogue>("/api/v1/tutorials"),
   agreements: (investorId: number) => request<PlanAgreement[]>(`/api/v1/investments/investors/${investorId}/agreements`),
   notices: (investorId: number) => request<{id: number; purpose: string; requested_on: string; eligible_on: string; notes: string | null}[]>(`/api/v1/investments/investors/${investorId}/notices`),
   agreement: (id: number) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}`),
@@ -137,6 +141,10 @@ export const api = {
   cancelAgreement: (id: number) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}/cancel`, {method: "POST"}),
   createNotice: (id: number, body: {purpose: string; requested_on?: string; notes?: string}) => request<{id: number; eligible_on: string}>(`/api/v1/investments/investors/${id}/notices`, {method: "POST", body: JSON.stringify(body)}),
   openAgreement: (body: Record<string, unknown>) => request<PlanAgreement>("/api/v1/investments/agreements/open", {method: "POST", body: JSON.stringify(body)}),
+  previewDateAmendment: (id: number, body: DateAgreementInput) => request<DateAgreementPreview>(`/api/v1/investments/plans/${id}/date-amendment-preview`, {method: "POST", body: JSON.stringify(body)}),
+  prepareDateAmendment: (id: number, body: DateAgreementInput & {reviewed_document_hash: string}) => request<PlanAgreement>(`/api/v1/investments/plans/${id}/date-amendment`, {method: "POST", body: JSON.stringify(body)}),
+  previewAgreementReplacement: (id: number, body: DateAgreementInput) => request<DateAgreementPreview>(`/api/v1/investments/agreements/${id}/replacement-preview`, {method: "POST", body: JSON.stringify(body)}),
+  prepareAgreementReplacement: (id: number, body: DateAgreementInput & {reviewed_document_hash: string}) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}/replacement`, {method: "POST", body: JSON.stringify(body)}),
   previewClosingAgreement: (id: number, requestedOn: string, purpose: "withdraw" | "renew" = "withdraw") => request<ClosingAgreementPreview>(`/api/v1/investments/plans/${id}/closing-preview`, {method: "POST", body: JSON.stringify({requested_on: requestedOn, purpose})}),
   closingAgreement: (id: number, noticeId: number, reviewedHash: string) => request<PlanAgreement>(`/api/v1/investments/plans/${id}/closing-agreement`, {method: "POST", body: JSON.stringify({notice_id: noticeId, reviewed_document_hash: reviewedHash})}),
   publicAgreement: (token: string) => request<PlanAgreement>("/api/v1/investments/agreement-public/read", {method: "POST", body: JSON.stringify({token})}),

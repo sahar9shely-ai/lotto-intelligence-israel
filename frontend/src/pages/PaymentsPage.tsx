@@ -208,6 +208,17 @@ export function PaymentsPage() {
     );
   }, [data]);
 
+  const yearScopePayments = (yearAll ?? []).filter(
+    (p) => !investorFilter || p.investor_id === investorFilter,
+  );
+  const frozenYearBatch = yearScopePayments.some(
+    (p) => p.status === "scheduled" && p.date_amendment_pending,
+  );
+  const frozenYearAmounts = yearScopePayments.some((p) => p.date_amendment_pending)
+    || (plans ?? []).some((p) => p.date_amendment_pending
+      && (!investorFilter || p.investor_id === investorFilter)
+      && Number(p.start_date.slice(0, 4)) === year);
+
   useEffect(() => {
     if (!focusPaymentId && !focusMonth) return;
     if (loading) return;
@@ -519,6 +530,10 @@ export function PaymentsPage() {
   }
 
   async function syncYearAmounts() {
+    if (frozenYearAmounts) {
+      setMessage("סנכרון הסכומים ממתין לחתימה או לביטול הסכם עדכון מועדי המסלול.");
+      return;
+    }
     if (
       !window.confirm(
         `לסנכרן את סכומי התשלומים לשנת ${year} לפי המסלולים הנוכחיים?\nתאריכי התחלה ותאריכי תשלום לא ישתנו — רק הסכומים.`,
@@ -565,6 +580,7 @@ export function PaymentsPage() {
   }
 
   async function markPaid(id: number) {
+    if (paymentAwaitingDateAmendment(id)) return;
     setMarkBusyId(id);
     setMessage(null);
     try {
@@ -585,6 +601,7 @@ export function PaymentsPage() {
   }
 
   async function markScheduled(id: number) {
+    if (paymentAwaitingDateAmendment(id)) return;
     setMarkBusyId(id);
     setMessage(null);
     try {
@@ -599,6 +616,7 @@ export function PaymentsPage() {
   }
 
   async function confirmPayment(id: number) {
+    if (paymentAwaitingDateAmendment(id)) return;
     const payment = payments.find((p) => p.id === id);
     const ok = await confirm({
       title: "קיבלתי את ההעברה",
@@ -622,6 +640,7 @@ export function PaymentsPage() {
   }
 
   async function rejectPayment(id: number) {
+    if (paymentAwaitingDateAmendment(id)) return;
     const payment = payments.find((p) => p.id === id);
     const ok = await confirm({
       title: "עדיין לא הגיע",
@@ -697,6 +716,10 @@ export function PaymentsPage() {
   }
 
   async function markEntireYearPaid() {
+    if (frozenYearBatch) {
+      setMessage("שליחה לכל השנה ממתינה לחתימה או לביטול הסכם עדכון מועדים. ניתן לשלוח בנפרד תשלומים ממסלולים אחרים.");
+      return;
+    }
     if (
       !window.confirm(
         `לשלוח בקשת אישור לכל התשלומים המתוכננים בשנת ${year}?\nכל משקיע יצטרך לאשר לפני שהסטטוס יהפוך לבוצע.`,
@@ -749,6 +772,12 @@ export function PaymentsPage() {
     }
   }
 
+  function paymentAwaitingDateAmendment(id: number) {
+    if (!payments.find((p) => p.id === id)?.date_amendment_pending) return false;
+    setMessage("התשלום ממתין לחתימת הסכם עדכון מועדי המסלול. ניתן להמשיך לאחר החתימה או ביטול ההסכם.");
+    return true;
+  }
+
   function paymentRowActions(p: (typeof payments)[number]) {
     if (isManager) {
       if (p.status === "scheduled") {
@@ -756,7 +785,7 @@ export function PaymentsPage() {
           <button
             type="button"
             className="btn btn--small btn--admin"
-            disabled={markBusyId === p.id}
+            disabled={markBusyId === p.id || p.date_amendment_pending}
             onClick={() => markPaid(p.id)}
           >
             {markBusyId === p.id ? "שולח..." : "שלח לאישור"}
@@ -768,7 +797,7 @@ export function PaymentsPage() {
           <button
             type="button"
             className="btn btn--small btn--ghost"
-            disabled={markBusyId === p.id}
+            disabled={markBusyId === p.id || p.date_amendment_pending}
             onClick={() => markScheduled(p.id)}
           >
             {markBusyId === p.id ? "מבטל..." : "בטל בקשה"}
@@ -780,7 +809,7 @@ export function PaymentsPage() {
           <button
             type="button"
             className="btn btn--small btn--ghost"
-            disabled={markBusyId === p.id}
+            disabled={markBusyId === p.id || p.date_amendment_pending}
             onClick={() => markScheduled(p.id)}
           >
             {markBusyId === p.id ? "מעדכן..." : "החזר למתוכנן"}
@@ -795,7 +824,7 @@ export function PaymentsPage() {
           <button
             type="button"
             className="btn btn--small btn--gold"
-            disabled={markBusyId === p.id}
+            disabled={markBusyId === p.id || p.date_amendment_pending}
             onClick={() => confirmPayment(p.id)}
           >
             {markBusyId === p.id ? "רושם..." : "קיבלתי את ההעברה"}
@@ -803,7 +832,7 @@ export function PaymentsPage() {
           <button
             type="button"
             className="btn btn--small btn--ghost"
-            disabled={markBusyId === p.id}
+            disabled={markBusyId === p.id || p.date_amendment_pending}
             onClick={() => rejectPayment(p.id)}
           >
             עדיין לא הגיע
@@ -860,7 +889,8 @@ export function PaymentsPage() {
                 <button
                   type="button"
                   className="tools-menu__item"
-                  disabled={syncBusy}
+                  disabled={syncBusy || frozenYearAmounts}
+                  title={frozenYearAmounts ? "ממתין לחתימת הסכם עדכון מועדים" : undefined}
                   onClick={syncYearAmounts}
                 >
                   {syncBusy ? "מסנכרנים..." : `סנכרון סכומי ${year}`}
@@ -1407,7 +1437,8 @@ export function PaymentsPage() {
             <button
               type="button"
               className="btn btn--small hide-on-phone"
-              disabled={markBusy}
+              disabled={markBusy || frozenYearBatch}
+              title={frozenYearBatch ? "ממתין לחתימת הסכם עדכון מועדים; ניתן לשלוח תשלומים אחרים בנפרד" : undefined}
               onClick={markEntireYearPaid}
             >
               {markBusy ? "שולחים..." : "שלח בקשת אישור לכל השנה"}
@@ -1415,6 +1446,7 @@ export function PaymentsPage() {
           ) : null
         }
       >
+        {frozenYearBatch && isManager && !allYears ? <p className="hint" role="status">שליחה לכל השנה ממתינה לחתימה או לביטול הסכם עדכון מועדים. ניתן לשלוח בנפרד תשלומים ממסלולים אחרים.</p> : null}
         {payments.length === 0 ? (
           <div className="empty-block">
             <p className="empty">
@@ -1506,6 +1538,7 @@ export function PaymentsPage() {
                     ) : null}
                     <td>
                       <span className={`badge badge--${p.status}`}>{statusLabel(p.status)}</span>
+                      {p.date_amendment_pending ? <p className="hint">ממתין לחתימת הסכם עדכון מועדים</p> : null}
                     </td>
                     <td className="table__actions">{paymentRowActions(p)}</td>
                   </tr>
@@ -1540,6 +1573,7 @@ export function PaymentsPage() {
                   <strong>{formatMoney(p.investor_amount, true)}</strong>
                   {isManager ? <em>עמלה {formatMoney(p.manager_amount, true)}</em> : null}
                 </div>
+                {p.date_amendment_pending ? <p className="hint">התשלום ממתין לחתימת הסכם עדכון מועדי המסלול. הפעולות ייפתחו לאחר חתימה או ביטול ההסכם.</p> : null}
                 <div className="pay-card__actions">{paymentRowActions(p)}</div>
               </li>
             ))}

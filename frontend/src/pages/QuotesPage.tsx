@@ -4,6 +4,7 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { FlowFunnel } from "../components/FlowFunnel";
 import { QuotePipelineStepper, quoteNextStepHint } from "../components/QuotePipelineStepper";
 import { Panel } from "../components/Panel";
+import { FirstPaymentPreview } from "../components/FirstPaymentPreview";
 import { AgreementContent, AgreementShare } from "../components/AgreementPanel";
 import { RevealSecret } from "../components/RevealSecret";
 import { disableIdentityAutofill, PasswordField } from "../components/PasswordField";
@@ -58,6 +59,9 @@ export function QuotesPage() {
   const [convertError, setConvertError] = useState<string | null>(null);
   const [draftPassword] = useState(() => suggestPassword());
   const [busy, setBusy] = useState(false);
+  const [draftStartDate, setDraftStartDate] = useState(todayISO);
+  const [convertStartDate, setConvertStartDate] = useState(todayISO);
+  const [draftHasCash, setDraftHasCash] = useState(true);
   const [viewTab, setViewTab] = useState<QuoteViewTab>("pipeline");
   const clearMessage = useCallback(() => setMessage(null), []);
 
@@ -87,6 +91,11 @@ export function QuotesPage() {
   };
   const publicUrl = siteStatus?.public_url || window.location.origin;
   const formOpen = showForm || editing != null;
+  useEffect(() => {
+    setDraftStartDate(editing?.start_date || todayISO());
+    setDraftHasCash((editing?.plan_type || "monthly") !== "savings" && (editing?.monthly_rate_percent ?? settings?.default_monthly_rate_percent ?? 0) > 0);
+  }, [editing, showForm, settings?.default_monthly_rate_percent]);
+  useEffect(() => {setConvertStartDate(converting?.start_date || todayISO());}, [converting]);
   const backfilling = useRef(false);
   const accessAttempted = useRef(new Set<number>());
 
@@ -430,7 +439,13 @@ export function QuotesPage() {
         <Panel
           title={editing ? `עריכת הצעה — ${editing.prospect_name}` : "סיכום הצעה"}
         >
-          <form className="form" onSubmit={onSave} key={editing?.id ?? "new"}>
+          <form className="form" onSubmit={onSave} key={editing?.id ?? "new"} onChange={e => {
+            const form = e.currentTarget;
+            window.requestAnimationFrame(() => {
+              const values = new FormData(form);
+              setDraftHasCash(values.get("plan_type") !== "savings" && Number(values.get("monthly_rate_percent") || 0) > 0);
+            });
+          }}>
             <div className="form__grid">
               <label>
                 שם המועמד/ת
@@ -469,9 +484,12 @@ export function QuotesPage() {
                   type="date"
                   dir="ltr"
                   required
-                  defaultValue={editing?.start_date ?? todayISO()}
+                  value={draftStartDate}
+                  onInput={e => setDraftStartDate(e.currentTarget.value)}
+                  onChange={e => setDraftStartDate(e.target.value)}
                 />
               </label>
+              <FirstPaymentPreview startDate={draftStartDate} hasCash={draftHasCash} />
               <label>
                 שם משתמש לכניסה
                 <input
@@ -645,6 +663,7 @@ export function QuotesPage() {
                     {q.start_date ? (
                       <p className="quote-card__phone muted">תחילת מסלול {formatDate(q.start_date)}</p>
                     ) : null}
+                    {q.first_payment_date && q.plan_type !== "savings" && q.monthly_rate_percent > 0 ? <p className="quote-card__phone muted">תשלום מזומן ראשון צפוי {formatDate(q.first_payment_date)}</p> : null}
                   </div>
                   <span className={`badge badge--${status}`}>{quoteStatusLabel(q.status)}</span>
                 </header>
@@ -954,7 +973,7 @@ export function QuotesPage() {
             <form className="request-form modal__form" onSubmit={convertQuote}>
               <div className="modal__body">
                 {convertError ? <p className="form-error">{convertError}</p> : null}
-                <label>מועד קבלת בקשת המשקיע<input name="notice_requested_on" type="date" required max={todayISO()} defaultValue={todayISO()}/><span className="hint">יש לתעד את המועד בפועל. המסלול מתחיל לפחות חודש לאחר הבקשה ורק לאחר חתימה.</span></label>
+                <label>מועד קבלת בקשת המשקיע<input name="notice_requested_on" type="date" required max={todayISO()} defaultValue={todayISO()}/><span className="hint">יש לתעד את המועד בפועל. המסלול יופעל רק לאחר חתימה; התשלום הראשון חל חודש לאחר תחילת המסלול בפועל.</span></label>
                 <label>
                   תחילת המסלול
                   <input
@@ -962,9 +981,12 @@ export function QuotesPage() {
                     type="date"
                     dir="ltr"
                     required
-                    defaultValue={converting.start_date ?? (()=>{const d=new Date();d.setMonth(d.getMonth()+1);return d.toLocaleDateString("en-CA");})()}
+                    value={convertStartDate}
+                    onInput={e => setConvertStartDate(e.currentTarget.value)}
+                    onChange={e => setConvertStartDate(e.target.value)}
                   />
                 </label>
+                <FirstPaymentPreview startDate={convertStartDate} hasCash={converting.plan_type !== "savings" && converting.monthly_rate_percent > 0} />
                 <label>
                   שם משתמש לכניסה (אנגלית)
                   <input

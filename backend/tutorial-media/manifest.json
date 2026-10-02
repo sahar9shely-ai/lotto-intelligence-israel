@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "scope": "investor_app",
+  "owner_publication_approved": true,
+  "approved_on": "2026-10-02",
+  "voice_provider": "ElevenLabs",
+  "generation_plan": "Free",
+  "commercial_license_confirmed": false,
+  "publication_decision": "Owner explicitly instructed publication without payment after the provider commercial-use restriction was explained.",
+  "lessons": [
+    {
+      "id": "01-welcome",
+      "duration_seconds": 23.416666666666668,
+      "sha256": {
+        "video": "f1a06ba49a70d1f4b0e4f2c987c9fba5830c04ba9386fc47c2f4be26881a4636",
+        "poster": "14554c5b17226d6d3393c7b23b5f3794bc92574a42bf990537f4cb73e4d316e9",
+        "captions": "f7cd69d97bd4021e0d2697cc76c1b254bf2ab2e333ea1fce2e242b6d5665a438",
+        "transcript": "deff3107c033438979482ce723290785fb5f753f8a3b1e2e9732406744216e5d"
+      }
+    },
+    {
+      "id": "02-plans-savings",
+      "duration_seconds": 28.833333333333332,
+      "sha256": {
+        "video": "d9bd1cd1951de75b71657e046f3911293ae3053fa01b15bacca28897b524da67",
+        "poster": "041851039835b4010b16a83565b08401e2ecf2fb31bef6f04fc2abb2daba5a82",
+        "captions": "0df06c04f7dd3b4b0a66ec8a4e9b412cb49a88fc2c2eb1d6b86d9c0125b3af5d",
+        "transcript": "fb1bd7e7e9b7c436e1da6b0c6c2bb82696305cc627010f85b956eed43fa68ed6"
+      }
+    },
+    {
+      "id": "03-payments",
+      "duration_seconds": 26.5,
+      "sha256": {
+        "video": "1ccb758b340f954af89965afb026593f8a0a0cbf94a60475972eb208ea737e8f",
+        "poster": "6d1c937afb41c1b75e5a1c53b3416e90c099ecf9836a9126c2d6bea2763aaeda",
+        "captions": "4484a6db66fb6623a0e74a9624be6a9e33d6a994ae910703b407f497c90e7f06",
+        "transcript": "b397cd76f648640aacdf70dfe50cdcdc922974d1770279789b1d3cc8877c8acb"
+      }
+    },
+    {
+      "id": "04-offers-signing",
+      "duration_seconds": 27.25,
+      "sha256": {
+        "video": "5bf61155df1fc12b910e69fe44c0dffc638e5cd71969b67808e679292a155b8f",
+        "poster": "fe3217e7e7ef9e53ec6adfe67e54d0384f587b049c808b4317ea66476418c18a",
+        "captions": "9f512d953bc209b3f868e59507cd5d0b65de5e650309fcfb0f42bbcfaddded67",
+        "transcript": "00c8c75db0e4b6ac2a3abb23f9a1ebda22c21d2918f67d5ceaa750ed9dd62707"
+      }
+    },
+    {
+      "id": "05-balance-ending",
+      "duration_seconds": 34.833333333333336,
+      "sha256": {
+        "video": "1e98d17e6d6c3d8a5dc0ba2d248aefd08283eae1cd11df3d4f3392cb1010e7c7",
+        "poster": "3d9b1c967bdc7f09ff3ba2d7aa4efe973e9bd26aeca457ad07ba59b8a7f4b6c5",
+        "captions": "98a875194170e7d251c904cc9c03f0c8d446d931a217c289d70628e9db40eeb4",
+        "transcript": "98d9227d87dd25812ff238f0c2de51986db604b72d00578ce734aef096c3054c"
+      }
+    },
+    {
+      "id": "06-help-requests",
+      "duration_seconds": 35.708333333333336,
+      "sha256": {
+        "video": "14c76bc0b19252db3acbf0dc0aa8d7e828fddc5d5f8813b060eb5152ae328ca4",
+        "poster": "64f5d2a2be969d895373a9960f4b1cf813ae1e80369de092d03824ed6ad6b588",
+        "captions": "09962682c243b4f6b7e36738f6d937618bbbafc1002fcfecf5bf4516724fbbbd",
+        "transcript": "07ff6a097c3158f75785111430fe2d284d762e510c1a1d8458c77d6b430a2026"
+      }
+    },
+    {
+      "id": "07-closing",
+      "duration_seconds": 9.666666666666666,
+      "sha256": {
+        "video": "97b7381f463daf81d33a1c976edb0d02ee808fdddc7628bb75ea4ca0602e39a5",
+        "poster": "7577011ea6bda15bbf5a3cf2c11f10d2e13d2c7f64856f09ce97f696a6e51ae9",
+        "captions": "dc5cc833761ffd9fabe6efbffee938f3ef31e4e67861b24939f8ad5f322919c7",
+        "transcript": "48b53e4e1d990f8db639b1db741d67f87a6dfff552362fce44eb3c2d5a7a1909"
+      }
+    }
+  ]
+}

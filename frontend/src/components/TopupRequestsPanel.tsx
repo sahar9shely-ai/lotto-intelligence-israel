@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { PlanTrackFields } from "./PlanTrackFields";
+import { FirstPaymentPreview } from "./FirstPaymentPreview";
 import { SignaturePad } from "./SignaturePad";
 import { api } from "../services/api";
 import type { Settings, TopupRequest } from "../types/investments";
@@ -274,10 +275,16 @@ export function TopupRequestsPanel({
   const showCreate = onCreateOpenChange ? createOpen : internalCreate;
   const setShowCreate = onCreateOpenChange ?? setInternalCreate;
   const [offerTarget, setOfferTarget] = useState<TopupRequest | null>(null);
+  const [offerStartDate, setOfferStartDate] = useState(todayISO);
+  const [offerHasCash, setOfferHasCash] = useState(true);
   const [contract, setContract] = useState<TopupRequest | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  useEffect(() => {
+    setOfferStartDate(todayISO());
+    setOfferHasCash((settings?.default_monthly_rate_percent ?? 0) > 0);
+  }, [offerTarget, settings?.default_monthly_rate_percent]);
 
   useEffect(() => {
     if (showCreate) setFormError(null);
@@ -639,7 +646,13 @@ export function TopupRequestsPanel({
           onClose={() => setOfferTarget(null)}
           wide
         >
-          <form className="form" onSubmit={offerContract}>
+          <form className="form" onSubmit={offerContract} onChange={e => {
+            const form = e.currentTarget;
+            window.requestAnimationFrame(() => {
+              const values = new FormData(form);
+              setOfferHasCash(values.get("plan_type") !== "savings" && Number(values.get("monthly_rate_percent") || 0) > 0);
+            });
+          }}>
             <p className="hint">
               קבעו את האחוזים שהמשקיע מקבל, משך המסלול ותאריכי התחלה וסיום. עמלת הניהול נשמרת אצלכם בלבד.
               החוזה ייחתם דיגיטלית לפני ביצוע המסלול.
@@ -677,7 +690,7 @@ export function TopupRequestsPanel({
               </label>
               <label>
                 יום תחילת המסלול
-                <input name="start_date" type="date" defaultValue={todayISO()} required />
+                <input name="start_date" type="date" value={offerStartDate} onInput={e => setOfferStartDate(e.currentTarget.value)} onChange={e => setOfferStartDate(e.target.value)} required />
               </label>
               <label>
                 משך (חודשים)
@@ -694,6 +707,7 @@ export function TopupRequestsPanel({
                 <input name="notes" placeholder="אופציונלי" />
               </label>
             </div>
+            <FirstPaymentPreview startDate={offerStartDate} hasCash={offerHasCash} />
             {offerTarget.notes ? <p className="hint">הערת המשקיע: {offerTarget.notes}</p> : null}
             <button type="submit" className="btn btn--primary" disabled={busyId === offerTarget.id}>
               {busyId === offerTarget.id ? "מכין חוזה..." : "הפקת חוזה לחתימה"}
@@ -732,6 +746,7 @@ export function TopupRequestsPanel({
                 <dt>מסתיים</dt>
                 <dd>{formatDate(contract.end_date)}</dd>
               </div>
+              {contract.first_payment_date && (contract.plan_type || "monthly") !== "savings" && Number(contract.monthly_rate_percent || 0) > 0 ? <div><dt>תשלום מזומן ראשון{isExecuted(contract.status) ? "" : " צפוי"}</dt><dd>{formatDate(contract.first_payment_date)}</dd></div> : null}
               {(contract.plan_type || "monthly") !== "savings" ? (
                 <div>
                   <dt>החזר חודשי צפוי</dt>

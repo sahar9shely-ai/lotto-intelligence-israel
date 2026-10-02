@@ -106,6 +106,9 @@ def init_investment_db() -> None:
     db = InvestmentSessionLocal()
     try:
         svc.seed_defaults(db)
+        from app.core.config import settings as app_settings
+        from app.services.payment_schedule_reconciliation import run_configured_payment_timing_repairs
+        run_configured_payment_timing_repairs(investment_engine, app_settings.payment_timing_repair_plan_ids)
         svc.repair_reporting_year_plans(db)
         svc.sync_track_continuity(db)
         try:
@@ -530,6 +533,11 @@ def update_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
+    try:
+        svc.require_plan_dates_settled(db, plan)
+    except svc.PendingDateAmendmentError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if plan.closed_on:
         raise HTTPException(status_code=409, detail="מסלול סגור נשמר כהיסטוריה ואינו ניתן לעריכה")
     from app.models.investments import PlanAgreement
@@ -537,6 +545,8 @@ def update_plan(
     if signed and any(getattr(payload, field) is not None and getattr(payload, field) != getattr(plan, field)
                       for field in ("principal", "start_date", "duration_months", "monthly_rate_percent", "savings_rate_percent", "plan_type", "status")):
         raise HTTPException(status_code=409, detail="תנאי מסלול חתום אינם ניתנים לשינוי ללא הסכם חדש")
+    if signed and "first_payment_date" in payload.model_fields_set and payload.first_payment_date != plan.first_payment_date:
+        raise HTTPException(status_code=409, detail="מועד תשלום של מסלול חתום אינו ניתן לשינוי ללא הסכם חדש")
     if payload.status == "completed":
         raise HTTPException(status_code=409, detail="יש לסגור מסלול באמצעות פעולת סגירת מסלול")
     if payload.manager_savings_rate_percent is not None and payload.manager_savings_rate_percent != plan.manager_savings_rate_percent:
@@ -550,8 +560,11 @@ def update_plan(
         raise HTTPException(status_code=409, detail="כדי לשנות קרן או תאריך במסלול עם חיסכון מנהל יש לסגור ולפתוח מסלול חדש")
 
     old_start = plan.start_date
+    old_first_payment = plan.first_payment_date
     old_duration = plan.duration_months
     data = payload.model_dump(exclude_unset=True, exclude={"regenerate_schedule"})
+    if payload.first_payment_date is not None and payload.first_payment_date < svc.add_months(payload.start_date or plan.start_date, 1):
+        raise HTTPException(status_code=409, detail="התשלום הראשון יכול לחול רק חודש לפחות לאחר תחילת המסלול")
     for key, value in data.items():
         setattr(plan, key, value)
     kind, monthly_rate, savings_rate = svc.normalize_plan_rates(
@@ -583,7 +596,7 @@ def update_plan(
     )
     db.commit()
 
-    start_changed = plan.start_date != old_start
+    start_changed = plan.start_date != old_start or plan.first_payment_date != old_first_payment
     duration_changed = plan.duration_months != old_duration
     money_changed = any(
         field in data
@@ -1142,7 +1155,11 @@ def regenerate_schedule(
     plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    svc.generate_payment_schedule(db, plan, realign_dates=realign_dates)
+    try:
+        svc.generate_payment_schedule(db, plan, realign_dates=realign_dates)
+    except svc.PendingDateAmendmentError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     payments = (
         db.query(Payment)
         .options(joinedload(Payment.investor))
@@ -1186,8 +1203,6 @@ def sync_all_payment_amounts(
     db: Session = Depends(get_investment_db),
 ):
     """Sync cash amounts on payments to current plan rates without moving dates."""
-    # Clip mid-year reporting boards to December so savings don't overlap next year.
-    restored = svc.repair_midyear_reporting_plans(db)
     query = db.query(InvestmentPlan).options(
         joinedload(InvestmentPlan.payments),
         joinedload(InvestmentPlan.investor),
@@ -1195,6 +1210,17 @@ def sync_all_payment_amounts(
     if investor_id is not None:
         query = query.filter(InvestmentPlan.investor_id == investor_id)
     plans = query.all()
+    plans = [plan for plan in plans if year is None or any(p.due_date and p.due_date.year == year for p in plan.payments)
+             or (plan.start_date and plan.start_date.year == year)]
+    wallet_svc.begin_wallet_write(db)
+    for target_investor_id in sorted({plan.investor_id for plan in plans}):
+        wallet_svc.lock_investor(db, target_investor_id)
+    try:
+        for plan in plans:
+            svc.require_plan_dates_settled(db, plan)
+    except svc.PendingDateAmendmentError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     synced = []
     for plan in plans:
         if year is not None:
@@ -1203,9 +1229,9 @@ def sync_all_payment_amounts(
             ) or (plan.start_date and plan.start_date.year == year)
             if not has_year:
                 continue
-        result = svc.sync_payment_amounts(db, plan)
+        result = svc.sync_payment_amounts(db, plan, commit=False)
         # Also fill any missing months without moving dates.
-        svc.generate_payment_schedule(db, plan, realign_dates=False)
+        svc.generate_payment_schedule(db, plan, realign_dates=False, commit=False)
         synced.append(
             {
                 "plan_id": plan.id,
@@ -1214,6 +1240,10 @@ def sync_all_payment_amounts(
                 **result,
             }
         )
+    db.commit()
+    # Historical reporting repairs run after the atomic payment sync. Signed
+    # agreements are excluded by their existing preservation guard.
+    restored = svc.repair_midyear_reporting_plans(db)
     return {
         "year": year,
         "synced": synced,
@@ -1313,9 +1343,11 @@ def mark_year_paid(
     db: Session = Depends(get_investment_db),
 ):
     """Send confirmation requests for all scheduled payments in a calendar year."""
-    return svc.mark_year_payments_paid(
-        db, year=year, investor_id=investor_id, actor=user
-    )
+    try:
+        return svc.mark_year_payments_paid(db, year=year, investor_id=investor_id, actor=user)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/align-calendar-year")
@@ -1367,6 +1399,11 @@ def update_payment(
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
 
+    try:
+        svc.require_payment_dates_settled(db, payment)
+    except svc.PendingDateAmendmentError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     data = payload.model_dump(exclude_unset=True)
 
     # Manager "mark paid" becomes a confirmation request to the investor.
@@ -1420,7 +1457,8 @@ def confirm_payment(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        db.rollback()
+        raise HTTPException(status_code=409 if isinstance(exc, svc.PendingDateAmendmentError) else 400, detail=str(exc)) from exc
     from app.services import activity_service as activity_svc
 
     activity_svc.log_activity(
@@ -1460,7 +1498,8 @@ def reject_payment(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        db.rollback()
+        raise HTTPException(status_code=409 if isinstance(exc, svc.PendingDateAmendmentError) else 400, detail=str(exc)) from exc
     from app.services import activity_service as activity_svc
 
     activity_svc.log_activity(

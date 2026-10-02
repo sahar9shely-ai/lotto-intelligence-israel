@@ -167,6 +167,7 @@ function buildQuoteDocumentHtml(quote: Quote): string {
     </section>
 
     ${accessSectionHtml(quote)}
+    ${showCash && quote.first_payment_date ? `<p>תשלום מזומן ראשון צפוי: <strong>${formatQuoteDate(quote.first_payment_date)}</strong>. התשלום הראשון חל חודש לאחר תחילת המסלול בפועל. אם החתימה תתבצע מאוחר יותר, התאריך יעודכן בהתאם לתחילת המסלול בפועל.</p>` : ""}
 
     <section class="pdf-table-wrap">
       <div class="pdf-section-title">

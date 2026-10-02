@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     jwt_expire_hours: int = 72
     admin_only_maintenance: bool = False
     maintenance_admin_username: str = "admin"
+    payment_timing_repair_plan_ids: str = ""
+    investor_tutorials_enabled: bool = False
+    investor_tutorials_media_dir: str = "/app/tutorial-media"
     app_public_url: str = "http://localhost:5173"
     reset_token_hours: int = 48
 

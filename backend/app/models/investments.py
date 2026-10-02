@@ -56,6 +56,8 @@ class InvestmentPlan(Base):
     closing_savings_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     closing_accrued_savings: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # NULL preserves imported/legacy schedules; new contracts pay after one month.
+    first_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     duration_months: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

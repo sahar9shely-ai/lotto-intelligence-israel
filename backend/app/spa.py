@@ -68,7 +68,9 @@ def mount_frontend(app: FastAPI) -> Path | None:
         ):
             raise HTTPException(status_code=404, detail="Not Found")
 
-        candidate = dist / full_path
+        candidate = (dist / full_path).resolve()
+        if not candidate.is_relative_to(dist):
+            raise HTTPException(status_code=404, detail="Not Found")
         if candidate.is_file():
             no_cache = full_path in {"sw.js", "index.html", "manifest.webmanifest"}
             return _file_response(candidate, no_cache=no_cache)

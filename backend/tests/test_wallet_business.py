@@ -112,6 +112,8 @@ class WalletBusinessTests(unittest.TestCase):
         self.assertEqual(self.investor.available_balance_cents,8850000)
 
     def test_deposit_and_funding_are_audited_and_rollback_together(self):
+        # Funding now requires any earlier track to have ended.
+        self.plan.status="completed"; self.plan.closed_on=date(2026,10,1); self.db.commit()
         data=dict(investor_id=self.investor.id,principal=1000,plan_type="monthly",monthly_rate_percent=5,
                   savings_rate_percent=0,manager_fee_percent=1,manager_savings_rate_percent=1,
                   start_date=date(2026,10,1),duration_months=12)

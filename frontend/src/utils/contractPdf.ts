@@ -103,6 +103,7 @@ function buildContractHtml(req: TopupRequest): string {
       <tbody>
         <tr><td class="muted">יום התחלה</td><td class="col-num">${formatDate(req.start_date)}</td></tr>
         <tr class="even"><td class="muted">יום סיום</td><td class="col-num">${formatDate(req.end_date)}</td></tr>
+        ${showCash && req.first_payment_date ? `<tr><td class="muted">תשלום מזומן ראשון${req.status === "executed" || req.status === "approved" ? "" : " צפוי"}</td><td class="col-num">${formatDate(req.first_payment_date)}</td></tr>` : ""}
         ${
           showCash
             ? `<tr><td class="muted">החזר חודשי במזומן (צפוי)</td><td class="col-num">${formatMoney(req.monthly_investor_payout || 0)}</td></tr>`

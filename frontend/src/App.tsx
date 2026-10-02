@@ -11,6 +11,7 @@ import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { InvestorsPage } from "./pages/InvestorsPage";
+import { InvestorTutorialsPage } from "./pages/InvestorTutorialsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PaymentsPage } from "./pages/PaymentsPage";
 import { PersonalAreaPage } from "./pages/PersonalAreaPage";
@@ -61,6 +62,7 @@ function AnimatedRoutes() {
             <Route path="payments" element={<PaymentsPage />} />
             <Route path="documents" element={<DocumentsRedirect />} />
             <Route path="account" element={<PersonalAreaPage />} />
+            <Route path="tutorials" element={<InvestorTutorialsPage />} />
             <Route element={<RequireManager />}>
               <Route path="activity" element={<ActivityPage />} />
               <Route path="quotes" element={<QuotesPage />} />

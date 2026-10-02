@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, object_session
 from sqlalchemy import update
 
 from app.models.investments import (
@@ -425,7 +425,24 @@ def seed_defaults(db: Session) -> dict:
 def plan_track_end_date(plan: InvestmentPlan) -> date:
     """Last calendar month of the track (start + effective duration − 1)."""
     duration = plan_effective_duration(plan) or max(plan.duration_months, 1)
+    if getattr(plan, "first_payment_date", None) is not None:
+        return payment_due_date(plan, max(duration, 1))
     return add_months(plan.start_date, max(duration, 1) - 1)
+
+
+def payment_due_date(plan: InvestmentPlan, month_number: int) -> date:
+    """Keep legacy dates; new default payments follow each completed month.
+
+    Computing from the original start preserves month-end anniversaries, e.g.
+    31 January -> 28 February -> 31 March. A separately agreed later first
+    payment uses its own monthly anniversary.
+    """
+    first = getattr(plan, "first_payment_date", None)
+    if first is None:
+        return add_months(plan.start_date, month_number - 1)
+    if first == add_months(plan.start_date, 1):
+        return add_months(plan.start_date, month_number)
+    return add_months(first, month_number - 1)
 
 
 def plan_accrual_principal(plan: InvestmentPlan) -> float:
@@ -781,6 +798,10 @@ def settle_savings_action(
         )
 
         note_bits = [f"המשך ממסלול #{plan.id}"]
+        from app.services import wallet_service as wallet
+        wallet.begin_wallet_write(db)
+        wallet.lock_investor(db, plan.investor_id)
+        wallet.require_no_current_plan(db, plan.investor_id, excluding_plan_id=plan.id)
         if compound_savings:
             note_bits.append(f"ריבית דריבית {duration} ח׳")
         new_plan = InvestmentPlan(
@@ -793,6 +814,7 @@ def settle_savings_action(
             savings_rate_percent=savings_rate,
             manager_fee_percent=fee,
             start_date=start,
+            first_payment_date=add_months(start, 1),
             duration_months=duration,
             status="active",
             notes=" · ".join(note_bits),
@@ -1020,6 +1042,16 @@ def serialize_plan(plan: InvestmentPlan, *, hide_fees: bool = False) -> dict:
         "closing_principal": plan.closing_principal_cents / 100 if plan.closing_principal_cents is not None else None,
         "closing_savings": plan.closing_savings_cents / 100 if plan.closing_savings_cents is not None else None,
         "start_date": plan.start_date,
+        "first_payment_date": plan.first_payment_date,
+        "date_amendment_pending": pending_date_amendment(object_session(plan), plan.id),
+        "date_terms_locked": any(a.kind == "open" and a.status == "signed" for a in plan.agreements),
+        "can_amend_dates": bool(plan.status == "active" and not plan.closed_on
+            and any(a.kind == "open" and a.status == "signed" for a in plan.agreements)
+            and len(plan.payments) == plan.duration_months
+            and all(p.status == "scheduled" and not p.paid_at and not p.confirmation_requested_at for p in plan.payments)
+            and not completed_months(plan.start_date, israel_today(), cap=plan.duration_months)
+            and not plan.savings_actions and not plan.savings_redeemed_total and not plan.rollover_savings_balance
+            and not accrued_savings_for_plan(plan) and not manager_savings_for_plan(plan)),
         "track_end_date": metrics["track_end_date"],
         "duration_months": duration,
         "status": plan.status,
@@ -1082,6 +1114,7 @@ def serialize_payment(payment: Payment) -> dict:
         "status": payment.status,
         "paid_at": payment.paid_at,
         "confirmation_requested_at": payment.confirmation_requested_at,
+        "date_amendment_pending": pending_date_amendment(object_session(payment), payment.plan_id),
         "notes": payment.notes,
     }
 
@@ -1258,6 +1291,7 @@ def serialize_quote(
         "access_username": quote.access_username,
         "access_password": None if hide_secrets else quote.access_password,
         "start_date": quote.start_date,
+        "first_payment_date": add_months(max(quote.start_date, israel_today()), 1) if quote.start_date else None,
         "principal": quote.principal,
         "plan_type": kind,
         "monthly_rate_percent": monthly_rate,
@@ -1407,7 +1441,7 @@ def build_plan_status_report(
         due = (
             payment.due_date
             if payment is not None and payment.due_date is not None
-            else add_months(plan.start_date, month - 1)
+            else payment_due_date(plan, month)
         )
         if year is not None and due.year != year:
             continue
@@ -1456,8 +1490,9 @@ def build_plan_status_report(
     }
 
 
-def sync_payment_amounts(db: Session, plan: InvestmentPlan) -> dict:
+def sync_payment_amounts(db: Session, plan: InvestmentPlan, *, commit: bool = True) -> dict:
     """Update cash amounts on existing payments without touching dates or start_date."""
+    require_plan_dates_settled(db, plan)
     kind, monthly_rate, savings_rate = normalize_plan_rates(
         getattr(plan, "plan_type", None) or "monthly",
         plan.monthly_rate_percent,
@@ -1482,7 +1517,10 @@ def sync_payment_amounts(db: Session, plan: InvestmentPlan) -> dict:
             payment.investor_amount = monthly_investor
             payment.manager_amount = monthly_manager
             updated += 1
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {
         "updated": updated,
         "monthly_investor": monthly_investor,
@@ -1504,6 +1542,7 @@ def generate_payment_schedule(
     """
     if plan.closed_on is not None:
         return []
+    require_plan_dates_settled(db, plan)
     kind, monthly_rate, _savings_rate = normalize_plan_rates(
         getattr(plan, "plan_type", None) or "monthly",
         plan.monthly_rate_percent,
@@ -1559,7 +1598,7 @@ def generate_payment_schedule(
         for month in range(1, plan.duration_months + 1):
             if month in by_month:
                 continue
-            due = add_months(plan.start_date, month - 1)
+            due = payment_due_date(plan, month)
             clash = (
                 db.query(Payment)
                 .filter(
@@ -1642,7 +1681,7 @@ def generate_payment_schedule(
             continue
         if month < 1 or month > plan.duration_months:
             continue
-        due = add_months(plan.start_date, month - 1)
+        due = payment_due_date(plan, month)
         payment.investor_id = plan.investor_id
         if not _resolve_investor_due_conflict(db, payment=payment, due=due):
             # Conflict with a stronger row on another plan — drop this preserved row
@@ -1655,7 +1694,7 @@ def generate_payment_schedule(
     for month in range(1, plan.duration_months + 1):
         if month in preserved:
             continue
-        due = add_months(plan.start_date, month - 1)
+        due = payment_due_date(plan, month)
         clash = (
             db.query(Payment)
             .filter(
@@ -2012,7 +2051,10 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
     if year < 2000 or year > israel_today().year + 1:
         raise ValueError("שנה לא תקינה")
 
-    investors = db.query(Investor).options(joinedload(Investor.plans)).order_by(Investor.id).all()
+    from app.models.investments import PlanAgreement
+    from app.services import wallet_service as wallet
+
+    investors = db.query(Investor).order_by(Investor.id).all()
     created: list[dict] = []
     skipped: list[dict] = []
     year_start = date(year, 1, 1)
@@ -2020,8 +2062,10 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
     plan_status = "completed" if year < israel_today().year else "active"
 
     for investor in investors:
+        wallet.begin_wallet_write(db)
+        wallet.lock_investor(db, investor.id)
         plans = sorted(
-            investor.plans,
+            db.query(InvestmentPlan).filter(InvestmentPlan.investor_id == investor.id).populate_existing().all(),
             key=lambda p: (p.start_date or date.min, p.id),
             reverse=True,
         )
@@ -2045,6 +2089,19 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
             continue
 
         template = next((p for p in plans if p.status == "active"), plans[0])
+        # A reporting helper must never renew a signed financial agreement or
+        # bypass the same investor lock/current-plan policy used by funding.
+        source_request = template.source_request
+        if template.first_payment_date is not None or (source_request and source_request.investor_signed_at) or db.query(PlanAgreement.id).filter(PlanAgreement.plan_id == template.id,
+            PlanAgreement.kind == "open", PlanAgreement.status == "signed").first():
+            skipped.append({"investor_id": investor.id, "reason": "signed_plan_requires_new_agreement"})
+            continue
+        if plan_status == "active":
+            try:
+                wallet.require_no_current_plan(db, investor.id)
+            except ValueError:
+                skipped.append({"investor_id": investor.id, "reason": "current_plan_exists"})
+                continue
         # Start from actual entry month in this year when known; otherwise Jan 1.
         if template.start_date and template.start_date.year == year:
             start = template.start_date
@@ -2074,9 +2131,9 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
             notes=f"לוח דיווח לשנת {year}",
         )
         db.add(plan)
+        db.flush()
+        generate_payment_schedule(db, plan, realign_dates=True, commit=False)
         db.commit()
-        db.refresh(plan)
-        generate_payment_schedule(db, plan, realign_dates=True)
         created.append(
             {
                 "plan_id": plan.id,
@@ -2088,6 +2145,7 @@ def open_calendar_year_plans(db: Session, *, year: int) -> dict:
             }
         )
 
+    db.commit()  # Release locks even when every investor was skipped.
     return {
         "year": year,
         "created": created,
@@ -2239,6 +2297,37 @@ def delete_investor_and_history(db: Session, *, investor_id: int) -> dict:
     return deleted
 
 
+class PendingDateAmendmentError(ValueError):
+    pass
+
+
+def pending_date_amendment(db: Session | None, plan_id: int) -> bool:
+    if db is None:
+        return False
+    from app.models.investments import PlanAgreement
+    return db.query(PlanAgreement.id).filter(PlanAgreement.plan_id == plan_id,
+        PlanAgreement.kind == "amend_dates", PlanAgreement.status == "pending").first() is not None
+
+
+def require_payment_dates_settled(db: Session, payment: Payment):
+    """Serialize payment writes with preparing/signing a date amendment."""
+    from app.services import wallet_service as wallet
+    wallet.begin_wallet_write(db)
+    wallet.lock_investor(db, payment.investor_id)
+    db.query(Payment).filter(Payment.id == payment.id).with_for_update().populate_existing().one()
+    if pending_date_amendment(db, payment.plan_id):
+        raise PendingDateAmendmentError("התשלום ממתין לחתימת הסכם עדכון מועדי המסלול; אין לשלוח או לאשר אותו עד להשלמת העדכון")
+
+
+def require_plan_dates_settled(db: Session, plan: InvestmentPlan):
+    from app.services import wallet_service as wallet
+    wallet.begin_wallet_write(db)
+    wallet.lock_investor(db, plan.investor_id)
+    db.query(InvestmentPlan).filter(InvestmentPlan.id == plan.id).with_for_update().populate_existing().one()
+    if pending_date_amendment(db, plan.id):
+        raise PendingDateAmendmentError("המסלול ממתין לחתימת הסכם עדכון מועדים; אין לשנות את לוח התשלומים עד להשלמת העדכון")
+
+
 def mark_year_payments_paid(
     db: Session,
     *,
@@ -2255,6 +2344,17 @@ def mark_year_payments_paid(
     if investor_id is not None:
         query = query.filter(Payment.investor_id == investor_id)
     payments = query.all()
+    # Lock in a stable order and validate the entire batch before sending email.
+    from app.services import wallet_service as wallet
+    wallet.begin_wallet_write(db)
+    for target_investor_id in sorted({p.investor_id for p in payments}):
+        wallet.lock_investor(db, target_investor_id)
+    for payment in payments:
+        require_payment_dates_settled(db, payment)
+    # An amendment or another payout can finish while this batch waits for its
+    # investor locks. The refreshed rows, not the original SELECT, define scope.
+    payments = [payment for payment in payments if payment.status == "scheduled"
+        and date(year, 1, 1) <= payment.due_date <= date(year, 12, 31)]
     requested = 0
     auto_paid = 0
     for payment in payments:
@@ -2338,6 +2438,7 @@ def request_payment_confirmation(
 
     If the actor is marking their own investor row, auto-confirm to בוצע.
     """
+    require_payment_dates_settled(db, payment)
     if payment.status == "paid":
         return {"status": "paid", "payment_id": payment.id, "notified": False}
 
@@ -2376,6 +2477,7 @@ def request_payment_confirmation(
 def confirm_payment(db: Session, *, payment: Payment, actor) -> dict:
     if payment.investor_id != actor.investor_id:
         raise PermissionError("ניתן לאשר רק תשלומים שלך")
+    require_payment_dates_settled(db, payment)
     if payment.status != "awaiting_confirmation":
         raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "paid"
@@ -2394,6 +2496,7 @@ def reject_payment_confirmation(db: Session, *, payment: Payment, actor) -> dict
         actor_is_manager = bool(inv and getattr(inv, "is_manager", False))
     if not is_owner and not actor_is_manager:
         raise PermissionError("אין הרשאה")
+    require_payment_dates_settled(db, payment)
     if payment.status != "awaiting_confirmation":
         raise ValueError("אין בקשת אישור ממתין לתשלום זה")
     payment.status = "scheduled"
@@ -2824,6 +2927,9 @@ def serialize_topup_request(
         savings_rate = getattr(plan, "savings_rate_percent", 0.0) or 0.0
     duration = request.offered_duration_months or (plan.duration_months if plan is not None else None)
     start_date = request.offered_start_date or (plan.start_date if plan is not None else None)
+    first_payment_date = plan.first_payment_date if plan is not None else (
+        add_months(start_date, 1) if start_date and not (manager_signed or investor_signed) else None
+    )
     end_date = request.offered_end_date
     if end_date is None and start_date is not None and duration:
         end_date = track_calendar_end_date(start_date, duration)
@@ -2866,6 +2972,7 @@ def serialize_topup_request(
         "monthly_rate_percent": monthly_rate,
         "savings_rate_percent": savings_rate,
         "start_date": start_date,
+        "first_payment_date": first_payment_date,
         "end_date": end_date,
         "duration_months": duration,
         "offered_notes": request.offered_notes,
@@ -3036,7 +3143,7 @@ def offer_topup_contract(
     request.offered_management_fee_percent = float(manager_fee_percent or 0)
     request.offered_start_date = start_date
     request.offered_duration_months = int(duration_months)
-    request.offered_end_date = track_calendar_end_date(start_date, duration_months)
+    request.offered_end_date = add_months(start_date, duration_months)
     request.offered_at = offered_at
     request.offered_by_user_id = actor_user_id
     request.offered_notes = (notes or "").strip() or None
@@ -3093,9 +3200,12 @@ def _execute_signed_contract(
         return
     if not request.offered_start_date or not request.offered_duration_months:
         raise ValueError("חסרים תנאי חוזה לביצוע")
-    if request.offered_start_date < add_months(request.created_at.date(), 1):
-        raise ValueError("התחלת מסלול מחייבת בקשה חודש מראש. יש להכין הסכם מעודכן")
-    investor = db.query(Investor).filter(Investor.id == request.investor_id).with_for_update().one()
+    if request.offered_start_date < israel_today():
+        raise ValueError("מועד התחלת החוזה חלף. יש להכין חוזה מעודכן לפני פתיחת מסלול")
+    from app.services import wallet_service as wallet
+    wallet.begin_wallet_write(db)
+    investor = wallet.lock_investor(db, request.investor_id)
+    wallet.require_no_current_plan(db, investor.id)
     if investor.available_balance_cents:
         raise ValueError("יש יתרה זמינה. יש לפתוח מסלול הכולל את כל היתרה דרך טופס מסלול חדש")
     amount = round(float(request.amount), 2)
@@ -3115,6 +3225,7 @@ def _execute_signed_contract(
         savings_rate_percent=savings_rate,
         manager_fee_percent=float(request.offered_management_fee_percent or 0),
         start_date=request.offered_start_date,
+        first_payment_date=add_months(request.offered_start_date, 1),
         duration_months=int(request.offered_duration_months),
         status="active",
         notes=visible_notes,

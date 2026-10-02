@@ -75,6 +75,7 @@ class AgreementTests(unittest.TestCase):
         self.assertEqual(row.snapshot["terms"]["duration_months"],1)
 
     def test_new_plan_stays_draft_until_verified_signature_funds_all_balance(self):
+        self.plan.status="completed"; self.plan.closed_on=self.today
         self.investor.available_balance_cents=8860000;self.db.commit()
         data=dict(investor_id=self.investor.id,principal=98600,additional_funds=10000,plan_type="hybrid",monthly_rate_percent=5,savings_rate_percent=2,
                   manager_fee_percent=1,manager_savings_rate_percent=0.5,start_date=self.today,duration_months=12)
@@ -156,6 +157,7 @@ class AgreementTests(unittest.TestCase):
             self.assertEqual(self.investor.available_balance_cents,7640000)
 
     def test_signed_term_survives_legacy_reporting_notes_and_startup_repair(self):
+        self.plan.status="completed"; self.plan.closed_on=self.today; self.db.commit()
         data=dict(investor_id=self.investor.id,principal=10000,additional_funds=10000,plan_type="hybrid",monthly_rate_percent=2,savings_rate_percent=1,
                   manager_fee_percent=0,manager_savings_rate_percent=0,start_date=date(2026,8,1),duration_months=12,notes="לוח דיווח לשנת 2026")
         row,token=agreements.issue(self.db,investor_id=self.investor.id,kind="open",actor_id=self.admin.id,notice_id=self.notice("new").id,data=data)

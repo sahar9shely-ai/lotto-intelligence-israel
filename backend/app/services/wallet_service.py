@@ -41,6 +41,15 @@ def lock_investor(db: Session, investor_id: int) -> Investor:
     return investor
 
 
+def require_no_current_plan(db: Session, investor_id: int, *, excluding_plan_id: int | None = None):
+    query = db.query(InvestmentPlan.id).filter(InvestmentPlan.investor_id == investor_id,
+        InvestmentPlan.status.in_(("active", "paused")), InvestmentPlan.closed_on.is_(None))
+    if excluding_plan_id is not None:
+        query = query.filter(InvestmentPlan.id != excluding_plan_id)
+    if query.first():
+        raise ValueError("למשקיע כבר קיים מסלול פעיל. יש לסיים אותו בחתימה לפני פתיחת מסלול נוסף")
+
+
 def replay(db: Session, key: str, investor_id: int, digest: str):
     entry = db.query(WalletEntry).filter(WalletEntry.operation_key == key).first()
     if entry and (entry.investor_id != investor_id or entry.request_fingerprint != digest):
@@ -221,21 +230,27 @@ def withdraw(db: Session, investor_id: int, amount, operation_key: str, actor_id
 
 
 def fund_plan(db: Session, data: dict, additional_funds, operation_key, actor_id: int):
+    begin_wallet_write(db)
     investor = lock_investor(db, data["investor_id"])
     digest = fingerprint({**data, "additional_funds": additional_funds})
     key = operation_key or str(uuid4())
     existing = replay(db, key, investor.id, digest)
     if existing:
         return db.get(InvestmentPlan, existing.plan_id)
+    require_no_current_plan(db, investor.id)
     balance = investor.available_balance_cents or 0
     declared = cents(data["principal"])
     additional = cents(additional_funds) if additional_funds is not None else declared - balance
     if additional < 0 or declared != balance + additional or declared <= 0:
         raise ValueError("הקרן החדשה חייבת לכלול את כל היתרה הזמינה ואת תוספת הכסף")
+    kind, cash, savings = svc.normalize_plan_rates(data["plan_type"], data["monthly_rate_percent"], data["savings_rate_percent"])
+    first_due = data.get("first_payment_date") or svc.add_months(data["start_date"], 1)
+    if first_due < svc.add_months(data["start_date"], 1):
+        raise ValueError("התשלום הראשון יכול לחול רק חודש לפחות לאחר תחילת המסלול")
     if additional:
         movement(db, investor, additional, "deposit", f"deposit:{key}", digest, actor_id)
-    kind, cash, savings = svc.normalize_plan_rates(data["plan_type"], data["monthly_rate_percent"], data["savings_rate_percent"])
     data.update(plan_type=kind, monthly_rate_percent=cash, savings_rate_percent=savings,
+                first_payment_date=first_due,
                 accrual_principal=declared / 100, savings_redeemed_total=0,
                 manager_savings_start_date=max(data["start_date"], israel_today()))
     plan = InvestmentPlan(**data)

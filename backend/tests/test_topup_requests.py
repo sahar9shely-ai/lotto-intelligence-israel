@@ -145,7 +145,8 @@ def test_investor_topup_request_signs_then_executes_without_exposing_fee():
     assert body["manager_fee_percent"] == 0.8
     assert body["monthly_rate_percent"] == 1.5
     assert body["start_date"] == "2041-06-01"
-    assert body["end_date"] == "2042-05-31"
+    assert body["end_date"] == "2042-06-01"
+    assert body["first_payment_date"] == "2041-07-01"
     assert body["duration_months"] == 12
     assert body["can_reverse_investment"] is False
 
@@ -372,5 +373,6 @@ def test_investor_contract_detail_hides_management_fee():
     assert "manager_fee" not in str(body)
     assert body["monthly_rate_percent"] == 1.5
     assert body["start_date"] == "2041-06-01"
-    assert body["end_date"] == "2042-05-31"
+    assert body["end_date"] == "2042-06-01"
+    assert body["first_payment_date"] == "2041-07-01"
 

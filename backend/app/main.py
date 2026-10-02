@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +13,7 @@ from app.api.v1.health import router as health_router
 from app.api.v1.imports import router as imports_router
 from app.api.v1.investments import init_investment_db, router as investments_router
 from app.api.v1.stats import router as stats_router
+from app.api.v1.tutorials import router as tutorials_router
 from app.core.config import settings
 from app.core.error_handlers import register_error_handlers
 from app.core.logging import configure_logging
@@ -42,6 +45,7 @@ app.include_router(auth_router)
 app.include_router(investments_router)
 app.include_router(agreements_router)
 app.include_router(assistant_router)
+app.include_router(tutorials_router)
 
 # Production: same-origin UI (built Vite app). Dev without dist keeps API-only.
 FRONTEND_DIST_MOUNTED = mount_frontend(app)
@@ -50,4 +54,12 @@ FRONTEND_DIST_MOUNTED = mount_frontend(app)
 @app.on_event("startup")
 def on_startup() -> None:
     init_investment_db()
+    if settings.investor_tutorials_enabled:
+        from app.services.tutorial_service import published_lessons
+
+        count = len(published_lessons())
+        logging.getLogger(__name__).log(
+            logging.INFO if count == 7 else logging.WARNING,
+            "Investor tutorials publication check: %s lessons available", count,
+        )
 

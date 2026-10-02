@@ -75,6 +75,7 @@ def ensure_schema(engine: Engine) -> None:
             "admin_notes": "VARCHAR(500)",
         },
         "investment_plans": {
+            "first_payment_date": "DATE",
             "manager_savings_rate_percent": "FLOAT NOT NULL DEFAULT 0",
             "manager_savings_start_date": "DATE",
             "closed_on": "DATE",

@@ -70,7 +70,7 @@ def document_snapshot(db: Session, *, investor: Investor, kind: str, terms: dict
     manager_settings = db.query(AppSettings).first()
     return {"version": 1, "investor_name": investor.name,
             "manager_name": manager_settings.manager_display_name if manager_settings else "המנהל",
-            "title": "הסכם סיום מסלול" if kind == "close" else "הסכם פתיחת מסלול",
+            "title": {"close": "הסכם סיום מסלול", "amend_dates": "הסכם עדכון מועדי מסלול"}.get(kind, "הסכם פתיחת מסלול"),
             "terms": terms, "clauses": clauses + ["בקשת המשקיע למשיכת כספים בתום תקופת המסלול מחייבת הודעה מוקדמת של חודש לפני תום התקופה. סיום ביוזמת האדמין לצורך מסלול חדש ופתיחת מסלול חדש אינם מחייבים המתנה זו."],
             "notice_requested_on": requested_on.isoformat()}
 
@@ -88,15 +88,66 @@ def closing_preview(db: Session, plan: InvestmentPlan, requested_on: date, *, pu
             "eligible_on": eligible_on, "can_prepare": today >= eligible_on, "calculated_on": today}
 
 
-def issue(db: Session, *, investor_id: int, kind: str, actor_id: int, notice_id: int, data: dict | None = None, plan_id: int | None = None):
+def opening_content(investor: Investor, data: dict):
+    if not data:
+        raise ValueError("חסרים תנאי המסלול")
+    private = json.loads(json.dumps(data, default=str))
+    balance = (investor.available_balance_cents or 0) / 100
+    principal = wallet.cents(data["principal"]) / 100
+    additional = wallet.cents(data.get("additional_funds") if data.get("additional_funds") is not None else principal - balance) / 100
+    if principal <= 0 or wallet.cents(principal) != wallet.cents(balance) + wallet.cents(additional):
+        raise ValueError("הקרן חייבת לכלול את כל היתרה הזמינה ותוספת הכסף")
+    kind_name, cash, savings = svc.normalize_plan_rates(data["plan_type"], data["monthly_rate_percent"], data["savings_rate_percent"])
+    requested_start = date.fromisoformat(str(data["start_date"]))
+    proposed_actual_start = max(requested_start, israel_today())
+    configured_first = data.get("first_payment_date")
+    first_due = date.fromisoformat(str(configured_first)) if configured_first else svc.add_months(proposed_actual_start, 1)
+    if first_due < svc.add_months(proposed_actual_start, 1):
+        raise ValueError("התשלום הראשון יכול לחול רק חודש לפחות לאחר תחילת המסלול")
+    private.update(additional_funds=additional, plan_type=kind_name, monthly_rate_percent=cash, savings_rate_percent=savings)
+    terms = {"principal": principal, "plan_type": kind_name, "available_balance": balance, "additional_funds": additional,
+             "monthly_rate_percent": cash, "savings_rate_percent": savings,
+             "monthly_cash": svc.calc_monthly(principal, cash), "monthly_savings": svc.calc_monthly(principal, savings),
+             "planned_savings_total": round(svc.calc_monthly(principal, savings) * data["duration_months"], 2),
+             "start_date": str(data["start_date"]), "duration_months": data["duration_months"],
+             "first_payment_date": first_due.isoformat(), "payment_timing": "month_after_start",
+             "end_date": svc.add_months(date.fromisoformat(str(data["start_date"])), data["duration_months"]).isoformat()}
+    clauses = [
+        "המסלול יופעל רק לאחר חתימת המשקיע ואישור תנאיו. עד אז לא נפתחת קרן פעילה ולא נצברת תשואה מכוח הצעה זו.",
+        "מועד התחלת המסלול הוא המאוחר מבין התאריך המוצג לבין יום חתימת המשקיע. התקופה המוסכמת נמדדת ממועד התחלה זה.",
+        "התשלום הראשון במזומן יחול חודש לאחר מועד תחילת המסלול בפועל, ולא בחודש הפתיחה. התאריך המוצע מחושב לפי מועד ההתחלה הידוע כעת; אם החתימה דוחה את ההתחלה, מועד התשלום ייקבע בהתאם. תאריך ראשון מאוחר יותר שסוכם במפורש יישמר, כל עוד עבר חודש מלא ממועד ההתחלה בפועל.",
+        f"משך המסלול הוא {data['duration_months']} חודשים. אין אפשרות למשוך את הקרן לפני תום התקופה המוסכמת.",
+        "שיעורי ההחזר והחיסכון המפורטים בטבלת התנאים הם ההתחייבויות למשקיע במסלול זה; רכיב ששיעורו אפס אינו נצבר או משולם.",
+        "ההחזר החודשי במזומן והחיסכון הם רכיבים נפרדים. החיסכון נצבר על הקרן בלבד, בחודשים מלאים, ללא ריבית דריבית.",
+        "הקרן כוללת את מלוא היתרה הזמינה המצוינת ואת תוספת הכסף החדש. אין כפל זיכוי של סכומים שכבר נמשכו או שולמו.",
+        "בתום התקופה לא יחודש המסלול באופן אוטומטי. סיום המסלול יושלם באמצעות הסכם סיום חתום; מסלול נוסף דורש הסכם חדש וחתימה חדשה.",
+        "תנאים אלה אינם גורעים מזכויות שאין להתנות עליהן על פי דין. שינוי תנאי המשקיע מחייב הסכמה מתועדת חדשה.",
+    ]
+    return terms, private, clauses
+
+
+def issue(db: Session, *, investor_id: int, kind: str, actor_id: int, notice_id: int, data: dict | None = None, plan_id: int | None = None,
+          supersedes_agreement_id: int | None = None, replacement_notes: str | None = None):
+    wallet.begin_wallet_write(db)
     investor = wallet.lock_investor(db, investor_id)
+    superseded = None
+    if supersedes_agreement_id is not None:
+        actor = db.get(User, actor_id)
+        if kind != "open" or not actor or not is_system_admin(actor):
+            raise ValueError("החלפת הסכם פתיחה ממתין זמינה לאדמין בלבד")
+        superseded = db.query(PlanAgreement).filter(PlanAgreement.id == supersedes_agreement_id).with_for_update().populate_existing().one_or_none()
+        if not superseded or superseded.investor_id != investor_id or superseded.kind != "open" or superseded.status != "pending" or superseded.plan_id is not None:
+            raise ValueError("ניתן להחליף רק הסכם פתיחה הממתין לחתימה של אותו משקיע")
     notice = db.get(PlanNotice, notice_id)
     if not notice or notice.investor_id != investor_id or notice.purpose not in ({"withdraw", "renew"} if kind == "close" else {"new", "renew"}):
         raise ValueError("יש לבחור בקשה מתועדת מראש התואמת לפעולה ולמשקיע")
     if notice.requested_on > israel_today():
         raise ValueError("תאריך קבלת הבקשה אינו יכול להיות עתידי")
     eligible_on = svc.add_months(notice.requested_on, 1)
-    if db.query(PlanAgreement).filter(PlanAgreement.investor_id == investor_id, PlanAgreement.status == "pending").first():
+    pending_query = db.query(PlanAgreement).filter(PlanAgreement.investor_id == investor_id, PlanAgreement.status == "pending")
+    if superseded:
+        pending_query = pending_query.filter(PlanAgreement.id != superseded.id)
+    if pending_query.first():
         raise ValueError("קיים הסכם הממתין לחתימה. יש להשלים או לבטל אותו לפני הכנת הסכם נוסף")
     if kind == "close":
         plan = db.query(InvestmentPlan).filter(InvestmentPlan.id == plan_id, InvestmentPlan.investor_id == investor_id).with_for_update().one_or_none()
@@ -112,39 +163,24 @@ def issue(db: Session, *, investor_id: int, kind: str, actor_id: int, notice_id:
         private = {}
         clauses = REINVESTMENT_CLOSING_CLAUSES if notice.purpose == "renew" else CLOSING_CLAUSES
     else:
-        if not data:
-            raise ValueError("חסרים תנאי המסלול")
-        private = json.loads(json.dumps(data, default=str))
-        balance = (investor.available_balance_cents or 0) / 100
-        principal = wallet.cents(data["principal"]) / 100
-        additional = wallet.cents(data.get("additional_funds") if data.get("additional_funds") is not None else principal - balance) / 100
-        if principal <= 0 or wallet.cents(principal) != wallet.cents(balance) + wallet.cents(additional):
-            raise ValueError("הקרן חייבת לכלול את כל היתרה הזמינה ותוספת הכסף")
-        kind_name, cash, savings = svc.normalize_plan_rates(data["plan_type"], data["monthly_rate_percent"], data["savings_rate_percent"])
-        requested_start = date.fromisoformat(str(data["start_date"]))
-        private.update(additional_funds=additional, plan_type=kind_name, monthly_rate_percent=cash, savings_rate_percent=savings)
-        terms = {"principal": principal, "plan_type": kind_name, "available_balance": balance, "additional_funds": additional,
-                 "monthly_rate_percent": cash, "savings_rate_percent": savings,
-                 "monthly_cash": svc.calc_monthly(principal, cash), "monthly_savings": svc.calc_monthly(principal, savings),
-                 "planned_savings_total": round(svc.calc_monthly(principal, savings) * data["duration_months"], 2),
-                 "start_date": str(data["start_date"]), "duration_months": data["duration_months"],
-                 "end_date": svc.add_months(date.fromisoformat(str(data["start_date"])), data["duration_months"]).isoformat()}
-        clauses = [
-            "המסלול יופעל רק לאחר חתימת המשקיע ואישור תנאיו. עד אז לא נפתחת קרן פעילה ולא נצברת תשואה מכוח הצעה זו.",
-            "מועד התחלת המסלול הוא המאוחר מבין התאריך המוצג לבין יום חתימת המשקיע. התקופה המוסכמת נמדדת ממועד התחלה זה.",
-            f"משך המסלול הוא {data['duration_months']} חודשים. אין אפשרות למשוך את הקרן לפני תום התקופה המוסכמת.",
-            "שיעורי ההחזר והחיסכון המפורטים בטבלת התנאים הם ההתחייבויות למשקיע במסלול זה; רכיב ששיעורו אפס אינו נצבר או משולם.",
-            "ההחזר החודשי במזומן והחיסכון הם רכיבים נפרדים. החיסכון נצבר על הקרן בלבד, בחודשים מלאים, ללא ריבית דריבית.",
-            "הקרן כוללת את מלוא היתרה הזמינה המצוינת ואת תוספת הכסף החדש. אין כפל זיכוי של סכומים שכבר נמשכו או שולמו.",
-            "בתום התקופה לא יחודש המסלול באופן אוטומטי. סיום המסלול יושלם באמצעות הסכם סיום חתום; מסלול נוסף דורש הסכם חדש וחתימה חדשה.",
-            "תנאים אלה אינם גורעים מזכויות שאין להתנות עליהן על פי דין. שינוי תנאי המשקיע מחייב הסכמה מתועדת חדשה.",
-        ]
+        wallet.require_no_current_plan(db, investor_id)
+        terms, private, clauses = opening_content(investor, data)
     snapshot = document_snapshot(db, investor=investor, kind=kind, terms=terms, clauses=clauses, requested_on=notice.requested_on)
+    if superseded:
+        snapshot.update(supersedes_agreement_id=superseded.id, supersedes_document_hash=superseded.document_hash)
+        if replacement_notes:
+            snapshot["replacement_notes"] = replacement_notes
     token = secrets.token_urlsafe(32)
     agreement = PlanAgreement(investor_id=investor_id, plan_id=plan_id, kind=kind,
         snapshot=snapshot, private_terms=private, token_hash=hashlib.sha256(token.encode()).hexdigest(),
         document_hash=digest(snapshot), actor_user_id=actor_id, notice_id=notice_id, expires_at=utcnow() + timedelta(days=14))
     db.add(agreement); db.flush()
+    if superseded:
+        changed = db.execute(update(PlanAgreement).where(PlanAgreement.id == superseded.id, PlanAgreement.status == "pending")
+            .values(status="cancelled").execution_options(synchronize_session=False))
+        if changed.rowcount != 1:
+            raise ValueError("ההסכם המקורי כבר טופל; לא ניתן להחליף אותו")
+        superseded.status = "cancelled"
     from app.services.activity_service import log_activity
     log_activity(db, kind="plan_agreement_prepared", title=f"{snapshot['title']} · {investor.name}",
                  body="המסמך ממתין לחתימת המשקיע; טרם בוצעה פעולה כספית", actor_name=snapshot["manager_name"],
@@ -172,6 +208,7 @@ def by_token(db: Session, token: str):
 
 
 def sign(db: Session, row: PlanAgreement, *, name: str, signature: str, accepted: bool, document_hash: str):
+    wallet.begin_wallet_write(db)
     investor = wallet.lock_investor(db, row.investor_id)
     row = db.query(PlanAgreement).filter(PlanAgreement.id == row.id).with_for_update().populate_existing().one()
     if row.status == "signed":
@@ -200,8 +237,12 @@ def sign(db: Session, row: PlanAgreement, *, name: str, signature: str, accepted
         current["transfer_total"] = round(current["principal"] + current["savings"], 2)
         if current != row.snapshot["terms"]:
             raise ValueError("נתוני המסלול השתנו. יש לבקש מהמנהל הסכם סיום מעודכן")
+    elif row.kind == "amend_dates":
+        from app.services.agreement_amendment_service import validate_date_amendment
+        amendment_plan, amendment_payments = validate_date_amendment(db, row)
     else:
         terms = row.snapshot["terms"]
+        wallet.require_no_current_plan(db, investor.id)
         if (investor.available_balance_cents or 0) != wallet.cents(terms["available_balance"]):
             raise ValueError("היתרה הזמינה השתנתה. יש להכין הסכם חדש")
     changed = db.execute(update(PlanAgreement).where(PlanAgreement.id == row.id, PlanAgreement.status == "pending").values(status="signed").execution_options(synchronize_session=False))
@@ -210,17 +251,25 @@ def sign(db: Session, row: PlanAgreement, *, name: str, signature: str, accepted
     if row.kind == "close":
         wallet.close_plan(db, row.plan_id, row.actor_user_id)
         row.execution_details = {"closed_on": israel_today().isoformat(), "transfer_total": row.snapshot["terms"]["transfer_total"]}
+    elif row.kind == "amend_dates":
+        from app.services.agreement_amendment_service import execute_date_amendment
+        execute_date_amendment(db, row, amendment_plan, amendment_payments)
     else:
         data = dict(row.private_terms)
         additional = data.pop("additional_funds", None)
         data.pop("operation_key", None); data.pop("generate_schedule", None)
         data["start_date"] = max(date.fromisoformat(data["start_date"]), israel_today())
+        configured_first = data.get("first_payment_date")
+        data["first_payment_date"] = date.fromisoformat(str(configured_first)) if configured_first else svc.add_months(data["start_date"], 1)
+        if data["first_payment_date"] < svc.add_months(data["start_date"], 1):
+            raise ValueError("מועד התשלום הראשון שסוכם מוקדם מחודש לאחר ההתחלה בפועל. יש להכין הסכם מעודכן")
         plan = wallet.fund_plan(db, data, additional, f"agreement:{row.id}", row.actor_user_id)
         row.plan_id = plan.id
-        row.execution_details = {"start_date": plan.start_date.isoformat(), "end_date": end_date(plan).isoformat(), "duration_months": plan.duration_months}
+        row.execution_details = {"start_date": plan.start_date.isoformat(), "end_date": end_date(plan).isoformat(), "duration_months": plan.duration_months,
+                                 "first_payment_date": plan.first_payment_date.isoformat()}
     row.status = "signed"; row.signed_at = utcnow(); row.signed_name = name.strip(); row.signature_png = png
     from app.services.activity_service import log_activity
-    log_activity(db, kind="plan_closed" if row.kind == "close" else "plan_created", title=f"{row.snapshot['title']} נחתם · {investor.name}",
+    log_activity(db, kind={"close": "plan_closed", "amend_dates": "plan_dates_amended"}.get(row.kind, "plan_created"), title=f"{row.snapshot['title']} נחתם · {investor.name}",
                  body="חתימת המשקיע נשמרה והשינוי בוצע בהתאם להסכם", actor_name=name.strip(),
                  investor_id=investor.id, investor_name=investor.name, entity_type="agreement", entity_id=row.id, href="/documents", severity="success")
     db.flush()

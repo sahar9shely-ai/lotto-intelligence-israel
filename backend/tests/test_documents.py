@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.db.investment_session import InvestmentSessionLocal
 from app.main import app
 from app.models.auth import User
-from app.models.investments import InvestmentTopupRequest
+from app.models.investments import InvestmentPlan, InvestmentTopupRequest
 from app.security.auth import hash_password
 from app.services import investment_service as inv_svc
 
@@ -100,6 +100,16 @@ def test_vault_lists_signed_contract_quote_and_reports_per_investor():
     manager, _ = _manager()
     bar, bar_id = _bar()
     _clear_open(bar_id)
+    # This vault scenario needs a new contract. Historical fixture plans must
+    # already be closed, because current contracts cannot run in parallel.
+    with InvestmentSessionLocal() as db:
+        for plan in db.query(InvestmentPlan).filter(
+            InvestmentPlan.investor_id == bar_id,
+            InvestmentPlan.status.in_(("active", "paused")),
+        ).all():
+            plan.status = "closed"
+            plan.closed_on = date.today()
+        db.commit()
 
     uname = f"vn{uuid4().hex[:8]}"
     quote = client.post(

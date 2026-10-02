@@ -65,13 +65,14 @@ export type BalanceTransferResult = {
 export type VaultDocumentKind = "contract" | "agreement" | "quote" | "monthly" | "yearly";
 
 export type PlanAgreement = {
-  id: number; investor_id: number; plan_id: number | null; kind: "open" | "close";
+  id: number; investor_id: number; plan_id: number | null; kind: "open" | "close" | "amend_dates";
   status: "pending" | "signed" | "cancelled";
   snapshot: {version: number; title: string; investor_name: string; manager_name: string;
-    terms: Record<string, string | number>; clauses: string[]; notice_requested_on: string};
+    terms: Record<string, string | number | null>; clauses: string[]; notice_requested_on: string;
+    amendment_notes?: string; replacement_notes?: string; supersedes_agreement_id?: number};
   document_hash: string; created_at: string; expires_at: string; signed_at: string | null;
   signed_name: string | null; signature_png: string | null; token?: string;
-  execution_details?: Record<string, string | number> | null;
+  execution_details?: Record<string, string | number | boolean> | null;
 };
 
 export type ClosingAgreementPreview = {
@@ -79,6 +80,15 @@ export type ClosingAgreementPreview = {
   snapshot: PlanAgreement["snapshot"];
   document_hash: string;
   eligible_on: string;
+  can_prepare: boolean;
+  calculated_on: string;
+};
+
+export type DateAgreementInput = {start_date: string; notes?: string};
+export type DateAgreementPreview = {
+  kind: "open" | "amend_dates";
+  snapshot: PlanAgreement["snapshot"];
+  document_hash: string;
   can_prepare: boolean;
   calculated_on: string;
 };
@@ -118,6 +128,10 @@ export type Plan = {
   closing_principal?: number | null;
   closing_savings?: number | null;
   start_date: string;
+  first_payment_date?: string | null;
+  date_terms_locked?: boolean;
+  can_amend_dates?: boolean;
+  date_amendment_pending?: boolean;
   track_end_date?: string | null;
   duration_months: number;
   status: string;
@@ -186,6 +200,7 @@ export type Payment = {
   investor_amount: number;
   manager_amount: number;
   status: string;
+  date_amendment_pending?: boolean;
   paid_at?: string | null;
   confirmation_requested_at?: string | null;
   notes?: string | null;
@@ -219,6 +234,7 @@ export type Quote = {
   access_username?: string | null;
   access_password?: string | null;
   start_date?: string | null;
+  first_payment_date?: string | null;
   principal: number;
   plan_type: PlanType | string;
   monthly_rate_percent: number;
@@ -398,6 +414,7 @@ export type TopupRequest = {
   contract_number?: string;
   manager_party_name?: string | null;
   start_date?: string | null;
+  first_payment_date?: string | null;
   end_date?: string | null;
   duration_months?: number | null;
   offered_notes?: string | null;
