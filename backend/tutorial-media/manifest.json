@@ -12,8 +12,8 @@
       "id": "01-welcome",
       "duration_seconds": 23.416666666666668,
       "sha256": {
-        "video": "f1a06ba49a70d1f4b0e4f2c987c9fba5830c04ba9386fc47c2f4be26881a4636",
-        "poster": "14554c5b17226d6d3393c7b23b5f3794bc92574a42bf990537f4cb73e4d316e9",
+        "video": "3fd9d3b7fc040274d43733e9244ae6c2e4820f3864942a23d4df12b04a4884a0",
+        "poster": "e05cfcca6ecc63db18d6bc699627a0b52dc3dea2011bd8c3df48f7144a73f347",
         "captions": "f7cd69d97bd4021e0d2697cc76c1b254bf2ab2e333ea1fce2e242b6d5665a438",
         "transcript": "deff3107c033438979482ce723290785fb5f753f8a3b1e2e9732406744216e5d"
       }
@@ -30,10 +30,10 @@
     },
     {
       "id": "03-payments",
-      "duration_seconds": 26.5,
+      "duration_seconds": 28.541666666666668,
       "sha256": {
-        "video": "1ccb758b340f954af89965afb026593f8a0a0cbf94a60475972eb208ea737e8f",
-        "poster": "6d1c937afb41c1b75e5a1c53b3416e90c099ecf9836a9126c2d6bea2763aaeda",
+        "video": "eab85ba84d4a22f992d777b2847e575c5454ad07f1be3bce714a3136fb4377c9",
+        "poster": "cd7a2028d677245c48cae99bc232fc1be97ff71a0092543017b849de827cc85d",
         "captions": "4484a6db66fb6623a0e74a9624be6a9e33d6a994ae910703b407f497c90e7f06",
         "transcript": "b397cd76f648640aacdf70dfe50cdcdc922974d1770279789b1d3cc8877c8acb"
       }
@@ -60,11 +60,11 @@
     },
     {
       "id": "06-help-requests",
-      "duration_seconds": 35.708333333333336,
+      "duration_seconds": 46.666666666666664,
       "sha256": {
-        "video": "14c76bc0b19252db3acbf0dc0aa8d7e828fddc5d5f8813b060eb5152ae328ca4",
-        "poster": "64f5d2a2be969d895373a9960f4b1cf813ae1e80369de092d03824ed6ad6b588",
-        "captions": "09962682c243b4f6b7e36738f6d937618bbbafc1002fcfecf5bf4516724fbbbd",
+        "video": "8376f1c9b4d92c374f8351d8dfb5abb0d94c12721835c12d7a274db9d8dc0d40",
+        "poster": "365505b1217f034f29a3ea1543465f3691f356481885fa857f0128b9c4398366",
+        "captions": "4687562c06d4338f7082aa1af62c9d76e63ed893caaf1ca8e615c2b959820e0a",
         "transcript": "07ff6a097c3158f75785111430fe2d284d762e510c1a1d8458c77d6b430a2026"
       }
     },
@@ -78,5 +78,6 @@
         "transcript": "48b53e4e1d990f8db639b1db741d67f87a6dfff552362fce44eb3c2d5a7a1909"
       }
     }
-  ]
+  ],
+  "ux_refresh_source_commit": "17365c12957d7882069bd4e34e05898645ea1dfc"
 }
