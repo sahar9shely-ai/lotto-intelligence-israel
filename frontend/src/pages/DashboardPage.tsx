@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { DashboardUrgentOps } from "../components/DashboardUrgentOps";
 import { InvestorHeroCard } from "../components/InvestorHeroCard";
@@ -12,7 +12,7 @@ import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
-import { formatDate, formatMoney, formatPercent, statusLabel } from "../utils/format";
+import { formatCalendarMonth, formatDate, formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
 import { isAdminAccount, isAdminShellInvestor } from "../utils/roles";
 
@@ -167,6 +167,8 @@ export function DashboardPage() {
             principal={data.total_principal}
             nextPayment={nextPayment}
             paidThisYear={data.ytd_investor_paid}
+            savingsBalance={savingsBalance}
+            availableBalance={data.available_balance ?? 0}
             onDownloadMonthly={() => void downloadMonthly()}
             monthlyBusy={monthlyBusy}
           />
@@ -175,9 +177,6 @@ export function DashboardPage() {
 
       {!isManager ? (
         <ScrollReveal>
-          <Panel title="חשבון יתרה זמינה" action={<Link className="btn btn--small btn--ghost" to="/investors">פרטי החשבון</Link>}>
-            <Stat label="זמין למשיכה או להשקעה" value={formatMoney(data.available_balance ?? 0)} hint="כסף שאינו משויך למסלול פעיל ואינו צובר תשואה" />
-          </Panel>
           <PaymentCeremonyCard
             payments={awaitingPayments}
             busyId={ceremonyBusyId}
@@ -266,10 +265,7 @@ export function DashboardPage() {
         </ScrollReveal>
       ) : (
         <>
-      {!isManager ? (
-        <p className="ledger-kicker">פירוט המסלול — מזומן וחיסכון בנפרד</p>
-      ) : null}
-      <ScrollReveal className={`money-ledger${!isManager ? " money-ledger--with-hero money-ledger--secondary" : ""}`}>
+      {isManager ? <ScrollReveal className="money-ledger">
         <div className="money-ledger__item money-ledger__item--accent">
           <span>{isManager && !scopeName ? "סך קרן פעילה" : "קרן"}</span>
           <strong>{formatMoney(data.total_principal)}</strong>
@@ -311,7 +307,7 @@ export function DashboardPage() {
             מזומן {formatMoney(cash)} + חיסכון {formatMoney(savings)}
           </em>
         </div>
-      </ScrollReveal>
+      </ScrollReveal> : null}
 
       {isManager && filterId == null && !isAdmin ? (
         <ScrollReveal className="stats-grid stats-grid--compact hide-on-phone">
@@ -446,7 +442,7 @@ export function DashboardPage() {
       ) : null}
 
       {!isAdmin ? (
-      <ScrollReveal className="grid-2" delay={80}>
+      <ScrollReveal className={isManager ? "grid-2" : "investor-home-upcoming"} delay={80}>
         {isManager ? (
           <Panel
             title={scopeName ? `פירוט · ${scopeName}` : "משקיעים"}
@@ -497,36 +493,14 @@ export function DashboardPage() {
               </ul>
             )}
           </Panel>
-        ) : (
-          <Panel className="home-card home-card--summary" title="הסיכום שלך" delay={80}>
-            <ul className="list">
-              {data.investors_summary.map((inv) => (
-                <li key={inv.id} className="list__row">
-                  <div>
-                    <strong>{inv.name}</strong>
-                    <span className="muted">{inv.months_in_program} חודשים בתוכנית</span>
-                  </div>
-                  <div className="list__meta">
-                    <span className="investor-summary__principal">{formatMoney(inv.active_principal)}</span>
-                    <span className="muted">
-                      מזומן {formatMoney(inv.monthly_cash ?? inv.monthly_payout)}
-                      {(inv.monthly_savings ?? 0) > 0
-                        ? ` · חיסכון ${formatMoney(inv.monthly_savings ?? 0)}`
-                        : ""}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        )}
+        ) : null}
 
         <Panel
           className="home-card home-card--upcoming"
-          title="תשלומים קרובים"
+          title={isManager ? "תשלומים קרובים" : "התשלומים שלך"}
           action={
             <Link className="text-link" to="/payments">
-              היסטוריה
+              {isManager ? "היסטוריה" : "כל התשלומים"}
             </Link>
           }
           delay={140}
@@ -535,16 +509,17 @@ export function DashboardPage() {
             <p className="empty">אין תשלומים מתוכננים כרגע.</p>
           ) : (
             <ul className="list">
-              {data.upcoming_payments.map((p) => (
+              {(isManager ? data.upcoming_payments : data.upcoming_payments.slice(0, 3)).map((p) => (
                 <li key={p.id} className="list__row">
                   <div>
                     <strong>
-                      {isManager ? `${p.investor_name} · ` : ""}חודש {p.month_number}
+                      {isManager ? `${p.investor_name} · חודש ${p.month_number}` : formatCalendarMonth(p.due_date)}
                     </strong>
                     <span className="muted">{formatDate(p.due_date)}</span>
+                    {!isManager && (p.date_amendment_pending || p.status === "awaiting_confirmation" || p.due_date < todayISO()) ? <span className="dashboard-payment-note">{p.date_amendment_pending ? "ממתין לחתימת הסכם" : p.status === "awaiting_confirmation" ? "ממתין לאישור קבלת הכסף" : "מועד התשלום עבר · טרם הושלם"}</span> : null}
                   </div>
                   <div className="list__meta">
-                    <span>{formatMoney(p.investor_amount)}</span>
+                    <span>{formatMoney(p.investor_amount, !isManager)}</span>
                     {isManager ? (
                       <span className="muted">עמלה {formatMoney(p.manager_amount)}</span>
                     ) : null}
@@ -557,7 +532,17 @@ export function DashboardPage() {
       </ScrollReveal>
       ) : null}
 
+      {!isManager ? <DashboardDetails collapsed title="תנאי המסלול והתחזית">
+        <dl className="dashboard-terms">
+          <div><dt>החזר מזומן חודשי</dt><dd>{formatMoney(cash)}</dd></div>
+          <div><dt>צבירת חיסכון חודשית</dt><dd>{formatMoney(savings)}</dd></div>
+          <div><dt>חיסכון צפוי בסיום המסלול</dt><dd>{formatMoney(data.projected_savings_total ?? 0)}</dd></div>
+        </dl>
+        <p className="hint">התחזית מחושבת לפי תנאי המסלול. את ההסכמים והמועדים ניתן לראות בתיק ההשקעה.</p>
+      </DashboardDetails> : null}
+
       {!isAdmin ? (
+      <DashboardDetails collapsed={!isManager} title="סיכומים והיסטוריית תשלומים">
       <ScrollReveal delay={200}>
       <Panel
         className="home-card home-card--yearly"
@@ -610,7 +595,12 @@ export function DashboardPage() {
         )}
       </Panel>
       </ScrollReveal>
+      </DashboardDetails>
       ) : null}
     </div>
   );
+}
+
+function DashboardDetails({collapsed, title, children}: {collapsed: boolean; title: string; children: ReactNode}) {
+  return collapsed ? <details className="dashboard-disclosure"><summary>{title}</summary><div className="dashboard-disclosure__body">{children}</div></details> : <>{children}</>;
 }

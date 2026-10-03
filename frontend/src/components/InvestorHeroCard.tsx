@@ -1,14 +1,17 @@
 import { Link } from "react-router-dom";
 import type { Payment } from "../types/investments";
-import { formatDate, formatMoney } from "../utils/format";
+import { formatDate, formatMoney, todayISO } from "../utils/format";
 import { HeroDepth } from "./motion/HeroDepth";
 import { MotionButton } from "./motion/MotionButton";
+import "./dashboardClarity.css";
 
 export function InvestorHeroCard({
   greeting,
   principal,
   nextPayment,
   paidThisYear,
+  savingsBalance = 0,
+  availableBalance = 0,
   onDownloadMonthly,
   monthlyBusy,
 }: {
@@ -16,29 +19,44 @@ export function InvestorHeroCard({
   principal: number;
   nextPayment?: Payment | null;
   paidThisYear: number;
+  savingsBalance?: number;
+  availableBalance?: number;
   onDownloadMonthly?: () => void;
   monthlyBusy?: boolean;
 }) {
   const nextIsAwaiting = nextPayment?.status === "awaiting_confirmation";
+  const paymentOverdue = nextPayment && nextPayment.due_date < todayISO();
 
   return (
-    <HeroDepth className="investor-hero" aria-label="התיק הפרטי">
+    <HeroDepth className="investor-hero investor-hero--overview" aria-label="התיק הפרטי">
       <h1 className="investor-hero__title">
         {greeting ? `שלום ${greeting}` : "התיק הפרטי"}
       </h1>
-      <div className="investor-hero__fund">
-        <span>הקרן</span>
-        <strong>{formatMoney(principal)}</strong>
-      </div>
-      <div className="investor-hero__grid">
+      <p className="investor-overview__intro">ההשקעה שלך במבט אחד</p>
+      <div className="investor-overview__grid">
         <div className="investor-hero__cell">
-          <span>התשלום הבא</span>
+          <span>קרן במסלול פעיל</span>
+          <strong>{formatMoney(principal)}</strong>
+          <em>הסכום שהושקע במסלול</em>
+        </div>
+        <div className="investor-hero__cell">
+          <span>חיסכון שנצבר</span>
+          <strong>{formatMoney(savingsBalance)}</strong>
+          <em>היתרה שנצברה עד היום</em>
+        </div>
+        <div className="investor-hero__cell">
+          <span>יתרה זמינה</span>
+          <strong>{formatMoney(availableBalance)}</strong>
+          <em>למשיכה או למסלול הבא</em>
+        </div>
+        <div className="investor-hero__cell">
+          <span>{nextIsAwaiting ? "תשלום הממתין לאישורך" : paymentOverdue ? "תשלום שטרם הושלם" : "התשלום הבא"}</span>
           {nextPayment ? (
             <>
-              <strong>{formatMoney(nextPayment.investor_amount)}</strong>
+              <strong>{formatMoney(nextPayment.investor_amount, true)}</strong>
               <em className="investor-hero__note">
                 {formatDate(nextPayment.due_date)}
-                {nextIsAwaiting ? " · ממתין לאישורך" : ""}
+                {nextPayment.date_amendment_pending ? " · ממתין לחתימת הסכם" : nextIsAwaiting ? " · ממתין לאישורך" : ""}
               </em>
             </>
           ) : (
@@ -48,30 +66,24 @@ export function InvestorHeroCard({
             </>
           )}
         </div>
-        <div className="investor-hero__cell">
-          <span>שולם השנה</span>
-          <strong>{formatMoney(paidThisYear)}</strong>
-          <em className="investor-hero__note">מזומן שהגיע אליך</em>
-        </div>
       </div>
       <div className="investor-hero__actions">
+        <Link className="btn btn--primary" to="/investors">לתיק ההשקעה</Link>
         {onDownloadMonthly ? (
           <MotionButton
             type="button"
-            className="btn btn--gold investor-hero__cta"
+            className="btn btn--ghost investor-hero__cta"
             disabled={monthlyBusy}
             onClick={onDownloadMonthly}
           >
             {monthlyBusy ? "מכינים דוח..." : "דוח חודשי"}
           </MotionButton>
         ) : null}
-        <Link className="btn btn--ghost hide-on-phone" to="/documents">
-          כספת מסמכים
-        </Link>
-        <Link className="btn btn--ghost hide-on-phone" to="/payments">
+        <Link className="btn btn--ghost" to="/payments">
           לתשלומים
         </Link>
       </div>
+      <p className="investor-overview__paid">מזומן ששולם לך השנה <strong>{formatMoney(paidThisYear)}</strong></p>
     </HeroDepth>
   );
 }

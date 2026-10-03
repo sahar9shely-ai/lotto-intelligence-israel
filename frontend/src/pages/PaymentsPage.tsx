@@ -29,6 +29,7 @@ import {
   paymentsFocusSearchKey,
 } from "../utils/paymentOps";
 import type { Plan } from "../types/investments";
+import "./paymentClarity.css";
 
 function visibleFocusEl(selector: string): HTMLElement | null {
   const nodes = [...document.querySelectorAll<HTMLElement>(selector)];
@@ -129,6 +130,8 @@ export function PaymentsPage() {
   const [manageYear, setManageYear] = useState(false);
   const paymentsPanelRef = useRef<HTMLDivElement | null>(null);
   const savingsPanelRef = useRef<HTMLDivElement | null>(null);
+  const savingsDisclosureRef = useRef<HTMLDetailsElement | null>(null);
+  const reportsDisclosureRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
     const key = paymentsFocusSearchKey(searchParams);
@@ -488,6 +491,7 @@ export function PaymentsPage() {
       focus === "lifetime-savings-now" || focus === "lifetime-savings-end";
 
     if (isSavings) {
+      if (savingsDisclosureRef.current) savingsDisclosureRef.current.open = true;
       setAllYears(false);
       setStatus("");
       window.setTimeout(() => {
@@ -537,10 +541,11 @@ export function PaymentsPage() {
 
   function focusStatusReport(planId: number) {
     setDetailFocus(null);
+    if (reportsDisclosureRef.current) reportsDisclosureRef.current.open = true;
     window.setTimeout(() => {
-      document
-        .getElementById(`status-report-plan-${planId}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const target = document.getElementById(`status-report-plan-${planId}`);
+      if (target instanceof HTMLDetailsElement) target.open = true;
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 60);
   }
 
@@ -870,7 +875,7 @@ export function PaymentsPage() {
     );
 
   return (
-    <div className={`page${refreshing ? " page--refreshing" : ""}`}>
+    <div className={`page payments-page${refreshing ? " page--refreshing" : ""}`}>
       {confirmDialog}
       <Toast message={message} onClear={clearMessage} />
       <ScrollReveal>
@@ -917,17 +922,6 @@ export function PaymentsPage() {
         </div>
       </header>
       </ScrollReveal>
-
-      {!isManager ? (
-        <ScrollReveal>
-        <PaymentCeremonyCard
-          payments={payments.filter((p) => p.status === "awaiting_confirmation")}
-          busyId={markBusyId}
-          onReceived={(id) => void confirmPayment(id)}
-          onNotYet={(id) => void rejectPayment(id)}
-        />
-        </ScrollReveal>
-      ) : null}
 
       <ScrollReveal className="filters">
         <label>
@@ -999,94 +993,21 @@ export function PaymentsPage() {
         ) : null}
       </ScrollReveal>
 
-      <ScrollReveal className="grid-2 hide-on-phone">
-        <Panel
-          title="סיכום שנתי"
-        >
-          <div className="stats-grid stats-grid--compact">
-            <Stat
-              label={isManager ? "שולם למשקיעים" : "שולם לי"}
-              value={formatMoney(yearly?.paid_investor ?? 0)}
-              active={detailFocus === "yearly-paid"}
-              onClick={() => openDetail("yearly-paid")}
-            />
-            <Stat
-              label="מתוכנן לשנה"
-              value={formatMoney(yearly?.planned_investor ?? 0)}
-              active={detailFocus === "yearly-planned"}
-              onClick={() => openDetail("yearly-planned")}
-            />
-            {isManager ? (
-              <Stat
-                label="עמלות ששולמו"
-                value={formatMoney(yearly?.paid_manager ?? 0)}
-                tone="manager"
-                active={detailFocus === "yearly-fees"}
-                onClick={() => openDetail("yearly-fees")}
-              />
-            ) : null}
-            <Stat
-              label="ממתינים לאישור"
-              value={String(yearly?.awaiting_count ?? 0)}
-              hint={`שולמו השנה: ${yearly?.paid_count ?? 0}`}
-              active={detailFocus === "yearly-awaiting"}
-              onClick={() => openDetail("yearly-awaiting")}
-            />
-            <Stat
-              label="מתוכננים"
-              value={String(yearly?.scheduled_count ?? 0)}
-              active={detailFocus === "yearly-scheduled"}
-              onClick={() => openDetail("yearly-scheduled")}
-            />
-          </div>
-        </Panel>
-
-        <Panel
-          title="סיכום סה״כ"
-        >
-          <div className="stats-grid stats-grid--compact">
-            <Stat
-              label={isManager ? "סה״כ שולם למשקיעים" : "סה״כ שולם לי"}
-              value={formatMoney(lifetime?.paid_investor ?? 0)}
-              active={detailFocus === "lifetime-paid"}
-              onClick={() => openDetail("lifetime-paid")}
-            />
-            <Stat
-              label="סה״כ מתוכנן"
-              value={formatMoney(lifetime?.planned_investor ?? 0)}
-              active={detailFocus === "lifetime-planned"}
-              onClick={() => openDetail("lifetime-planned")}
-            />
-            {isManager ? (
-              <Stat
-                label="סה״כ עמלות"
-                value={formatMoney(lifetime?.paid_manager ?? 0)}
-                tone="manager"
-                active={detailFocus === "lifetime-fees"}
-                onClick={() => openDetail("lifetime-fees")}
-              />
-            ) : null}
-            <Stat
-              label="תשלומים ששולמו"
-              value={String(lifetime?.paid_count ?? 0)}
-              active={detailFocus === "lifetime-paid-count"}
-              onClick={() => openDetail("lifetime-paid-count")}
-            />
-            <Stat
-              label="חיסכון עד עכשיו"
-              value={formatMoney(lifetime?.savings_to_date ?? 0)}
-              active={detailFocus === "lifetime-savings-now"}
-              onClick={() => openDetail("lifetime-savings-now")}
-            />
-            <Stat
-              label="חיסכון עד סוף מסלול"
-              value={formatMoney(lifetime?.savings_to_track_end ?? 0)}
-              active={detailFocus === "lifetime-savings-end"}
-              onClick={() => openDetail("lifetime-savings-end")}
-            />
-          </div>
-        </Panel>
-      </ScrollReveal>
+      <section className="payment-current-summary" aria-label={`סיכום תשלומי ${year}`}>
+        <p className="payment-current-summary__scope">סיכום {year}{selectedInvestorName ? ` · ${selectedInvestorName}` : ""}{allYears ? " · הרשימה מציגה את כל השנים" : ""}</p>
+        <div className="payment-current-summary__grid">
+          <Stat label={isManager ? "שולם למשקיעים בפועל" : "שולם לך בפועל"}
+            value={formatMoney(yearly?.paid_investor ?? 0, true)}
+            hint={`${yearly?.paid_count ?? 0} תשלומים ששולמו`}
+            active={detailFocus === "yearly-paid"} onClick={() => openDetail("yearly-paid")} />
+          <Stat label="ממתינים לאישור" value={String(yearly?.awaiting_count ?? 0)}
+            active={detailFocus === "yearly-awaiting"} onClick={() => openDetail("yearly-awaiting")} />
+          <Stat label="תשלומים מתוכננים" value={String(yearly?.scheduled_count ?? 0)}
+            active={detailFocus === "yearly-scheduled"} onClick={() => openDetail("yearly-scheduled")} />
+          <Stat label="תכנון לשנה · כולל מה ששולם" value={formatMoney(yearly?.planned_investor ?? 0, true)}
+            active={detailFocus === "yearly-planned"} onClick={() => openDetail("yearly-planned")} />
+        </div>
+      </section>
 
       {(focusPaymentId || focusMonth) && !detailFocus ? (
         <div className="detail-focus-banner" role="status">
@@ -1123,316 +1044,15 @@ export function PaymentsPage() {
         </div>
       ) : null}
 
-      {isManager && yearInvestors.length > 0 ? (
-        <Panel
-          className="hide-on-phone"
-          title={`מי בלוח ${year}`}
-          action={
-            <button
-              type="button"
-              className={manageYear ? "btn btn--small btn--ghost btn--danger" : "btn btn--small btn--ghost"}
-              onClick={() => setManageYear((v) => !v)}
-            >
-              {manageYear ? "סיום עריכה" : "עריכת לוח"}
-            </button>
-          }
-        >
-          <ul className="list">
-            {yearInvestors.map((inv) => {
-              const savings = savingsByInvestor.get(inv.id) ?? [];
-              const track = primaryPlanForInvestor(plans, inv.id, year);
-              const end = track ? planTrackEnd(track) : null;
-              const selected = investorId === String(inv.id);
-              return (
-                <li key={inv.id} className={selected ? "list__row list__row--selected" : "list__row"}>
-                  <button
-                    type="button"
-                    className="list__pick"
-                    onClick={() => {
-                      setInvestorId((cur) => (cur === String(inv.id) ? "" : String(inv.id)));
-                      setDetailFocus(null);
-                    }}
-                  >
-                    <strong>
-                      {inv.name}
-                      {selected ? <span className="chip">נבחר</span> : null}
-                    </strong>
-                    {track ? (
-                      <span className="muted">
-                        {formatCalendarMonth(track.start_date)} {track.start_date.slice(0, 4)}
-                        {" → "}
-                        {formatCalendarMonth(end)} {end?.slice(0, 4)}
-                        {" · "}
-                        {track.duration_months} ח׳
-                      </span>
-                    ) : (
-                      <span className="muted">מופיע בדוח {year}</span>
-                    )}
-                    {savings.length > 0 ? (
-                      <span className="muted">
-                        חיסכון {formatMoney(savings[0].current_savings_balance ?? 0)}
-                      </span>
-                    ) : null}
-                  </button>
-                  {manageYear ? (
-                    <button
-                      type="button"
-                      className="btn btn--small btn--ghost btn--danger"
-                      disabled={removeBusyId === inv.id}
-                      onClick={() => removeInvestorFromYear(inv)}
-                    >
-                      {removeBusyId === inv.id ? "מסירים..." : "הסר מהשנה"}
-                    </button>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
-      ) : null}
-
-      {activeSavingsPlans.length > 0 ? (
-        <div
-          ref={savingsPanelRef}
-          className={[
-            detailFocus === "lifetime-savings-now" ||
-            detailFocus === "lifetime-savings-end"
-              ? "detail-target detail-target--active"
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" ") || undefined}
-        >
-          <Panel
-            title={
-              detailFocus === "lifetime-savings-now"
-                ? "פירוט · חיסכון עד עכשיו"
-                : detailFocus === "lifetime-savings-end"
-                  ? "פירוט · חיסכון עד סוף מסלול"
-                  : "חיסכון פעיל · לפי תנאי מסלול"
-            }
-          >
-            {savingsByInvestorCards.length > 1 ? (
-              <div className="savings-grand-total">
-                <span className="muted">סה״כ כל המשקיעים בלוח</span>
-                <div className="savings-grand-total__nums">
-                  <strong>חיסכון שנצבר עד עכשיו {formatMoney(savingsTotals.savingsToDate)}</strong>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="savings-investor-list">
-              {savingsByInvestorCards.map((inv) => (
-                <article key={inv.id} className="savings-investor-card">
-                  <header className="savings-investor-card__head">
-                    <div>
-                      <h3 className="savings-investor-card__name">{inv.name}</h3>
-                      <p className="muted" style={{ margin: 0 }}>
-                        {inv.plans.length === 1
-                          ? `${planTypeLabel(inv.plans[0].plan_type)} · קרן ${formatMoney(inv.plans[0].principal)}`
-                          : `${inv.plans.length} מסלולי חיסכון / משולב`}
-                      </p>
-                    </div>
-                    <div className="savings-investor-card__hero">
-                      <span className="stat__label">יתרת חיסכון שנצברה</span>
-                      <strong className="savings-investor-card__hero-value">
-                        {formatMoney(inv.savingsToDate)}
-                      </strong>
-                      <span className="muted">
-                        חיסכון בלבד · ללא תשלומי המזומן
-                      </span>
-                    </div>
-                  </header>
-
-                  <div className="savings-breakdown">
-                    <div className="savings-breakdown__item">
-                      <span className="stat__label">צבירת חיסכון חודשית</span>
-                      <strong>{formatMoney(inv.plans.reduce((sum, p) => sum + Number(p.monthly_savings_accrual || 0), 0))}</strong>
-                    </div>
-                    <div className="savings-breakdown__plus" aria-hidden>
-                      ·
-                    </div>
-                    <div className="savings-breakdown__item">
-                      <span className="stat__label">חיסכון עד עכשיו</span>
-                      <strong>{formatMoney(inv.savingsToDate)}</strong>
-                    </div>
-                    <div className="savings-breakdown__plus" aria-hidden>
-                      ·
-                    </div>
-                    <div className="savings-breakdown__item savings-breakdown__item--total">
-                      <span className="stat__label">צבירת חיסכון חדשה במסלולים המוצגים</span>
-                      <strong>{formatMoney(inv.plans.reduce((sum, p) => sum + Number(p.accrued_savings_balance ?? p.current_savings_balance ?? 0), 0))}</strong>
-                    </div>
-                    <div className="savings-breakdown__item savings-breakdown__item--end">
-                      <span className="stat__label">חיסכון צפוי בסיום מסלול</span>
-                      <strong>{formatMoney(inv.savingsAtEnd)}</strong>
-                    </div>
-                  </div>
-
-                  {inv.plans.map((p) => {
-                    const cash = planCashToDate(p);
-                    const sav = Number(p.current_savings_balance || 0);
-                    const progress =
-                      p.duration_months > 0
-                        ? Math.min(
-                            100,
-                            Math.round(
-                              (Number(p.months_elapsed || 0) /
-                                p.duration_months) *
-                                100,
-                            ),
-                          )
-                        : 0;
-                    return (
-                      <div key={p.id} className="savings-track-block">
-                        <div className="savings-track-block__meta">
-                          <div>
-                            <strong>
-                              מסלול #{p.id} · {planTypeLabel(p.plan_type)}
-                              {p.status === "active" ? " · פעיל" : " · הסתיים"}
-                            </strong>
-                            <div className="muted">
-                              {formatCalendarMonth(p.start_date)}{" "}
-                              {p.start_date.slice(0, 4)}
-                              {" → "}
-                              {formatCalendarMonth(planTrackEnd(p))}{" "}
-                              {planTrackEnd(p).slice(0, 4)}
-                              {" · "}
-                              {p.months_elapsed}/{p.duration_months} חודשים
-                              {p.status !== "active"
-                                ? " · חיסכון חודשי בזמנו (לא נוסף על הפעיל)"
-                                : ""}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            className="btn btn--small btn--ghost"
-                            onClick={() => focusStatusReport(p.id)}
-                          >
-                            פירוט חודשי
-                          </button>
-                        </div>
-
-                        <div
-                          className="savings-progress"
-                          title={`${progress}% מהמסלול`}
-                        >
-                          <div
-                            className="savings-progress__bar"
-                            style={{ width: `${progress}%` }}
-                          />
-                        </div>
-
-                        <div className="savings-track-nums">
-                          <div>
-                            <span className="stat__label">קרן</span>
-                            <strong>{formatMoney(p.principal)}</strong>
-                          </div>
-                          <div>
-                            <span className="stat__label">מזומן עד עכשיו</span>
-                            <strong>{formatMoney(cash)}</strong>
-                            {p.plan_type !== "savings" ? (
-                              <span className="muted">
-                                {formatMoney(p.monthly_investor_payout, true)} ×{" "}
-                                {p.months_elapsed || p.paid_count || 0} ח׳
-                              </span>
-                            ) : (
-                              <span className="muted">אין מזומן חודשי</span>
-                            )}
-                          </div>
-                          <div>
-                            <span className="stat__label">חיסכון עד עכשיו</span>
-                            <strong>{formatMoney(sav)}</strong>
-                            <span className="muted">
-                              {formatMoney(p.monthly_savings_accrual, true)}/ח׳ ·{" "}
-                              {formatPercent(p.savings_rate_percent)}
-                            </span>
-                          </div>
-                          <div className="savings-track-nums__total">
-                            <span className="stat__label">צבירת חיסכון במסלול עד היום</span>
-                            <strong>{formatMoney(Number(p.accrued_savings_balance ?? sav))}</strong>
-                            <span className="muted">לפני משיכות חיסכון קודמות</span>
-                          </div>
-                          <div>
-                            <span className="stat__label">חיסכון צפוי בסיום</span>
-                            <strong>
-                              {formatMoney(p.projected_savings_balance)}
-                            </strong>
-                            <span className="muted">
-                              מחושב על הקרן בלבד
-                            </span>
-                          </div>
-                        </div>
-
-                        <Link className="btn btn--small btn--ghost" to={`/investors?investor_id=${p.investor_id}&plan_id=${p.id}`}>לניהול מסלול #{p.id}</Link>
-                      </div>
-                    );
-                  })}
-                </article>
-              ))}
-            </div>
-          </Panel>
-        </div>
-      ) : null}
-
-      {closedSavingsPlans.length > 0 ? (
-        <Panel
-          className="hide-on-phone"
-          title="תיקי חיסכון סגורים"
-        >
-          <div className="closed-plans">
-            {closedSavingsPlans.map((p) => (
-              <div key={p.id} className="closed-plan-row">
-                <div>
-                  <strong>
-                    {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)} · סגור
-                  </strong>
-                  <span className="muted">
-                    קרן {formatMoney(p.principal)} · מזומן עד אז{" "}
-                    {formatMoney(planCashToDate(p))} · חיסכון שנותר{" "}
-                    {formatMoney(Number(p.current_savings_balance || 0))}
-                    {p.successor_plan_id
-                      ? ` · המשך במסלול #${p.successor_plan_id}`
-                      : ""}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn--small btn--ghost"
-                  onClick={() => focusStatusReport(p.id)}
-                >
-                  פירוט חודשי
-                </button>
-              </div>
-            ))}
-          </div>
-        </Panel>
-      ) : null}
-
-      {statusReportPlans.length > 0 ? (
-        <Panel
-          className="hide-on-phone"
-          title="דוח מצב · מתחילת מסלול עד סוף מסלול"
-        >
-          {statusReportPlans.map((p) => (
-            <div
-              key={p.id}
-              id={`status-report-plan-${p.id}`}
-              style={{ marginBottom: 18 }}
-            >
-              <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem" }}>
-                {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)}
-                {" · "}
-                {formatCalendarMonth(p.start_date)} →{" "}
-                {p.closed_on ? `סיום בפועל ${formatDate(p.closed_on)}` : `${formatCalendarMonth(planTrackEnd(p))} (${p.duration_months} ח׳ מוסכמים)`}
-              </h3>
-              {isClosedPaymentPlan(p) ? <details>
-                <summary>היסטוריית מסלול #{p.id}{p.closed_on ? ` · הסתיים ב־${formatDate(p.closed_on)}` : " · סגור"}</summary>
-                <PlanStatusReportPanel planId={p.id} />
-              </details> : <PlanStatusReportPanel planId={p.id} />}
-            </div>
-          ))}
-        </Panel>
+      {!isManager ? (
+        <ScrollReveal>
+        <PaymentCeremonyCard
+          payments={payments.filter((p) => p.status === "awaiting_confirmation")}
+          busyId={markBusyId}
+          onReceived={(id) => void confirmPayment(id)}
+          onNotYet={(id) => void rejectPayment(id)}
+        />
+        </ScrollReveal>
       ) : null}
 
       <div
@@ -1628,6 +1248,377 @@ export function PaymentsPage() {
           </>
         )}
       </Panel>
+      </div>
+
+      <div className="payment-secondary" aria-label="חיסכון, סיכומים והיסטוריה">
+      {isManager && yearInvestors.length > 0 ? (
+        <details className="payment-disclosure">
+          <summary><span>משקיעים בלוח {year}</span><span className="payment-disclosure__hint">{yearInvestors.length} משקיעים · ניהול הלוח</span></summary>
+        <Panel
+          title={`מי בלוח ${year}`}
+          action={
+            <button
+              type="button"
+              className={manageYear ? "btn btn--small btn--ghost btn--danger" : "btn btn--small btn--ghost"}
+              onClick={() => setManageYear((v) => !v)}
+            >
+              {manageYear ? "סיום עריכה" : "עריכת לוח"}
+            </button>
+          }
+        >
+          <ul className="list">
+            {yearInvestors.map((inv) => {
+              const savings = savingsByInvestor.get(inv.id) ?? [];
+              const track = primaryPlanForInvestor(plans, inv.id, year);
+              const end = track ? planTrackEnd(track) : null;
+              const selected = investorId === String(inv.id);
+              return (
+                <li key={inv.id} className={selected ? "list__row list__row--selected" : "list__row"}>
+                  <button
+                    type="button"
+                    className="list__pick"
+                    onClick={() => {
+                      setInvestorId((cur) => (cur === String(inv.id) ? "" : String(inv.id)));
+                      setDetailFocus(null);
+                    }}
+                  >
+                    <strong>
+                      {inv.name}
+                      {selected ? <span className="chip">נבחר</span> : null}
+                    </strong>
+                    {track ? (
+                      <span className="muted">
+                        {formatCalendarMonth(track.start_date)} {track.start_date.slice(0, 4)}
+                        {" → "}
+                        {formatCalendarMonth(end)} {end?.slice(0, 4)}
+                        {" · "}
+                        {track.duration_months} ח׳
+                      </span>
+                    ) : (
+                      <span className="muted">מופיע בדוח {year}</span>
+                    )}
+                    {savings.length > 0 ? (
+                      <span className="muted">
+                        חיסכון {formatMoney(savings[0].current_savings_balance ?? 0)}
+                      </span>
+                    ) : null}
+                  </button>
+                  {manageYear ? (
+                    <button
+                      type="button"
+                      className="btn btn--small btn--ghost btn--danger"
+                      disabled={removeBusyId === inv.id}
+                      onClick={() => removeInvestorFromYear(inv)}
+                    >
+                      {removeBusyId === inv.id ? "מסירים..." : "הסר מהשנה"}
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </Panel>
+        </details>
+      ) : null}
+
+      {activeSavingsPlans.length > 0 ? (
+        <details ref={savingsDisclosureRef} className="payment-disclosure">
+          <summary><span>חיסכון פעיל</span><span className="payment-disclosure__hint">נצבר {formatMoney(savingsTotals.savingsToDate, true)} · פירוט ותחזית</span></summary>
+        <div
+          ref={savingsPanelRef}
+          className={[
+            detailFocus === "lifetime-savings-now" ||
+            detailFocus === "lifetime-savings-end"
+              ? "detail-target detail-target--active"
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined}
+        >
+          <Panel
+            title={
+              detailFocus === "lifetime-savings-now"
+                ? "פירוט · חיסכון עד עכשיו"
+                : detailFocus === "lifetime-savings-end"
+                  ? "פירוט · חיסכון עד סוף מסלול"
+                  : "חיסכון פעיל · לפי תנאי מסלול"
+            }
+          >
+            {savingsByInvestorCards.length > 1 ? (
+              <div className="savings-grand-total">
+                <span className="muted">סה״כ כל המשקיעים בלוח</span>
+                <div className="savings-grand-total__nums">
+                  <strong>חיסכון שנצבר עד עכשיו {formatMoney(savingsTotals.savingsToDate)}</strong>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="savings-investor-list">
+              {savingsByInvestorCards.map((inv) => (
+                <article key={inv.id} className="savings-investor-card">
+                  <header className="savings-investor-card__head">
+                    <div>
+                      <h3 className="savings-investor-card__name">{inv.name}</h3>
+                      <p className="muted" style={{ margin: 0 }}>
+                        {inv.plans.length === 1
+                          ? `${planTypeLabel(inv.plans[0].plan_type)} · קרן ${formatMoney(inv.plans[0].principal)}`
+                          : `${inv.plans.length} מסלולי חיסכון / משולב`}
+                      </p>
+                    </div>
+                    <div className="savings-investor-card__hero">
+                      <span className="stat__label">יתרת חיסכון שנצברה</span>
+                      <strong className="savings-investor-card__hero-value">
+                        {formatMoney(inv.savingsToDate)}
+                      </strong>
+                      <span className="muted">
+                        חיסכון בלבד · ללא תשלומי המזומן
+                      </span>
+                    </div>
+                  </header>
+
+                  <div className="savings-breakdown">
+                    <div className="savings-breakdown__item">
+                      <span className="stat__label">צבירת חיסכון חודשית</span>
+                      <strong>{formatMoney(inv.plans.reduce((sum, p) => sum + Number(p.monthly_savings_accrual || 0), 0))}</strong>
+                    </div>
+                    <div className="savings-breakdown__plus" aria-hidden>
+                      ·
+                    </div>
+                    <div className="savings-breakdown__item">
+                      <span className="stat__label">חיסכון עד עכשיו</span>
+                      <strong>{formatMoney(inv.savingsToDate)}</strong>
+                    </div>
+                    <div className="savings-breakdown__plus" aria-hidden>
+                      ·
+                    </div>
+                    <div className="savings-breakdown__item savings-breakdown__item--total">
+                      <span className="stat__label">צבירת חיסכון חדשה במסלולים המוצגים</span>
+                      <strong>{formatMoney(inv.plans.reduce((sum, p) => sum + Number(p.accrued_savings_balance ?? p.current_savings_balance ?? 0), 0))}</strong>
+                    </div>
+                    <div className="savings-breakdown__item savings-breakdown__item--end">
+                      <span className="stat__label">חיסכון צפוי בסיום מסלול</span>
+                      <strong>{formatMoney(inv.savingsAtEnd)}</strong>
+                    </div>
+                  </div>
+
+                  {inv.plans.map((p) => {
+                    const cash = planCashToDate(p);
+                    const sav = Number(p.current_savings_balance || 0);
+                    const progress =
+                      p.duration_months > 0
+                        ? Math.min(
+                            100,
+                            Math.round(
+                              (Number(p.months_elapsed || 0) /
+                                p.duration_months) *
+                                100,
+                            ),
+                          )
+                        : 0;
+                    return (
+                      <div key={p.id} className="savings-track-block">
+                        <div className="savings-track-block__meta">
+                          <div>
+                            <strong>
+                              מסלול #{p.id} · {planTypeLabel(p.plan_type)}
+                              {p.status === "active" ? " · פעיל" : " · הסתיים"}
+                            </strong>
+                            <div className="muted">
+                              {formatCalendarMonth(p.start_date)}{" "}
+                              {p.start_date.slice(0, 4)}
+                              {" → "}
+                              {formatCalendarMonth(planTrackEnd(p))}{" "}
+                              {planTrackEnd(p).slice(0, 4)}
+                              {" · "}
+                              {p.months_elapsed}/{p.duration_months} חודשים
+                              {p.status !== "active"
+                                ? " · חיסכון חודשי בזמנו (לא נוסף על הפעיל)"
+                                : ""}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn--small btn--ghost"
+                            onClick={() => focusStatusReport(p.id)}
+                          >
+                            פירוט חודשי
+                          </button>
+                        </div>
+
+                        <div
+                          className="savings-progress"
+                          title={`${progress}% מהמסלול`}
+                        >
+                          <div
+                            className="savings-progress__bar"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+
+                        <div className="savings-track-nums">
+                          <div>
+                            <span className="stat__label">קרן</span>
+                            <strong>{formatMoney(p.principal)}</strong>
+                          </div>
+                          <div>
+                            <span className="stat__label">מזומן עד עכשיו</span>
+                            <strong>{formatMoney(cash)}</strong>
+                            {p.plan_type !== "savings" ? (
+                              <span className="muted">
+                                {formatMoney(p.monthly_investor_payout, true)} ×{" "}
+                                {p.months_elapsed || p.paid_count || 0} ח׳
+                              </span>
+                            ) : (
+                              <span className="muted">אין מזומן חודשי</span>
+                            )}
+                          </div>
+                          <div>
+                            <span className="stat__label">חיסכון עד עכשיו</span>
+                            <strong>{formatMoney(sav)}</strong>
+                            <span className="muted">
+                              {formatMoney(p.monthly_savings_accrual, true)}/ח׳ ·{" "}
+                              {formatPercent(p.savings_rate_percent)}
+                            </span>
+                          </div>
+                          <div className="savings-track-nums__total">
+                            <span className="stat__label">צבירת חיסכון במסלול עד היום</span>
+                            <strong>{formatMoney(Number(p.accrued_savings_balance ?? sav))}</strong>
+                            <span className="muted">לפני משיכות חיסכון קודמות</span>
+                          </div>
+                          <div>
+                            <span className="stat__label">חיסכון צפוי בסיום</span>
+                            <strong>
+                              {formatMoney(p.projected_savings_balance)}
+                            </strong>
+                            <span className="muted">
+                              מחושב על הקרן בלבד
+                            </span>
+                          </div>
+                        </div>
+
+                        <Link className="btn btn--small btn--ghost" to={`/investors?investor_id=${p.investor_id}&plan_id=${p.id}`}>לניהול מסלול #{p.id}</Link>
+                      </div>
+                    );
+                  })}
+                </article>
+              ))}
+            </div>
+          </Panel>
+        </div>
+        </details>
+      ) : null}
+
+      {closedSavingsPlans.length > 0 ? (
+        <details className="payment-disclosure">
+          <summary><span>היסטוריית חיסכון</span><span className="payment-disclosure__hint">{closedSavingsPlans.length} מסלולים סגורים</span></summary>
+        <Panel
+          title="תיקי חיסכון סגורים"
+        >
+          <div className="closed-plans">
+            {closedSavingsPlans.map((p) => (
+              <div key={p.id} className="closed-plan-row">
+                <div>
+                  <strong>
+                    {p.investor_name} · מסלול #{p.id} · {planTypeLabel(p.plan_type)} · סגור
+                  </strong>
+                  <span className="muted">
+                    קרן {formatMoney(p.principal)} · מזומן עד אז{" "}
+                    {formatMoney(planCashToDate(p))} · חיסכון שנותר{" "}
+                    {formatMoney(Number(p.current_savings_balance || 0))}
+                    {p.successor_plan_id
+                      ? ` · המשך במסלול #${p.successor_plan_id}`
+                      : ""}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--small btn--ghost"
+                  onClick={() => focusStatusReport(p.id)}
+                >
+                  פירוט חודשי
+                </button>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        </details>
+      ) : null}
+
+      {statusReportPlans.length > 0 ? (
+        <details ref={reportsDisclosureRef} className="payment-disclosure">
+          <summary><span>דוחות חודשיים לפי מסלול</span><span className="payment-disclosure__hint">תשלומים וחיסכון · מתחילת המסלול</span></summary>
+          <div className="payment-disclosure__body">
+            {statusReportPlans.map((p) => (
+              <details key={p.id} id={`status-report-plan-${p.id}`} className="payment-plan-report">
+                <summary>
+                  <span>{isManager ? `${p.investor_name} · ` : ""}מסלול #{p.id} · {planTypeLabel(p.plan_type)}</span>
+                  <span className="payment-disclosure__hint">
+                    {formatDate(p.start_date)} → {p.closed_on ? `סיום בפועל ${formatDate(p.closed_on)}` : `סיום מתוכנן ${formatDate(planTrackEnd(p))}`}
+                    {isClosedPaymentPlan(p) ? " · היסטוריה" : " · פעיל"}
+                  </span>
+                </summary>
+                <PlanStatusReportPanel planId={p.id} />
+              </details>
+            ))}
+          </div>
+        </details>
+      ) : null}
+
+      <details className="payment-disclosure">
+        <summary><span>סיכומים נוספים</span><span className="payment-disclosure__hint">כל השנים, חיסכון ותחזית{isManager ? " · רווחי מנהל" : ""}</span></summary>
+        <div className="payment-disclosure__body">
+          {isManager ? <Panel title={`רווחי מנהל · ${year}`}>
+            <Stat label="עמלות ששולמו בפועל" value={formatMoney(yearly?.paid_manager ?? 0, true)} tone="manager"
+              active={detailFocus === "yearly-fees"} onClick={() => openDetail("yearly-fees")} />
+          </Panel> : null}
+        <Panel
+          title="סיכום כל השנים"
+        >
+          <div className="stats-grid stats-grid--compact">
+            <Stat
+              label={isManager ? "סה״כ שולם למשקיעים" : "סה״כ שולם לי"}
+              value={formatMoney(lifetime?.paid_investor ?? 0)}
+              active={detailFocus === "lifetime-paid"}
+              onClick={() => openDetail("lifetime-paid")}
+            />
+            <Stat
+              label="תכנון לכל השנים · כולל תשלומים ששולמו"
+              value={formatMoney(lifetime?.planned_investor ?? 0)}
+              active={detailFocus === "lifetime-planned"}
+              onClick={() => openDetail("lifetime-planned")}
+            />
+            {isManager ? (
+              <Stat
+                label="סה״כ עמלות"
+                value={formatMoney(lifetime?.paid_manager ?? 0)}
+                tone="manager"
+                active={detailFocus === "lifetime-fees"}
+                onClick={() => openDetail("lifetime-fees")}
+              />
+            ) : null}
+            <Stat
+              label="תשלומים ששולמו"
+              value={String(lifetime?.paid_count ?? 0)}
+              active={detailFocus === "lifetime-paid-count"}
+              onClick={() => openDetail("lifetime-paid-count")}
+            />
+            <Stat
+              label="חיסכון עד עכשיו"
+              value={formatMoney(lifetime?.savings_to_date ?? 0)}
+              active={detailFocus === "lifetime-savings-now"}
+              onClick={() => openDetail("lifetime-savings-now")}
+            />
+            <Stat
+              label="חיסכון צפוי בסיום המסלולים"
+              value={formatMoney(lifetime?.savings_to_track_end ?? 0)}
+              active={detailFocus === "lifetime-savings-end"}
+              onClick={() => openDetail("lifetime-savings-end")}
+            />
+          </div>
+        </Panel>
+
+        </div>
+      </details>
       </div>
     </div>
   );

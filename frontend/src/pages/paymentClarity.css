@@ -1,0 +1,133 @@
+.payments-page .payment-current-summary {
+  padding: 0;
+}
+
+.payments-page .payment-current-summary__scope {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.payments-page .payment-current-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.payments-page .payment-current-summary .stat {
+  min-height: 94px;
+  padding: 14px;
+}
+
+.payments-page .payment-current-summary .stat__value {
+  font-size: clamp(1.2rem, 2.2vw, 1.65rem);
+  overflow-wrap: anywhere;
+}
+
+.payments-page .payment-current-summary .stat__label {
+  line-height: 1.4;
+}
+
+.payments-page .payment-secondary {
+  display: grid;
+  gap: 12px;
+}
+
+.payments-page .payment-disclosure,
+.payments-page .payment-plan-report {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.payments-page .payment-disclosure > summary,
+.payments-page .payment-plan-report > summary {
+  padding: 16px 18px;
+  min-height: 54px;
+  cursor: pointer;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.payments-page .payment-disclosure > summary::marker,
+.payments-page .payment-plan-report > summary::marker {
+  color: var(--accent);
+}
+
+.payments-page .payment-disclosure > summary:focus-visible,
+.payments-page .payment-plan-report > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+}
+
+.payments-page .payment-disclosure__hint {
+  display: block;
+  padding-inline-start: 18px;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.payments-page .payment-disclosure[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.payments-page .payment-disclosure > .panel,
+.payments-page .payment-disclosure > div > .panel {
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.payments-page .payment-disclosure__body {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.payments-page .payment-plan-report > .status-report,
+.payments-page .payment-plan-report > p {
+  margin: 14px;
+}
+
+.payments-page #payments-list,
+.payments-page .payment-plan-report {
+  scroll-margin-top: 90px;
+}
+
+@media (max-width: 700px) {
+  .payments-page .payment-current-summary__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .payments-page .payment-current-summary .stat {
+    min-height: 86px;
+    padding: 12px;
+  }
+
+  .payments-page .filters {
+    gap: 10px;
+  }
+
+  .payments-page .payment-history-toggle {
+    flex-basis: 100%;
+  }
+
+  .payments-page .payment-disclosure__body {
+    padding: 10px;
+  }
+
+  .payments-page .closed-plan-row,
+  .payments-page .list__row {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .payments-page .payment-disclosure > summary,
+  .payments-page .payment-plan-report > summary {
+    padding: 14px;
+    overflow-wrap: anywhere;
+  }
+}

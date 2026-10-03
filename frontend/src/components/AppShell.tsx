@@ -2,11 +2,12 @@ import { PersonalAssistant } from "./PersonalAssistant";
 import { NotificationCenter } from "./NotificationCenter";
 import { PaymentNudgeDialog } from "./PaymentNudgeDialog";
 import { PageTransition } from "./motion/PageTransition";
+import { PageNavigationReset } from "./PageNavigationReset";
 import { MotionButton } from "./motion/MotionButton";
 import { useMotionPrefs } from "../hooks/useMotionPrefs";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState, type SVGProps } from "react";
-import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
+import { NavLink, useLocation, useNavigate, useNavigationType, useOutlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isAdminAccount } from "../utils/roles";
 import { useAsync } from "../hooks/useAsync";
@@ -128,6 +129,7 @@ export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const page = useOutlet();
   const { reduceMotion } = useMotionPrefs();
   const isManager = Boolean(user?.is_manager);
@@ -357,7 +359,10 @@ export function AppShell() {
       <div className="app">
         <main className="main">
           <AnimatePresence mode="wait">
-            <PageTransition key={location.pathname}>{page}</PageTransition>
+            <PageTransition key={location.pathname}>
+              <PageNavigationReset navigationType={navigationType} />
+              {page}
+            </PageTransition>
           </AnimatePresence>
         </main>
       </div>
