@@ -16,6 +16,7 @@ import {
   formatMoney,
   formatPercent,
   statusLabel,
+  todayISO,
   trackEndISO,
 } from "../utils/format";
 import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
@@ -222,6 +223,9 @@ export function PaymentsPage() {
   const closedPlanIds = useMemo(() => new Set((plans ?? []).filter(isClosedPaymentPlan).map((p) => p.id)), [plans]);
 
   function paymentDisplayStatus(payment: (typeof payments)[number]) {
+    if (!isManager && payment.status === "scheduled" && !payment.date_amendment_pending && payment.due_date < todayISO()) {
+      return "טרם הושלם · המועד עבר";
+    }
     return payment.status === "skipped" && closedPlanIds.has(payment.plan_id)
       ? "בוטל בסיום המסלול" : statusLabel(payment.status);
   }

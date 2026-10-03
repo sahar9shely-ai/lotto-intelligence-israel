@@ -71,6 +71,7 @@ export function InvestorsPage() {
     [],
   );
   const [scope, setScope] = useState<Scope | null>(null);
+  const [investorSearch, setInvestorSearch] = useState("");
   const sectionParam = searchParams.get("section");
   const workspaceSection: WorkspaceSection = WORKSPACE_SECTIONS.some(s => s.id === sectionParam) ? sectionParam as WorkspaceSection : "plans";
   const [agreementRevision, setAgreementRevision] = useState(0);
@@ -143,6 +144,10 @@ export function InvestorsPage() {
     () => (investors ?? []).filter((inv) => !isAdminShellInvestor(inv)),
     [investors],
   );
+  const investorMatches = useMemo(() => {
+    const query = investorSearch.trim().toLocaleLowerCase();
+    return query ? bookInvestors.filter(inv => [inv.name, inv.access_username].some(value => value?.toLocaleLowerCase().includes(query))) : bookInvestors;
+  }, [bookInvestors, investorSearch]);
 
   const effectiveScope: Scope = useMemo(() => {
     const linkedId = Number(searchParams.get("investor_id"));
@@ -354,6 +359,15 @@ export function InvestorsPage() {
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
 
       {isManager ? (
+        <>
+        <div className="filters" aria-label="מציאת תיק משקיע">
+          <label>
+            חיפוש משקיע
+            <input type="search" value={investorSearch} onChange={event => setInvestorSearch(event.target.value)} placeholder="שם המשקיע או שם המשתמש" autoComplete="off" />
+          </label>
+          {investorSearch ? <button type="button" className="btn btn--ghost btn--small" onClick={() => setInvestorSearch("")}>נקה חיפוש</button> : null}
+          <p className="hint" role="status">{investorMatches.length ? `${investorMatches.length} מתוך ${bookInvestors.length} תיקים לבחירה` : "לא נמצאו משקיעים. נסו שם אחר או נקו את החיפוש."}</p>
+        </div>
         <div className="scope-bar" role="tablist" aria-label="בחירת משקיע">
           <button
             type="button"
@@ -366,7 +380,7 @@ export function InvestorsPage() {
           >
             סה״כ כולם
           </button>
-          {bookInvestors.map((inv) => (
+          {investorMatches.map((inv) => (
             <button
               key={inv.id}
               type="button"
@@ -382,6 +396,7 @@ export function InvestorsPage() {
             </button>
           ))}
         </div>
+        </>
       ) : null}
 
       {effectiveScope === "all" && isManager && workspaceSection !== "plans" ? (

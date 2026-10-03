@@ -9,6 +9,7 @@ import { api } from "../services/api";
 import type { AuthUser, PasswordResetRequestItem } from "../types/auth";
 import { formatDate } from "../utils/format";
 import { formatPhoneDisplay, toWhatsAppNumber, whatsAppAccessUrl } from "../utils/whatsapp";
+import "./userSearch.css";
 
 function lockPageScroll() {
   const body = document.body;
@@ -66,6 +67,7 @@ export function UsersPage() {
   const [formRev, setFormRev] = useState<Record<number, number>>({});
   const [openEditors, setOpenEditors] = useState<Record<number, boolean>>({});
   const [focusPasswordUserId, setFocusPasswordUserId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const clearMessage = useCallback(() => setMessage(null), []);
   const publicUrl = siteStatus?.public_url || window.location.origin;
 
@@ -84,6 +86,7 @@ export function UsersPage() {
   }
 
   function jumpToUserPassword(userId: number) {
+    setSearchQuery("");
     setFocusPasswordUserId(userId);
     setOpenEditors((prev) => ({ ...prev, [userId]: true }));
     window.requestAnimationFrame(() => {
@@ -332,6 +335,16 @@ export function UsersPage() {
 
   const pendingUsers = (users ?? []).filter((u) => !u.has_password);
   const pendingResets = resetRequests ?? [];
+  const normalizeSearch = (value: string) => value.normalize("NFC").trim().toLocaleLowerCase().replace(/\s+/g, " ");
+  const query = normalizeSearch(searchQuery);
+  const matchingUserIds = new Set((users ?? []).filter((u) =>
+    [u.investor_name, u.username].some((value) => normalizeSearch(value || "").includes(query)),
+  ).map((u) => u.id));
+
+  function clearSearch() {
+    setSearchQuery("");
+    document.getElementById("user-search")?.focus();
+  }
 
   return (
     <div className="page">
@@ -349,6 +362,22 @@ export function UsersPage() {
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
       {errorMsg ? <p className="form-error">{errorMsg}</p> : null}
+
+      <section className="user-search" role="search" aria-label="חיפוש משתמשים">
+        <label htmlFor="user-search">
+          חיפוש לפי שם המשקיע או שם הכניסה
+          <input id="user-search" type="search" value={searchQuery}
+            placeholder="הקלד שם או שם משתמש" autoComplete="off"
+            aria-describedby="user-search-count"
+            onChange={(e) => setSearchQuery(e.target.value)} />
+        </label>
+        <button type="button" className="btn btn--ghost btn--small" disabled={!searchQuery} onClick={clearSearch}>
+          נקה חיפוש
+        </button>
+        <p id="user-search-count" className="user-search__count" role="status">
+          {query ? `${matchingUserIds.size} מתוך ${users?.length ?? 0} משתמשים מתאימים לחיפוש` : `${users?.length ?? 0} משתמשים`}
+        </p>
+      </section>
 
       {pendingResets.length > 0 ? (
         <Panel
@@ -417,10 +446,19 @@ export function UsersPage() {
         </Panel>
       ) : null}
 
+      {matchingUserIds.size === 0 ? (
+        <div className="empty-block">
+          <p className="empty">{query ? "לא נמצאו משתמשים בשם הזה. נסה שם המשקיע או שם הכניסה, גם בחלק מהמילה." : "אין משתמשים להצגה."}</p>
+          {query ? <button type="button" className="btn btn--ghost" onClick={clearSearch}>הצג את כל המשתמשים</button> : null}
+        </div>
+      ) : null}
+
+      {/* Keep filtered cards mounted so unsaved editor fields remain intact. */}
       {(users ?? []).map((u) => (
         <div
           key={u.id}
           id={`user-card-${u.id}`}
+          hidden={!matchingUserIds.has(u.id)}
           className={`user-card-anchor${focusPasswordUserId === u.id ? " is-target" : ""}`}
         >
         <Panel

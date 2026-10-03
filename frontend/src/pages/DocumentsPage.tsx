@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Panel } from "../components/Panel";
 import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Toast } from "../components/Toast";
@@ -14,8 +14,11 @@ import { openPdfBlob, savePdfBlob } from "../utils/pdfDocument";
 import { yearlyPaymentsPdfFile } from "../utils/paymentsPdf";
 import { quotePdfFile } from "../utils/quotePdf";
 import { isAdminAccount, isAdminShellInvestor } from "../utils/roles";
+import { documentPeriod, issuedDocumentPeriod, matchesDocumentPeriod } from "../utils/documentPeriod";
+import "./documentsPage.css";
 
 const KIND_ORDER: VaultDocumentKind[] = ["agreement", "contract", "quote", "yearly", "monthly"];
+const MONTH_NAMES = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"];
 
 const KIND_SECTION: Record<VaultDocumentKind, string> = {
   agreement: "הסכמי פתיחה וסיום",
@@ -39,6 +42,9 @@ export function DocumentsPage({investorId, embedded = false, excludeAgreements =
   const [filterId, setFilterId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [year, setYear] = useState("");
+  const [month, setMonth] = useState("");
+  const periodHintId = useId();
 
   const {
     data: investors,
@@ -57,6 +63,7 @@ export function DocumentsPage({investorId, embedded = false, excludeAgreements =
 
   const scopedId = isManager ? investorId ?? filterId : null;
   const canLoad = !isManager || scopedId != null;
+  useEffect(() => {setYear(""); setMonth("");}, [scopedId, user?.id]);
 
   const { data, error, loading, reload } = useAsync(
     () =>
@@ -66,17 +73,30 @@ export function DocumentsPage({investorId, embedded = false, excludeAgreements =
     [isManager, scopedId, canLoad],
   );
 
+  const expectedInvestorId = isManager ? scopedId : user?.investor_id;
+  const scopedData = data?.investor_id === expectedInvestorId ? data : null;
+  const documents = useMemo(
+    () => (scopedData?.documents ?? []).filter(doc => !excludeAgreements || doc.kind !== "agreement"),
+    [scopedData, excludeAgreements],
+  );
+  const years = useMemo(
+    () => [...new Set(documents.map(doc => documentPeriod(doc)?.year).filter((value): value is string => Boolean(value)))].sort((a, b) => Number(b) - Number(a)),
+    [documents],
+  );
+  const filteredDocuments = useMemo(() => documents.filter(doc => matchesDocumentPeriod(doc, year, month)), [documents, year, month]);
   const groups = useMemo(() => {
-    const docs = (data?.documents ?? []).filter(doc => !excludeAgreements || doc.kind !== "agreement");
     return KIND_ORDER.map((kind) => ({
       kind,
       title: KIND_SECTION[kind],
-      items: docs.filter((row) => row.kind === kind),
+      items: filteredDocuments.filter((row) => row.kind === kind),
     })).filter((group) => group.items.length > 0);
-  }, [data, excludeAgreements]);
+  }, [filteredDocuments]);
+  const scopeLoading = loading || (!error && canLoad && scopedData == null);
+  const hasPeriodFilter = Boolean(year || month);
+  function resetPeriod() {setYear(""); setMonth("");}
 
   const investorName =
-    data?.investor_name ||
+    scopedData?.investor_name ||
     investorOptions.find((inv) => inv.id === scopedId)?.name ||
     user?.investor_name ||
     user?.username ||
@@ -179,6 +199,18 @@ export function DocumentsPage({investorId, embedded = false, excludeAgreements =
         </div>
       ) : null}
 
+      {canLoad && !scopeLoading && !error && documents.length > 0 ? <fieldset className="document-period-filters" aria-describedby={periodHintId}>
+        <legend>סינון הארכיון לפי תקופה</legend>
+        <div className="document-period-filters__controls">
+          <label>שנת המסמכים<select value={year} onChange={event => setYear(event.target.value)}><option value="">כל השנים</option>{years.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label>חודש המסמכים<select value={month} onChange={event => setMonth(event.target.value)}><option value="">כל החודשים</option>{MONTH_NAMES.map((name, index) => <option key={name} value={String(index + 1).padStart(2, "0")}>{name}</option>)}</select></label>
+          <button type="button" className="btn btn--ghost btn--small" disabled={!hasPeriodFilter} onClick={resetPeriod}>ניקוי סינון</button>
+        </div>
+        <p className="document-period-filters__count" role="status" aria-live="polite">מסמכים מוצגים: {filteredDocuments.length} מתוך {documents.length}</p>
+        <p className="hint" id={periodHintId}>דוחות מסוננים לפי תקופת הדוח; שאר המסמכים לפי תאריך ההפקה. דוחות שנתיים מוצגים בבחירה ״כל החודשים״.</p>
+        {excludeAgreements ? <p className="hint">הסכמי המסלולים מוצגים באזור החתימות למעלה ואינם נכללים בסינון הארכיון.</p> : null}
+      </fieldset> : null}
+
       {!embedded && isManager && investorsLoading ? (
         <div className="state state--loading" role="status">טוען את רשימת המשקיעים...</div>
       ) : !embedded && isManager && investorsError ? (
@@ -195,7 +227,7 @@ export function DocumentsPage({investorId, embedded = false, excludeAgreements =
         <div className="vault-empty">
           <p>בחרו משקיע כדי לראות את כספת המסמכים שלו.</p>
         </div>
-      ) : loading ? (
+      ) : scopeLoading ? (
         <div className="state state--loading">טוען את הכספת...</div>
       ) : error ? (
         <div className="state state--error">
@@ -204,10 +236,10 @@ export function DocumentsPage({investorId, embedded = false, excludeAgreements =
             נסה שוב
           </button>
         </div>
-      ) : !data || groups.length === 0 ? (
+      ) : !scopedData || groups.length === 0 ? (
         <div className="vault-empty">
-          <p>{excludeAgreements ? "אין מסמכים נוספים או דוחות בתיק." : `עדיין אין מסמכים בתיק${data?.investor_name ? ` של ${data.investor_name}` : ""}.`}</p>
-          <span>{excludeAgreements ? "הסכמי פתיחה וסיום מוצגים באזור החתימות למעלה." : "חוזה חתום, הצעה ודוח חודשי או שנתי יופיעו כאן ברגע שיהיו במערכת."}</span>
+          <p>{documents.length > 0 && hasPeriodFilter ? "לא נמצאו מסמכים התואמים לשנה ולחודש שנבחרו." : excludeAgreements ? "אין מסמכים נוספים או דוחות בתיק." : `עדיין אין מסמכים בתיק${scopedData?.investor_name ? ` של ${scopedData.investor_name}` : ""}.`}</p>
+          <span>{documents.length > 0 && hasPeriodFilter ? "אפשר לבחור תקופה אחרת או לנקות את הסינון להצגת כל מסמכי הארכיון." : excludeAgreements ? "הסכמי פתיחה וסיום מוצגים באזור החתימות למעלה." : "חוזה חתום, הצעה ודוח חודשי או שנתי יופיעו כאן ברגע שיהיו במערכת."}</span>
         </div>
       ) : (
         groups.map((group) => (
@@ -224,7 +256,7 @@ export function DocumentsPage({investorId, embedded = false, excludeAgreements =
                       <span className="vault-row__kind">{kindGlyph(doc.kind)}</span>
                       <strong className="vault-row__title">{doc.title}</strong>
                       {doc.subtitle ? <span className="vault-row__meta">{doc.subtitle}</span> : null}
-                      {doc.issued_at ? (
+                      {doc.issued_at && issuedDocumentPeriod(doc.issued_at) ? (
                         <span className="vault-row__meta">{formatDate(doc.issued_at)}</span>
                       ) : null}
                     </div>

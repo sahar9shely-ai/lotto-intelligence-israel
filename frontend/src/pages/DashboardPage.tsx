@@ -15,6 +15,7 @@ import { api } from "../services/api";
 import { formatCalendarMonth, formatDate, formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 import { downloadMonthlyReportPdf } from "../utils/monthlyReportPdf";
 import { isAdminAccount, isAdminShellInvestor } from "../utils/roles";
+import { isActionQueueAdmin } from "../utils/adminActionQueue";
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -22,7 +23,7 @@ export function DashboardPage() {
   const isAdmin = isAdminAccount(user);
   const [filterId, setFilterId] = useState<number | null>(null);
 
-  const { data: investors } = useAsync(
+  const { data: investors, error: investorsError, reload: reloadInvestors } = useAsync(
     () => (isManager ? api.investors() : Promise.resolve([])),
     [isManager],
   );
@@ -76,6 +77,9 @@ export function DashboardPage() {
       ? investors?.find((i) => i.id === filterId)?.name ?? "משקיע"
       : null;
   const investorScopeOptions = (investors ?? []).filter((inv) => !isAdminShellInvestor(inv));
+  const topupTasks = (topupRequests ?? []).filter(row => isActionQueueAdmin(user)
+    ? row.can_reverse_investment && (filterId == null || row.investor_id === filterId)
+    : row.status === "pending" || row.status === "contract" || row.can_reverse_investment);
   const awaitingPayments = (investorPayments ?? []).filter(
     (p) => p.status === "awaiting_confirmation",
   );
@@ -188,28 +192,22 @@ export function DashboardPage() {
 
       {isManager ? (
         <ScrollReveal>
-          <DashboardUrgentOps investorId={filterId} />
+          <DashboardUrgentOps investorId={filterId} investors={investors} investorsError={investorsError} onReloadInvestors={reloadInvestors} />
         </ScrollReveal>
       ) : null}
 
-      {(topupRequests ?? []).some(
-        (r) => r.status === "pending" || r.status === "contract" || r.can_reverse_investment,
-      ) ? (
+      {topupTasks.length > 0 ? (
         <ScrollReveal>
         <Panel
-          title={isManager ? "בקשות מסלול" : "הוסף מסלול"}
+          title={isActionQueueAdmin(user) ? "מסלולים בתקופת ביטול" : isManager ? "בקשות מסלול" : "הוסף מסלול"}
           action={
-            <Link className="btn btn--small btn--primary" to="/investors">
-              {isManager ? "לטיפול בבקשות" : "לפרטים"}
+            <Link className="btn btn--small btn--primary" to={isActionQueueAdmin(user) && filterId != null ? `/investors?investor_id=${filterId}&section=requests` : "/investors"}>
+              {isActionQueueAdmin(user) ? "לפרטי המסלולים" : isManager ? "לטיפול בבקשות" : "לפרטים"}
             </Link>
           }
         >
           <ul className="list">
-            {(topupRequests ?? [])
-              .filter(
-                (r) =>
-                  r.status === "pending" || r.status === "contract" || r.can_reverse_investment,
-              )
+            {topupTasks
               .slice(0, 6)
               .map((r) => (
                 <li key={r.id} className="list__row">
@@ -226,6 +224,7 @@ export function DashboardPage() {
                     </span>
                   </div>
                   <span className={`badge badge--${r.status}`}>{statusLabel(r.status)}</span>
+                  {isActionQueueAdmin(user) ? <Link className="text-link" to={`/investors?investor_id=${r.investor_id}&section=requests`}>לפרטים בתיק</Link> : null}
                 </li>
               ))}
             </ul>

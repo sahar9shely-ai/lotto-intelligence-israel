@@ -896,10 +896,10 @@ export function QuotesPage() {
                   {viewTab === "completed" ? (
                     <>
                       <Link
-                        to="/investors"
+                        to={q.converted_investor_id ? `/investors?investor_id=${q.converted_investor_id}` : "/investors"}
                         className="btn btn--admin"
                       >
-                        מסך משקיעים #{q.converted_investor_id}
+                        {q.converted_investor_id ? `לתיק של ${q.prospect_name}` : "לתיקי המשקיעים"}
                       </Link>
                       <button
                         type="button"
