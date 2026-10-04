@@ -171,6 +171,7 @@ def prepare_payment_confirmation(
         end = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
         payments = db.query(Payment).options(joinedload(Payment.investor)).filter(
             Payment.investor_id == investor.id, Payment.due_date >= start, Payment.due_date < end,
+            Payment.status != "skipped",
         ).order_by(Payment.id).all()
         month_label = f"{_MONTHS[month - 1]} {year}"
         if not payments:

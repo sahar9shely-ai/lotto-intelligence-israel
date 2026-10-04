@@ -160,7 +160,7 @@ export function PersonalAreaPage() {
       </header>
       </ScrollReveal>
 
-      <PushNotificationSettings />
+      {!user?.is_manager && <PushNotificationSettings />}
 
       <ScrollReveal>
       <Panel

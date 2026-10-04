@@ -64,6 +64,16 @@ class AssistantActionTests(unittest.TestCase):
         self.assertEqual(self.db.query(EmailOutbox).count(), 0)
         self.notify_mock.assert_not_called()
 
+    def historical_skipped_payment(self):
+        closed_plan = InvestmentPlan(investor_id=self.recipient.id, principal=12000,
+            plan_type="monthly", monthly_rate_percent=2, start_date=date(2026, 1, 1),
+            duration_months=12, status="completed", closed_on=date(2026, 10, 1))
+        self.db.add(closed_plan); self.db.flush()
+        cancelled = Payment(plan_id=closed_plan.id, investor_id=self.recipient.id,
+            month_number=11, due_date=date(2026, 11, 15), investor_amount=240, status="skipped")
+        self.db.add(cancelled); self.db.commit()
+        return cancelled
+
     def test_fresh_direct_command_only_prepares_explicit_read_only_card(self):
         forms = [
             "תשלח בקשה לאופק על חודש נובמבר",
@@ -131,13 +141,58 @@ class AssistantActionTests(unittest.TestCase):
         self.assert_unchanged()
 
     def test_multiple_payments_in_calendar_month_require_selection(self):
+        cancelled = self.historical_skipped_payment()
         other_plan = InvestmentPlan(investor_id=self.recipient.id, principal=12000, plan_type="monthly",
             monthly_rate_percent=2, start_date=date(2026, 1, 1), duration_months=12)
         self.db.add(other_plan); self.db.flush()
         self.db.add(Payment(plan_id=other_plan.id, investor_id=self.recipient.id, month_number=11,
             due_date=date(2026, 11, 15), investor_amount=240, status="scheduled")); self.db.commit()
-        self.assertIsNone(self.prepare()["action"])
+        result = self.prepare()
+        self.assertIsNone(result["action"])
+        self.assertIn("נמצאו כמה תשלומים", result["reply"])
+        self.db.refresh(cancelled)
+        self.assertEqual(cancelled.status, "skipped")
         self.assert_unchanged()
+
+    def test_scheduled_payment_with_cancelled_closed_plan_history_prepares_read_only_card(self):
+        cancelled = self.historical_skipped_payment()
+        result = self.prepare()
+        self.assertIsNotNone(result["action"], result["reply"])
+        self.assertEqual(result["action"]["payment_id"], self.payment.id)
+        self.assertEqual(result["action"]["due_date"], "2026-11-01")
+        self.db.refresh(cancelled)
+        self.assertEqual(cancelled.status, "skipped")
+        self.assertIsNone(cancelled.confirmation_requested_at)
+        self.assert_unchanged()
+
+    def test_skipped_only_month_has_no_confirmation_card_or_write(self):
+        self.payment.status = "skipped"; self.db.commit()
+        result = self.prepare()
+        self.assertIsNone(result["action"])
+        self.assertIn("לא נמצא תשלום", result["reply"])
+        self.db.refresh(self.payment)
+        self.assertEqual(self.payment.status, "skipped")
+        self.assertIsNone(self.payment.confirmation_requested_at)
+        self.assertEqual(self.db.query(ActivityEvent).count(), 0)
+        self.assertEqual(self.db.query(EmailOutbox).count(), 0)
+        self.notify_mock.assert_not_called()
+
+    def test_paid_and_awaiting_with_cancelled_history_keep_current_state_reply(self):
+        cancelled = self.historical_skipped_payment()
+        for status, message in (("paid", "כבר אושר ובוצע"),
+            ("awaiting_confirmation", "כבר ממתין לאישור המשקיע")):
+            with self.subTest(status=status):
+                self.payment.status = status; self.db.commit()
+                result = self.prepare()
+                self.assertIsNone(result["action"])
+                self.assertIn(message, result["reply"])
+                self.db.refresh(self.payment)
+                self.assertEqual(self.payment.status, status)
+        self.db.refresh(cancelled)
+        self.assertEqual(cancelled.status, "skipped")
+        self.assertEqual(self.db.query(ActivityEvent).count(), 0)
+        self.assertEqual(self.db.query(EmailOutbox).count(), 0)
+        self.notify_mock.assert_not_called()
 
     def test_only_actual_system_admin_can_prepare_and_execute(self):
         token = self.token()
