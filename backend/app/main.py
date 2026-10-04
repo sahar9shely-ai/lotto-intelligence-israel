@@ -56,8 +56,16 @@ FRONTEND_DIST_MOUNTED = mount_frontend(app)
 
 
 async def _push_delivery_loop() -> None:
-    from app.services.push_service import run_pending_pushes
+    from app.services.push_service import run_pending_pushes, run_scheduled_reminders
+    last_reminder_scan = 0.0
     while True:
+        clock = asyncio.get_running_loop().time()
+        if not last_reminder_scan or clock - last_reminder_scan >= 60:
+            last_reminder_scan = clock
+            try:
+                await asyncio.to_thread(run_scheduled_reminders)
+            except Exception:
+                logging.getLogger(__name__).warning("Push reminder scan failed; it will be retried later")
         try:
             await asyncio.to_thread(run_pending_pushes, limit=10)
         except Exception:
@@ -79,6 +87,7 @@ async def on_startup() -> None:
         )
     if settings.web_push_enabled:
         app.state.push_delivery_task = asyncio.create_task(_push_delivery_loop())
+        logging.getLogger(__name__).info("Push delivery and reminder worker started")
 
 
 @app.on_event("shutdown")

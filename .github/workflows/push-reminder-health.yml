@@ -1,0 +1,40 @@
+name: Daily notification service health
+
+on:
+  schedule:
+    # UTC: daytime in Israel in both summer and winter, away from peak hour.
+    # The second health check recovers a delayed/failed morning startup. The
+    # server deduplicates reminders per document/account/Israel calendar day.
+    - cron: '17 8 * * *'
+    - cron: '47 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notification-service-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    # Standard runners are free for this public repository. Do not allocate a
+    # runner if repository visibility changes; never introduce paid hosting.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check production readiness and allow its notification worker to run
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A Free Render web service can sleep between requests. An ordinary
+          # public health request starts it; its own authenticated outbox logic
+          # selects recipients. No keys, customer data or write API are used.
+          for attempt in 1 2 3; do
+            curl --fail --silent --show-error --output /dev/null \
+              --connect-timeout 15 --max-time 90 --retry 2 \
+              --retry-delay 10 --retry-all-errors \
+              https://tazrim.onrender.com/health
+            if [ "$attempt" -lt 3 ]; then sleep 30; fi
+          done

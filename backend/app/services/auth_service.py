@@ -134,6 +134,10 @@ def notify_manager_login(db: Session, user: User) -> LoginAlert:
         meta={"login_alert_id": alert.id, "username": user.username},
     )
 
+    from app.services import push_service
+
+    push_service.enqueue_investor_login(db, alert)
+
     manager = (
         db.query(User)
         .options(joinedload(User.investor))

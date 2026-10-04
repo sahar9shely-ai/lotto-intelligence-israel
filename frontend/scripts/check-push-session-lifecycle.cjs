@@ -21,8 +21,8 @@ function eventTarget() {
 
 function fixture({ user = investor(2), owner = user && !user.is_manager ? { user_id: user.id, endpoint: 'https://push.example.test/device' } : null, permission = 'granted', subscribed = true, config = { enabled: true, public_key: 'AQIDBA', require_notifications: true } } = {}) {
   let currentUser = user;
-  const runtime = { owner, binding: owner, writes: [], states: [], subscriptions: 0, unsubscribes: 0, serverDeletes: [], registrations: 0, permissionPrompts: 0, subscribePosts: 0, statusCalls: 0, configCalls: 0, statusInFlight: 0, maxStatusInFlight: 0, statusImpl: null, configImpl: null, postImpl: null, support: 'supported' };
-  const notification = { permission, async requestPermission() { runtime.permissionPrompts++; return notification.permission; } };
+  const runtime = { owner, binding: owner, writes: [], states: [], subscriptions: 0, unsubscribes: 0, serverDeletes: [], registrations: 0, permissionPrompts: 0, requestedPermission: 'granted', subscribePosts: 0, statusCalls: 0, configCalls: 0, statusInFlight: 0, maxStatusInFlight: 0, statusImpl: null, configImpl: null, postImpl: null, testCalls: [], deliveryChecks: [], testImpl: null, deliveryImpl: null, support: 'supported' };
+  const notification = { permission, async requestPermission() { runtime.permissionPrompts++; notification.permission = runtime.requestedPermission; return notification.permission; } };
   const makeSubscription = endpoint => ({ endpoint, options: { applicationServerKey: new ArrayBuffer(4) }, toJSON: () => ({ keys: { p256dh: 'synthetic-key', auth: 'synthetic-auth' } }), async unsubscribe() { runtime.unsubscribes++; if (runtime.subscription?.endpoint === endpoint) runtime.subscription = null; return true; } });
   runtime.subscription = makeSubscription(owner?.endpoint || 'https://push.example.test/device');
   const registration = { pushManager: {
@@ -38,6 +38,8 @@ function fixture({ user = investor(2), owner = user && !user.is_manager ? { user
     },
     async pushSubscribe(body) { runtime.subscribePosts++; return runtime.postImpl ? runtime.postImpl(body) : {}; },
     async pushUnsubscribe(body, token) { assert.equal(token, 'synthetic-current-token'); runtime.serverDeletes.push(body.endpoint); },
+    async pushTest(body, signal) { runtime.testCalls.push(body); return runtime.testImpl ? runtime.testImpl(body, signal) : { queued: true, delivery_id: 42 }; },
+    async pushDeliveryStatus(body, signal) { runtime.deliveryChecks.push(body); return runtime.deliveryImpl ? runtime.deliveryImpl(body, signal) : { subscribed: true, pending: 0, last_delivery: { status: 'sent', error: null, sent_at: 'synthetic-time' } }; },
   };
   const service = {
     PUSH_DETACHING_EVENT: 'detaching',
@@ -64,10 +66,13 @@ function fixture({ user = investor(2), owner = user && !user.is_manager ? { user
     useEffect(fn, deps) { renderer.useEffect(fn, deps); },
   };
   const module = { exports: {} };
+  const pushTypes = { exports: {} };
+  const pushTypesCode = ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../src/types/push.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+  vm.runInNewContext(pushTypesCode, { module: pushTypes, exports: pushTypes.exports });
   const source = fs.readFileSync(path.resolve(__dirname, '../src/context/PushNotificationsContext.tsx'), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText;
-  const imports = { react: fakeReact, 'react/jsx-runtime': jsx, './AuthContext': { useAuth: () => ({ user: currentUser }) }, '../services/api': { api, getToken: () => 'synthetic-current-token' }, '../services/pushNotifications': service };
-  vm.runInNewContext(code, { module, exports: module.exports, require: name => imports[name] || require(name), window, document, navigator, Notification: notification, Promise, Error, ArrayBuffer });
+  const imports = { react: fakeReact, 'react/jsx-runtime': jsx, './AuthContext': { useAuth: () => ({ user: currentUser }) }, '../services/api': { api, getToken: () => 'synthetic-current-token' }, '../services/pushNotifications': service, '../types/push': pushTypes.exports };
+  vm.runInNewContext(code, { module, exports: module.exports, require: name => imports[name] || require(name), window, document, navigator, Notification: notification, Promise, Error, ArrayBuffer, AbortController });
 
   const sameDeps = (left, right) => left && right && left.length === right.length && left.every((value, index) => Object.is(value, right[index]));
   function mount(nextUser = currentUser) {
@@ -208,6 +213,50 @@ async function main() {
   const manager = fixture({ user: { id: 1, is_manager: true } }); const managerSession = manager.mount(); await tick();
   assert.equal(managerSession.value.state, 'ready'); assert.equal(manager.runtime.configCalls, 0); managerSession.unmount();
 
-  console.log('PASS: actual hook rerenders, coalesced focus/visibility checks, bounded network failures, permission revocation, StrictMode/reload persistence, account isolation, stale cleanup, endpoint repair, and once-per-session pending-delivery recovery. No browser or network used.');
+  const adminUser = { id: 1, is_manager: true, username: 'admin' };
+  const admin = fixture({ user: adminUser, permission: 'default' }); const adminSession = admin.mount(); await tick();
+  assert.equal(adminSession.value.state, 'needs_permission'); assert.equal(adminSession.value.required, false, 'Admin notification enrollment is optional');
+  assert.equal(adminSession.value.canEnable, true, 'Only the exact administrator can enroll manager-device notifications');
+  assert.equal(admin.runtime.testCalls.length, 0, 'The test never sends automatically');
+  await adminSession.value.testDelivery(); assert.equal(admin.runtime.testCalls.length, 0, 'An unverified device cannot request a push test');
+  await adminSession.value.enable(); await tick();
+  assert.equal(adminSession.value.state, 'ready'); assert.equal(admin.runtime.permissionPrompts, 1);
+  await adminSession.value.testDelivery(); await tick();
+  assert.equal(admin.runtime.testCalls[0].endpoint, admin.runtime.binding.endpoint, 'Tests target only this verified own-device endpoint');
+  assert.equal(admin.runtime.deliveryChecks[0].delivery_id, 42);
+  assert.equal(adminSession.value.testResult.status, 'sent');
+  assert(adminSession.value.testResult.message.includes('שירות ההתראות קיבל'), 'Provider acceptance must not claim phone delivery');
+  assert.equal(adminSession.value.testBusy, false);
+
+  admin.runtime.deliveryImpl = async () => ({ subscribed: true, pending: 0, last_delivery: { status: 'failed', error: 'provider_rejected', sent_at: null } });
+  await adminSession.value.testDelivery(); await tick();
+  assert.equal(adminSession.value.testResult.status, 'failed');
+  assert(adminSession.value.testResult.message.includes('דחה'), 'A rejected push must not display a success result');
+  admin.runtime.deliveryImpl = (body, signal) => new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(Error('timeout')), { once: true }));
+  const boundedTest = adminSession.value.testDelivery(); await tick(); admin.advance(30001); await boundedTest; await tick();
+  assert.equal(adminSession.value.testResult.status, 'queued'); assert.equal(adminSession.value.testBusy, false, 'Phone-test polling must end within its thirty-second bound');
+  adminSession.unmount();
+
+  const otherManager = fixture({ user: { id: 9, is_manager: true, username: 'manager', investor_name: 'מנהל מערכת' } });
+  const otherManagerSession = otherManager.mount(); await tick();
+  assert.equal(otherManagerSession.value.canEnable, false, 'Display name does not grant administrator enrollment');
+  await otherManagerSession.value.enable(); await otherManagerSession.value.testDelivery();
+  assert.equal(otherManager.runtime.subscribePosts, 0); assert.equal(otherManager.runtime.testCalls.length, 0); otherManagerSession.unmount();
+
+  const investorTest = fixture(); const investorTestSession = investorTest.mount(); await tick();
+  const lateDelivery = deferred(); investorTest.runtime.deliveryImpl = () => lateDelivery.promise;
+  const oldTest = investorTestSession.value.testDelivery(); await tick();
+  investorTest.window.dispatch('focus'); await tick();
+  assert.equal(investorTestSession.value.testBusy, true, 'An ordinary focus check must not cancel an own-device test');
+  investorTestSession.unmount();
+  investorTest.runtime.owner = { user_id: 3, endpoint: 'https://push.example.test/next-owner' };
+  investorTest.runtime.binding = investorTest.runtime.owner; investorTest.runtime.subscription.endpoint = investorTest.runtime.owner.endpoint;
+  const nextOwner = investorTest.mount(investor(3)); await tick();
+  lateDelivery.resolve({ subscribed: true, pending: 0, last_delivery: { status: 'sent', error: null, sent_at: 'synthetic-time' } });
+  await oldTest; await tick();
+  assert.equal(nextOwner.value.testResult, null, 'Late prior-account test responses must not appear in the next account');
+  assert.equal(investorTest.runtime.binding.user_id, 3); nextOwner.unmount();
+
+  console.log('PASS: actual hook rerenders, background checks, StrictMode persistence, account isolation, endpoint/key repair, once-per-session recovery, optional exact-admin activation, own-device test targeting, provider acceptance/failure, bounded polling, and stale test isolation. No browser or network used.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

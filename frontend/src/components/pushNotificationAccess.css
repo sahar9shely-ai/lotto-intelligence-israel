@@ -15,4 +15,9 @@
 .push-activation__logout { display: block; min-height: 44px; margin: 16px auto 0; padding: 8px 12px; border: 0; background: transparent; color: #416957; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; font: inherit; }
 .push-settings h2 { margin-top: 0; }
 .push-settings__hint { color: var(--ink-soft); font-size: .85rem; }
+.push-settings__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-block: 16px; }
+.push-settings__actions .btn { min-height: 44px; }
+.push-settings__result { padding: 12px 14px; border: 1px solid #d9e5dc; border-radius: 12px; background: #f0f6f0; line-height: 1.6; }
+.push-settings__result--sent { border-color: #b6ddc6; color: #245b43; background: #edf8f0; }
+.push-settings__result--failed, .push-settings__result--cancelled { border-color: #e5d6b8; color: #79572b; background: #fff8ec; }
 @media (max-width: 480px) { .push-activation__card { padding: 22px 18px; } }

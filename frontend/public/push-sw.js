@@ -24,7 +24,7 @@ function safeNotificationUrl(href) {
     const url = new URL(typeof href === "string" ? href : "/", self.location.origin);
     if (url.origin !== self.location.origin || url.username || url.password || !["https:", "http:"].includes(url.protocol)) return self.location.origin + "/";
     // Allow application destinations and their identifying filters only, never tokens or arbitrary query data.
-    if (!["/", "/payments", "/investors"].includes(url.pathname) && !/^\/agreements\/\d+\/sign$/.test(url.pathname)) return self.location.origin + "/";
+    if (!["/", "/payments", "/investors", "/activity", "/account"].includes(url.pathname) && !/^\/agreements\/\d+\/sign$/.test(url.pathname)) return self.location.origin + "/";
     const target = new URL(url.pathname, self.location.origin);
     for (const key of ["investor_id", "payment_id", "agreement_id", "topup_request_id", "year"]) {
       const value = url.searchParams.get(key);
@@ -44,6 +44,21 @@ async function bindingMatches(userId) {
   return Boolean(subscription && subscription.endpoint === binding.endpoint);
 }
 
+function notificationBody(kind) {
+  // Use reviewed, non-identifying copy only. Never render arbitrary payload text
+  // or financial/account details on a shared device's lock screen.
+  switch (kind) {
+    case "test": return "זו התראת בדיקה מתזרים.";
+    case "admin_login": return "משקיע התחבר לתזרים. אפשר לפתוח את המעקב לפרטים.";
+    case "agreement_reminder":
+    case "topup_reminder": return "ממתין לך הסכם לחתימה. אפשר לפתוח את תזרים ולחתום.";
+    case "agreement":
+    case "topup": return "ממתין לך מסמך לאישור ולחתימה. אפשר לפתוח את תזרים.";
+    case "payment": return "ממתינה לך בקשה לאישור קבלת תשלום. אפשר לפתוח את תזרים.";
+    default: return "יש בקשת אישור חדשה בתזרים. פתחו את האפליקציה כדי לצפות בה.";
+  }
+}
+
 self.addEventListener("install", event => event.waitUntil(self.skipWaiting()));
 self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
 self.addEventListener("push", event => {
@@ -53,7 +68,7 @@ self.addEventListener("push", event => {
     const ownerId = payload?.data?.owner_user_id;
     const matches = payload && await bindingMatches(ownerId).catch(() => false);
     await self.registration.showNotification("תזרים", {
-      body: matches ? "יש בקשת אישור חדשה בתזרים. פתחו את האפליקציה כדי לצפות בה." : "פתחו את תזרים כדי לבדוק אם ממתינה בקשת אישור.",
+      body: matches ? notificationBody(payload.kind) : "פתחו את תזרים כדי לבדוק אם ממתינה בקשת אישור.",
       icon: "/icon-192-logo-a.png",
       badge: "/icon-192-logo-a.png",
       tag: matches && typeof payload.tag === "string" && /^tazrim-push-\d+$/.test(payload.tag) ? payload.tag : "tazrim-pending-request",

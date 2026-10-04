@@ -5,6 +5,7 @@ import { PasswordField } from "../components/PasswordField";
 import { Toast } from "../components/Toast";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
+import { PushNotificationSettings } from "../components/PushNotificationAccess";
 
 export function SettingsPage() {
   const { data, error, loading, reload } = useAsync(() => api.settings(), []);
@@ -82,6 +83,8 @@ export function SettingsPage() {
       </header>
 
       {message ? <Toast message={message} onClear={clearMessage} /> : null}
+
+      <PushNotificationSettings />
 
       {siteStatus?.data_persistent === false ? (
         <Panel title="שמירת נתונים בענן">

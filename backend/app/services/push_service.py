@@ -12,8 +12,9 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from urllib.parse import urlsplit, urlunsplit
+from zoneinfo import ZoneInfo
 
 import requests
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -25,15 +26,17 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.investment_session import InvestmentSessionLocal
-from app.models.auth import User
-from app.models.investments import InvestmentTopupRequest, Payment, PlanAgreement, utcnow
+from app.models.auth import LoginAlert, User
+from app.models.investments import Investor, InvestmentTopupRequest, Payment, PlanAgreement, utcnow
 from app.models.push import PushDelivery, PushNotice, PushSubscription
+from app.security.auth import is_manager, is_system_admin
 
 MAX_SUBSCRIPTIONS = 10
 MAX_ATTEMPTS = 4
 CLAIM_LEASE_SECONDS = 120
 RETRY_SECONDS = (60, 300, 1800)
 logger = logging.getLogger(__name__)
+ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 
 
 class SubscriptionConflict(ValueError):
@@ -197,6 +200,146 @@ def _revision(value: datetime) -> str:
     return value.replace(tzinfo=timezone.utc).isoformat(timespec="microseconds")
 
 
+def _enqueue_for_account(db: Session, user: User, *, event_key: str, kind: str, entity_id: int,
+                         revision: str, expires_at: datetime,
+                         device: PushSubscription | None = None) -> int:
+    if not user.is_active or not user.investor_id or not user.investor or (device is not None and device.user_id != user.id):
+        return 0
+    subscriptions = [device] if device is not None else db.query(PushSubscription).filter_by(user_id=user.id).all()
+    if not subscriptions:
+        return 0
+    _insert_ignore(db, PushNotice, {
+        "event_key": event_key, "user_id": user.id, "investor_id": user.investor_id,
+        "kind": kind, "entity_id": entity_id, "entity_revision": revision,
+        "created_at": utcnow(), "expires_at": expires_at,
+    }, ["event_key", "user_id"])
+    notice = db.query(PushNotice).filter_by(event_key=event_key, user_id=user.id).one()
+    count = 0
+    for subscription in subscriptions:
+        if _insert_ignore(db, PushDelivery, {
+            "notice_id": notice.id, "subscription_id": subscription.id,
+            "status": "queued", "attempts": 0, "next_attempt_at": utcnow(),
+        }, ["notice_id", "subscription_id"]):
+            count += 1
+    db.flush()
+    return count
+
+
+def enqueue_investor_login(db: Session, alert: LoginAlert) -> int:
+    """Only committed successful investor logins notify the verified system admin."""
+    if not is_enabled():
+        return 0
+    actor = db.get(User, alert.user_id)
+    if not actor or not actor.is_active or is_manager(actor):
+        return 0
+    db.flush()
+    count = 0
+    for admin in db.query(User).filter_by(username="admin", is_active=True).all():
+        if not is_system_admin(admin) or admin.id == actor.id or not admin.investor:
+            continue
+        count += _enqueue_for_account(db, admin, kind="admin_login", entity_id=alert.id,
+                                     revision=_revision(alert.logged_in_at), event_key=f"admin-login:{alert.id}",
+                                     expires_at=utcnow() + timedelta(hours=24))
+    return count
+
+
+def enqueue_device_test(db: Session, user: User, endpoint: str) -> int:
+    endpoint = validate_endpoint(endpoint)
+    if not user.is_active or not user.investor_id or not user.investor:
+        raise SubscriptionConflict("לא ניתן לשייך את בדיקת ההתראות לחשבון המחובר")
+    device = db.query(PushSubscription).filter_by(user_id=user.id, endpoint_hash=_hash_endpoint(endpoint)).one_or_none()
+    if not device:
+        raise SubscriptionConflict("המכשיר הזה אינו רשום להתראות בחשבון המחובר")
+    # Repeated clicks in the same minute return the same queued test; never fan
+    # out to the account's other phones or to another investor.
+    minute = int(utcnow().timestamp()) // 60
+    event_key = f"device-test:{device.endpoint_hash[:24]}:{minute}"
+    _enqueue_for_account(db, user, kind="test", entity_id=device.id, revision=device.endpoint_hash,
+                         event_key=event_key, expires_at=utcnow() + timedelta(minutes=5), device=device)
+    notice = db.query(PushNotice).filter_by(user_id=user.id, event_key=event_key).one()
+    return db.query(PushDelivery.id).filter_by(notice_id=notice.id, subscription_id=device.id).scalar()
+
+
+def device_delivery_status(db: Session, user: User, endpoint: str, delivery_id: int | None = None) -> dict:
+    endpoint = validate_endpoint(endpoint)
+    device = db.query(PushSubscription).filter_by(user_id=user.id, endpoint_hash=_hash_endpoint(endpoint)).one_or_none()
+    if not device:
+        return {"subscribed": False, "pending": 0, "last_delivery": None}
+    query = db.query(PushDelivery).join(PushNotice).filter(
+        PushDelivery.subscription_id == device.id, PushNotice.user_id == user.id,
+    )
+    pending = query.filter(PushDelivery.status.in_(("queued", "sending"))).count()
+    if delivery_id is not None:
+        query = query.filter(PushDelivery.id == delivery_id)
+    delivery = query.order_by(PushDelivery.id.desc()).first()
+    result = None
+    if delivery:
+        code = delivery.last_error_code or ""
+        result = {"status": delivery.status,
+                  "error": "temporarily_unavailable" if code in {"transport_error", "http_429"} or code.startswith("http_5") else "provider_rejected" if code else None,
+                  "sent_at": delivery.sent_at}
+    return {"subscribed": True, "pending": pending, "last_delivery": result}
+
+
+def enqueue_agreement_reminders(db: Session, *, now: datetime | None = None, limit: int = 100) -> int:
+    """At most one reminder per agreement/account/Israel day, during daytime.
+
+    The current state and document revision are checked again by the outbox.
+    A request first issued or reconciled today waits until the following day.
+    """
+    if not is_enabled() or not settings.web_push_agreement_reminders_enabled:
+        return 0
+    now = now or utcnow()
+    local = now.astimezone(ISRAEL_TZ)
+    if not settings.web_push_agreement_reminder_hour <= local.hour < 20:
+        return 0
+    start = datetime.combine(local.date(), time.min, tzinfo=ISRAEL_TZ).astimezone(timezone.utc)
+    end = datetime.combine(local.date(), time(20), tzinfo=ISRAEL_TZ).astimezone(timezone.utc)
+    has_device = select(PushSubscription.id).where(PushSubscription.user_id == User.id).exists()
+    max_items = max(0, min(limit, 200))
+    count = 0
+    for model, kind, original, revision_field, signed_field, offered_field in (
+        (PlanAgreement, "agreement_reminder", "agreement", PlanAgreement.token_hash, PlanAgreement.signed_at, None),
+        (InvestmentTopupRequest, "topup_reminder", "topup", InvestmentTopupRequest.offered_at, InvestmentTopupRequest.investor_signed_at, InvestmentTopupRequest.offered_at),
+    ):
+        already_today = select(PushNotice.id).where(
+            PushNotice.user_id == User.id, PushNotice.entity_id == model.id,
+            PushNotice.kind.in_((original, kind)), PushNotice.created_at >= start,
+        ).exists()
+        outstanding_or_delivered_today = select(PushDelivery.id).join(PushNotice).where(
+            PushNotice.user_id == User.id, PushNotice.entity_id == model.id,
+            PushNotice.kind.in_((original, kind)),
+            or_(
+                PushDelivery.status.in_(("queued", "sending")) & (PushNotice.expires_at > now),
+                (PushDelivery.status == "sent") & (PushDelivery.sent_at >= start),
+            ),
+        ).exists()
+        query = db.query(model, User).join(User, User.investor_id == model.investor_id).join(Investor, Investor.id == User.investor_id).filter(
+            User.is_active.is_(True), User.role != "manager", Investor.is_manager.is_(False),
+            has_device, ~already_today, ~outstanding_or_delivered_today, signed_field.is_(None),
+        )
+        if model is PlanAgreement:
+            query = query.filter(PlanAgreement.status == "pending", PlanAgreement.expires_at > now)
+        else:
+            query = query.filter(InvestmentTopupRequest.status == "contract", offered_field.isnot(None))
+        for item, owner in query.order_by(model.id, User.id).limit(max_items).all():
+            revision = getattr(item, revision_field.key)
+            revision = revision if isinstance(revision, str) else _revision(revision)
+            expires = min(item.expires_at.replace(tzinfo=timezone.utc), end) if model is PlanAgreement else end
+            count += _enqueue_for_account(db, owner, kind=kind, entity_id=item.id, revision=revision,
+                event_key=f"{kind}:{item.id}:{revision}:{local.date().isoformat()}", expires_at=expires)
+    return count
+
+
+def run_scheduled_reminders(*, session_factory=InvestmentSessionLocal, now: datetime | None = None) -> int:
+    with session_factory() as db:
+        count = enqueue_agreement_reminders(db, now=now)
+        db.commit()
+        if count:
+            logger.info("Daily unsigned document reminders queued: %s deliveries", count)
+        return count
+
+
 def _enqueue(db: Session, *, investor_id: int, kind: str, entity_id: int, revision: str,
              expires_at: datetime, device: PushSubscription | None = None) -> int:
     count = 0
@@ -217,20 +360,10 @@ def _enqueue(db: Session, *, investor_id: int, kind: str, entity_id: int, revisi
                 # Do not revive expired work on older devices. The pending
                 # request can have one fresh catch-up on this device instead.
                 event_key = f"{base_event_key}:device:{device.endpoint_hash[:24]}"
-        _insert_ignore(db, PushNotice, {
-            "event_key": event_key, "user_id": user.id, "investor_id": investor_id,
-            "kind": kind, "entity_id": entity_id, "entity_revision": revision,
-            "created_at": utcnow(), "expires_at": expires_at,
-        }, ["event_key", "user_id"])
-        notice = db.query(PushNotice).filter_by(event_key=event_key, user_id=user.id).one()
         # A newly opted-in device may need a still-pending request even when an
         # earlier device received it. Keep that earlier delivery immutable.
-        for subscription in subscriptions:
-            if _insert_ignore(db, PushDelivery, {
-                "notice_id": notice.id, "subscription_id": subscription.id,
-                "status": "queued", "attempts": 0, "next_attempt_at": utcnow(),
-            }, ["notice_id", "subscription_id"]):
-                count += 1
+        count += _enqueue_for_account(db, user, event_key=event_key, kind=kind, entity_id=entity_id,
+                                      revision=revision, expires_at=expires_at, device=device)
     db.flush()
     return count
 
@@ -245,7 +378,7 @@ def enqueue_outstanding_for_device(db: Session, device: PushSubscription) -> int
     if not is_enabled():
         return 0
     user = db.get(User, device.user_id)
-    if not user or not user.is_active or user.role == "manager" or not user.investor_id or user.investor.is_manager:
+    if not user or not user.is_active or user.role == "manager" or not user.investor_id or not user.investor or user.investor.is_manager:
         return 0
     now = utcnow()
     count = 0
@@ -308,7 +441,21 @@ def _payload(db: Session, notice: PushNotice, now: datetime) -> dict | None:
         or notice.expires_at.replace(tzinfo=timezone.utc) <= now
     ):
         return None
-    if notice.kind == "payment":
+    if notice.kind == "test":
+        device = db.get(PushSubscription, notice.entity_id)
+        if not device or device.user_id != owner.id or device.endpoint_hash != notice.entity_revision:
+            return None
+        href = "/account"
+        body = "זו התראת בדיקה מתזרים. ההתראה נשלחה למכשיר הזה בלבד."
+    elif notice.kind == "admin_login":
+        alert = db.get(LoginAlert, notice.entity_id)
+        actor = db.get(User, alert.user_id) if alert else None
+        if (not is_system_admin(owner) or not alert or not actor or not actor.is_active or is_manager(actor)
+            or _revision(alert.logged_in_at) != notice.entity_revision):
+            return None
+        href = "/activity"
+        body = "התקבלה פעילות כניסה חדשה בתזרים. אפשר לפתוח את אזור הניהול."
+    elif notice.kind == "payment":
         payment = db.get(Payment, notice.entity_id)
         if (not payment or payment.investor_id != notice.investor_id or payment.status != "awaiting_confirmation"
             or not payment.confirmation_requested_at or _revision(payment.confirmation_requested_at) != notice.entity_revision):
@@ -316,7 +463,7 @@ def _payload(db: Session, notice: PushNotice, now: datetime) -> dict | None:
         due = payment.due_date.isoformat()
         href = f"/payments?investor_id={notice.investor_id}&payment_id={payment.id}&year={due[:4]}&month={due[:7]}"
         body = "ממתינה לך בקשה לאישור קבלת תשלום. אפשר לפתוח את האזור האישי."
-    elif notice.kind == "agreement":
+    elif notice.kind in {"agreement", "agreement_reminder"}:
         agreement = db.get(PlanAgreement, notice.entity_id)
         if (not agreement or agreement.investor_id != notice.investor_id or agreement.status != "pending"
             or agreement.token_hash != notice.entity_revision
@@ -324,7 +471,7 @@ def _payload(db: Session, notice: PushNotice, now: datetime) -> dict | None:
             return None
         href = f"/agreements/{agreement.id}/sign"
         body = "ממתין לך מסמך לאישור ולחתימה. אפשר לפתוח את האזור האישי."
-    elif notice.kind == "topup":
+    elif notice.kind in {"topup", "topup_reminder"}:
         request = db.get(InvestmentTopupRequest, notice.entity_id)
         if (not request or request.investor_id != notice.investor_id or request.status != "contract"
             or request.investor_signed_at is not None or not request.offered_at
@@ -334,7 +481,7 @@ def _payload(db: Session, notice: PushNotice, now: datetime) -> dict | None:
         body = "ממתין לך מסמך לאישור ולחתימה. אפשר לפתוח את האזור האישי."
     else:
         return None
-    return {"title": "תזרים", "body": body, "tag": f"tazrim-push-{notice.id}",
+    return {"title": "תזרים", "body": body, "kind": notice.kind, "tag": f"tazrim-push-{notice.id}",
             "data": {"href": href, "owner_user_id": notice.user_id}}
 
 

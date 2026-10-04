@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { usePushNotifications } from "../context/PushNotificationsContext";
 import { loadTutorialMedia, type TutorialMedia } from "../services/tutorialMedia";
+import { canUseDevicePush, isAdminPushAccount } from "../types/push";
 import "./pushNotificationAccess.css";
 
 function ActivationGuide() {
@@ -61,12 +62,29 @@ export function PushNotificationAccess({ children }: { children: ReactNode }) {
 }
 
 export function PushNotificationSettings() {
+  const { user } = useAuth();
   const push = usePushNotifications();
+  if (!canUseDevicePush(user)) return null;
+  const isAdministrator = isAdminPushAccount(user);
+  const canEnable = push.canEnable && ["needs_permission", "error"].includes(push.state);
   return <section id="push-notifications" className="push-settings panel">
     <h2>התראות במכשיר הזה</h2>
-    <p>{!push.enabled ? "התראות אינן זמינות כרגע במערכת." : push.state === "ready" ? "התראות פעילות לבקשות אישור קבלת תשלום ולמסמכים לחתימה." : push.required === false ? "אפשר להפעיל התראות על בקשות אישור קבלת תשלום ועל מסמכים לחתימה." : "צריך להפעיל התראות כדי להיכנס לתיק מהמכשיר הזה."}</p>
+    <p>{push.state === "checking" ? "בודקים את ההתראות במכשיר הזה…"
+      : !push.enabled ? "התראות אינן זמינות כרגע במערכת."
+      : isAdministrator ? push.state === "ready" ? "התראות פעילות על כניסת משקיעים למערכת." : "אפשר להפעיל במכשיר הזה התראות על כניסת משקיעים למערכת."
+      : push.state === "ready" ? "התראות פעילות לבקשות אישור קבלת תשלום ולמסמכים לחתימה."
+      : push.required === false ? "אפשר להפעיל התראות על בקשות אישור קבלת תשלום ועל מסמכים לחתימה." : "צריך להפעיל התראות כדי להיכנס לתיק מהמכשיר הזה."}</p>
+    {push.state === "install_required" ? <p className="push-settings__hint">ב־iPhone או iPad יש לפתוח את תזרים ב־Safari, לבחור שיתוף והוספה למסך הבית, ולפתוח את הסמל שנוסף לפני הפעלת ההתראות.</p> : null}
+    {push.state === "unsupported" ? <p className="push-settings__hint">הדפדפן הזה אינו תומך בהתראות. אפשר לפתוח בדפדפן שתומך בהן; ב־iPhone יש לפתוח מהסמל במסך הבית.</p> : null}
+    {push.state === "denied" ? <p className="push-settings__hint">ההתראות חסומות. יש לאפשר התראות לתזרים בהגדרות האתר או המכשיר, ואז ללחוץ על בדיקת ההתראות.</p> : null}
     {push.error ? <p className="push-settings__hint" role="status">{push.error}</p> : null}
     <p className="push-settings__hint">אפשר לשנות את ההרשאה בהגדרות האתר או בהגדרות ההתראות במכשיר.</p>
-    <button type="button" className="btn btn--ghost" onClick={() => void push.refresh()} disabled={push.busy || push.state === "checking"}>בדיקת ההתראות</button>
+    <div className="push-settings__actions">
+      {canEnable ? <button type="button" className="btn btn--primary" onClick={() => void push.enable()} disabled={push.busy || push.testBusy}>{push.busy ? "מפעילים התראות…" : "הפעל התראות במכשיר הזה"}</button> : null}
+      <button type="button" className="btn btn--ghost" onClick={() => void push.refresh()} disabled={push.busy || push.state === "checking" || push.testBusy}>בדיקת ההתראות</button>
+      {push.enabled && push.state === "ready" ? <button type="button" className="btn btn--primary" onClick={() => void push.testDelivery()} disabled={push.busy || push.testBusy}>{push.testBusy ? "בודקים שליחת התראה…" : "שליחת התראת בדיקה למכשיר הזה"}</button> : null}
+    </div>
+    {push.testResult ? <p className={`push-settings__result push-settings__result--${push.testResult.status}`} role="status" aria-live="polite">{push.testResult.message}</p> : null}
+    {push.enabled && push.state === "ready" ? <p className="push-settings__hint">אם בדיקת השליחה מצליחה וההתראה אינה מופיעה, יש לבדוק את הגדרות ההתראות במכשיר ואת מצב ״נא לא להפריע״.</p> : null}
   </section>;
 }

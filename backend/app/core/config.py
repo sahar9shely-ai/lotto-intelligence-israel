@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +28,8 @@ class Settings(BaseSettings):
     web_push_vapid_public_key: str = ""
     web_push_vapid_private_key: str = ""
     web_push_vapid_subject: str = ""
+    web_push_agreement_reminders_enabled: bool = True
+    web_push_agreement_reminder_hour: int = Field(default=10, ge=9, le=19)
 
     smtp_host: str = ""
     smtp_port: int = 587

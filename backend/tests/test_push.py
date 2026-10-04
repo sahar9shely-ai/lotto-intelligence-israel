@@ -4,7 +4,7 @@ All outbound delivery is mocked. These tests never contact a push provider.
 """
 import base64
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -17,10 +17,11 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.push import router
+from app.api.v1.auth import router as auth_router
 from app.core.config import settings
 from app.db.investment_base import InvestmentBase
 from app.db.investment_session import get_investment_db
-from app.models.auth import User
+from app.models.auth import LoginAlert, User
 from app.models.investments import Investor, InvestmentPlan, InvestmentTopupRequest, Payment, PlanAgreement, PlanNotice, utcnow
 from app.models.push import PushDelivery, PushNotice, PushSubscription
 from app.security.auth import create_access_token, enforce_notification_access, hash_password
@@ -65,7 +66,7 @@ def push_env(tmp_path, monkeypatch):
         ids = [user.id for user in users]
         payment_id = payment.id
         investor_id = first.id
-    app = FastAPI(); app.include_router(router)
+    app = FastAPI(); app.include_router(router); app.include_router(auth_router)
 
     def database():
         with sessions() as db:
@@ -633,3 +634,221 @@ def test_fixed_provider_diagnostics_never_include_private_exception_or_device(pu
     assert "Push delivery failed (http_403)" in caplog.text
     for value in ("synthetic-secret", "Private investor name", "6543", "Bearer", env.payload["keys"]["auth"]):
         assert value not in caplog.text
+
+
+def add_manager(env, username="admin", role="manager", manager_investor=True):
+    with env.sessions() as db:
+        investor = Investor(name="Synthetic administrator", is_manager=manager_investor)
+        db.add(investor); db.flush()
+        user = User(username=username, investor_id=investor.id, role=role, password_hash=hash_password("SyntheticAdmin1!"))
+        db.add(user); db.commit()
+        return user.id, {"Authorization": "Bearer " + create_access_token(user_id=user.id, role=user.role, investor_id=investor.id)}
+
+
+def test_login_push_only_successful_investor_login_to_exact_verified_admin(push_env):
+    from app.services import auth_service
+
+    env = push_env
+    admin_id, admin_header = add_manager(env)
+    other_id, _ = add_manager(env, username="another-manager")
+    with env.sessions() as db:
+        # Legacy other-manager enrollments still cannot become login recipients.
+        push.subscribe(db, db.get(User, other_id), endpoint="https://fcm.googleapis.com/wpush/legacy-manager", **env.payload["keys"])
+        db.commit()
+    assert env.client.post("/api/v1/push/subscriptions", headers=admin_header,
+        json={**env.payload, "endpoint": "https://fcm.googleapis.com/wpush/admin-device"}).status_code == 200
+    with env.sessions() as db:
+        with pytest.raises(ValueError):
+            auth_service.login_user(db, "push-one", "WrongPassword!")
+        assert db.query(LoginAlert).count() == 0
+        assert db.query(PushNotice).count() == 0
+        auth_service.login_user(db, "push-one", "Synthetic1!")
+        notice = db.query(PushNotice).one()
+        assert notice.kind == "admin_login" and notice.user_id == admin_id
+        alert = db.query(LoginAlert).one()
+        assert push.enqueue_investor_login(db, alert) == 0
+        db.commit()
+    for _ in range(2):
+        assert env.client.get("/api/v1/auth/me", headers=env.headers[0]).status_code == 200
+    with patch.object(push, "_send_push") as send:
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+        assert send.call_count == 1
+        device, payload = send.call_args.args
+        assert device.user_id == admin_id
+        assert payload["kind"] == "admin_login"
+        assert payload["data"]["href"] == "/activity"
+        assert payload["data"]["owner_user_id"] == admin_id
+        for secret in ("Private investor name", "push-one", "99777", "6543", "Synthetic"):
+            assert secret not in json.dumps(payload)
+    with env.sessions() as db:
+        auth_service.login_user(db, "admin", "SyntheticAdmin1!")
+        assert db.query(PushNotice).count() == 1
+
+
+@pytest.mark.parametrize("change", ["inactive", "renamed", "not_manager"])
+def test_login_push_revalidates_admin_privilege_before_sending(push_env, change):
+    from app.services import auth_service
+
+    env = push_env; admin_id, header = add_manager(env)
+    assert env.client.post("/api/v1/push/subscriptions", headers=header, json=env.payload).status_code == 200
+    with env.sessions() as db:
+        auth_service.login_user(db, "push-one", "Synthetic1!")
+        admin = db.get(User, admin_id)
+        if change == "inactive": admin.is_active = False
+        if change == "renamed": admin.username = "former-admin"
+        if change == "not_manager": admin.role = "investor"; admin.investor.is_manager = False
+        db.commit()
+    with patch.object(push, "_send_push") as send:
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+        send.assert_not_called()
+
+
+def test_device_test_current_owner_only_one_device_idempotent_and_safe_status(push_env):
+    env = push_env; first = register(env)
+    register(env, endpoint="https://fcm.googleapis.com/wpush/another-owned-device")
+    register(env, index=1, endpoint="https://fcm.googleapis.com/wpush/another-account")
+    with patch.object(push, "_send_push") as send:
+        response = env.client.post("/api/v1/push/test", headers=env.headers[0], json={"endpoint": first})
+        assert response.status_code == 200
+        delivery_id = response.json()["delivery_id"]
+        repeated = env.client.post("/api/v1/push/test", headers=env.headers[0], json={"endpoint": first})
+        assert repeated.json()["delivery_id"] == delivery_id
+        send.assert_not_called()
+        foreign = env.client.post("/api/v1/push/test", headers=env.headers[1], json={"endpoint": first})
+        assert foreign.status_code == 409
+        hidden = env.client.post("/api/v1/push/delivery-status", headers=env.headers[1],
+            json={"endpoint": first, "delivery_id": delivery_id})
+        assert hidden.json() == {"subscribed": False, "pending": 0, "last_delivery": None}
+        waiting = env.client.post("/api/v1/push/delivery-status", headers=env.headers[0],
+            json={"endpoint": first, "delivery_id": delivery_id})
+        assert waiting.json()["last_delivery"] == {"status": "queued", "error": None, "sent_at": None}
+        assert waiting.json()["pending"] == 1
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+        assert send.call_count == 1
+        assert send.call_args.args[0].endpoint == first
+        assert send.call_args.args[1]["kind"] == "test"
+        assert send.call_args.args[1]["data"]["href"] == "/account"
+        accepted = env.client.post("/api/v1/push/delivery-status", headers=env.headers[0],
+            json={"endpoint": first, "delivery_id": delivery_id})
+        assert accepted.json()["last_delivery"]["status"] == "sent"
+        assert accepted.json()["last_delivery"]["sent_at"] is not None
+        assert accepted.json()["pending"] == 0
+        for secret in (first, env.payload["keys"]["auth"], "Private investor name", "6543"):
+            assert secret not in accepted.text
+        # A delivery id from a different own device does not reveal that device's state.
+        other = env.client.post("/api/v1/push/delivery-status", headers=env.headers[0],
+            json={"endpoint": "https://fcm.googleapis.com/wpush/another-owned-device", "delivery_id": delivery_id})
+        assert other.json()["last_delivery"] is None
+
+
+def test_other_manager_cannot_enroll_or_test_and_fake_admin_is_not_privileged(push_env):
+    env = push_env
+    for username, role, manager_investor in [("another-manager", "manager", True), ("admin", "investor", False)]:
+        _, header = add_manager(env, username=username, role=role, manager_investor=manager_investor)
+        subscribed = env.client.post("/api/v1/push/subscriptions", headers=header,
+            json={**env.payload, "endpoint": "https://fcm.googleapis.com/wpush/" + username})
+        if role == "manager":
+            assert subscribed.status_code == 403
+            assert env.client.post("/api/v1/push/test", headers=header, json={"endpoint": env.payload["endpoint"]}).status_code == 403
+            assert env.client.post("/api/v1/push/delivery-status", headers=header, json={"endpoint": env.payload["endpoint"]}).status_code == 403
+        else:
+            assert subscribed.status_code == 200
+            with env.sessions() as db:
+                actor = db.get(User, env.user_ids[0])
+                alert = LoginAlert(user_id=actor.id, investor_id=actor.investor_id,
+                    email="synthetic", display_name="synthetic", logged_in_at=utcnow())
+                db.add(alert); db.flush()
+                assert push.enqueue_investor_login(db, alert) == 0
+
+
+def old_pending_agreement(env, *, offered_on=None):
+    with env.sessions() as db:
+        notice = PlanNotice(investor_id=env.investor_id, purpose="new", requested_on=date(2026, 1, 1), actor_user_id=env.user_ids[0])
+        db.add(notice); db.flush()
+        agreement = PlanAgreement(investor_id=env.investor_id, kind="open", status="pending", snapshot={}, private_terms={},
+            token_hash="a" * 64, document_hash="b" * 64, notice_id=notice.id, actor_user_id=env.user_ids[0],
+            created_at=offered_on or utcnow() - timedelta(days=2), expires_at=utcnow() + timedelta(days=14))
+        db.add(agreement); db.commit()
+        return agreement.id
+
+
+def test_daily_reminders_israel_daytime_once_and_missing_days_not_replayed(push_env, monkeypatch):
+    env = push_env; register(env); agreement_id = old_pending_agreement(env)
+    today = datetime(2026, 10, 5, 10, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    with patch.object(push, "utcnow", return_value=today):
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=today - timedelta(hours=1)) == 0
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=today) == 1
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=today + timedelta(hours=1)) == 0
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=today + timedelta(hours=10)) == 0
+    # Wake after a missed day: only today's pending request is queued. Older
+    # unsent reminders expire rather than causing a burst of missed-day pushes.
+    waking = today + timedelta(days=3)
+    with patch.object(push, "utcnow", return_value=waking):
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=waking) == 1
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=waking) == 0
+        with patch.object(push, "_send_push") as send:
+            assert push.run_pending_pushes(session_factory=env.sessions) == 2
+            assert send.call_count == 1
+            payload = send.call_args.args[1]
+            assert payload["kind"] == "agreement_reminder"
+            assert payload["data"]["href"] == f"/agreements/{agreement_id}/sign"
+    with env.sessions() as db:
+        assert db.query(PushNotice).filter_by(kind="agreement_reminder").count() == 2
+
+
+def test_initial_request_not_reminded_again_today_signature_and_new_revision_revalidated(push_env):
+    env = push_env; register(env)
+    now = datetime(2026, 10, 5, 10, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    with patch.object(push, "utcnow", return_value=now):
+        agreement_id = make_agreement(env)
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=now) == 0
+        with patch.object(push, "_send_push"):
+            assert push.run_pending_pushes(session_factory=env.sessions) == 1
+    tomorrow = now + timedelta(days=1)
+    with patch.object(push, "utcnow", return_value=tomorrow):
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=tomorrow) == 1
+        with env.sessions() as db:
+            agreement = db.get(PlanAgreement, agreement_id)
+            agreement.status = "signed"; agreement.signed_at = tomorrow
+            db.commit()
+        with patch.object(push, "_send_push") as send:
+            push.run_pending_pushes(session_factory=env.sessions)
+            send.assert_not_called()
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=tomorrow + timedelta(days=1)) == 0
+
+
+def test_unsigned_topup_reminder_and_reminder_disable_setting(push_env, monkeypatch):
+    env = push_env; register(env)
+    with env.sessions() as db:
+        request = InvestmentTopupRequest(investor_id=env.investor_id, amount=99777, status="contract", offered_at=utcnow() - timedelta(days=1))
+        db.add(request); db.commit(); request_id = request.id
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    with patch.object(push, "utcnow", return_value=now):
+        monkeypatch.setattr(settings, "web_push_agreement_reminders_enabled", False)
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=now) == 0
+        monkeypatch.setattr(settings, "web_push_agreement_reminders_enabled", True)
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=now) == 1
+        with env.sessions() as db:
+            request = db.get(InvestmentTopupRequest, request_id)
+            request.investor_signed_at = now
+            db.commit()
+        with patch.object(push, "_send_push") as send:
+            assert push.run_pending_pushes(session_factory=env.sessions) == 1
+            send.assert_not_called()
+
+
+def test_waking_with_unsent_original_does_not_double_send_reminder_same_day(push_env):
+    env = push_env; register(env)
+    yesterday = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    with patch.object(push, "utcnow", return_value=yesterday):
+        make_agreement(env)
+    waking = yesterday + timedelta(days=1)
+    with patch.object(push, "utcnow", return_value=waking):
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=waking) == 0
+        with patch.object(push, "_send_push") as send:
+            assert push.run_pending_pushes(session_factory=env.sessions) == 1
+            assert send.call_count == 1
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=waking + timedelta(hours=1)) == 0
+    next_day = waking + timedelta(days=1)
+    with patch.object(push, "utcnow", return_value=next_day):
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=next_day) == 1

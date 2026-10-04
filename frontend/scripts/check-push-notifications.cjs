@@ -96,14 +96,21 @@ async function main() {
   await emit('notificationclick',{notification:{data:displayed[0].options.data,close(){}}});assert.deepEqual(navigation,['https://tazrim.test/payments?payment_id=7']);
   await emit('push',{data:{json(){throw Error('invalid json');}}});assert.equal(Object.keys(displayed[3].options.data).length,0,'Malformed pushes still use a generic visible notification without navigation');
 
-  let user={id:2,is_manager:false};let push={state:'needs_permission',busy:false,error:null,canEnable:true,enable:async()=>{},refresh:async()=>{}};
-  const component=loadTs('components/PushNotificationAccess.tsx',{'../context/AuthContext':{useAuth:()=>({user,logout:async()=>{}})},'../context/PushNotificationsContext':{usePushNotifications:()=>push},'../services/tutorialMedia':{loadTutorialMedia:async()=>{}},'./pushNotificationAccess.css':{}});
+  let user={id:2,is_manager:false};let push={state:'needs_permission',busy:false,error:null,canEnable:true,enabled:true,testBusy:false,testResult:null,testDelivery:async()=>{},enable:async()=>{},refresh:async()=>{}};
+  const pushTypes=loadTs('types/push.ts',{});
+  const component=loadTs('components/PushNotificationAccess.tsx',{'../context/AuthContext':{useAuth:()=>({user,logout:async()=>{}})},'../context/PushNotificationsContext':{usePushNotifications:()=>push},'../services/tutorialMedia':{loadTutorialMedia:async()=>{}},'../types/push':pushTypes,'./pushNotificationAccess.css':{}});
   const render=()=>renderToStaticMarkup(React.createElement(component.PushNotificationAccess,null,React.createElement('div',null,'PRIVATE_LEDGER')));
   for(const state of ['checking','needs_permission','denied','install_required','unsupported','unavailable','error']){
     push.state=state;const html=render();assert.equal(html.includes('PRIVATE_LEDGER'),false,`${state} must not mount financial contents`);assert(html.includes('יציאה מהחשבון'));assert(html.includes('סרטון 8: הפעלת התראות'));
   }
   push.state='ready';assert(render().includes('PRIVATE_LEDGER'));
   user={id:1,is_manager:true};push.state='unavailable';assert(render().includes('PRIVATE_LEDGER'),'Manager must remain accessible');
+  user={id:1,is_manager:true,username:'admin'};push.state='needs_permission';assert(render().includes('PRIVATE_LEDGER'),'Administrator activation must never gate administration');
+  const renderSettings=()=>renderToStaticMarkup(React.createElement(component.PushNotificationSettings));
+  assert(renderSettings().includes('הפעל התראות במכשיר הזה'),'Administrator has an explicit activation control');
+  push.state='ready';push.testResult={status:'sent',message:'שירות ההתראות קיבל את התראת הבדיקה'};
+  assert(renderSettings().includes('שליחת התראת בדיקה למכשיר הזה'));assert(renderSettings().includes('שירות ההתראות קיבל'));
+  user={id:9,is_manager:true,username:'manager',investor_name:'מנהל מערכת'};assert.equal(renderSettings(),'','A matching display name must not expose administrator settings');
   console.log('PASS: persistent opt-in ownership, logout suspension, cleanup order, legacy hints, secure worker destinations, generic logged-out delivery, stale-account click protection, permission support, and 9 access gate states. No browser or network used.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

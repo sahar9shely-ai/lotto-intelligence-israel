@@ -29,6 +29,10 @@ class UnsubscribeRequest(BaseModel):
     endpoint: str = Field(min_length=1, max_length=2048)
 
 
+class DeliveryStatusRequest(UnsubscribeRequest):
+    delivery_id: int | None = Field(default=None, ge=1)
+
+
 @router.get("/config")
 def config(_: User = Depends(get_current_user)):
     return push.public_config()
@@ -44,12 +48,15 @@ def status(endpoint: str | None = None, user: User = Depends(get_current_user), 
 
 @router.post("/subscriptions")
 def subscribe(payload: SubscriptionRequest, user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
+    if push.is_manager(user) and not push.is_system_admin(user):
+        raise HTTPException(status_code=403, detail="התראות זמינות למשקיע או למנהל המערכת בלבד")
     if not push.is_enabled():
         raise HTTPException(status_code=503, detail="התראות לטלפון אינן זמינות כרגע")
     try:
         device = push.subscribe(db, user, endpoint=payload.endpoint, p256dh=payload.keys.p256dh, auth=payload.keys.auth)
-        push.enqueue_outstanding_for_device(db, device)
+        pending = push.enqueue_outstanding_for_device(db, device)
         db.commit()
+        push.logger.info("Push enrollment reconciliation: %s pending delivery records", pending)
     except push.SubscriptionConflict as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -60,6 +67,34 @@ def subscribe(payload: SubscriptionRequest, user: User = Depends(get_current_use
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"subscribed": True}
+
+
+@router.post("/test")
+def test_notification(payload: UnsubscribeRequest, user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
+    if push.is_manager(user) and not push.is_system_admin(user):
+        raise HTTPException(status_code=403, detail="בדיקת התראות זמינה למשקיע או למנהל המערכת בלבד")
+    if not push.is_enabled():
+        raise HTTPException(status_code=503, detail="התראות לטלפון אינן זמינות כרגע")
+    try:
+        delivery_id = push.enqueue_device_test(db, user, payload.endpoint)
+        db.commit()
+    except push.SubscriptionConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"queued": True, "delivery_id": delivery_id}
+
+
+@router.post("/delivery-status")
+def delivery_status(payload: DeliveryStatusRequest, user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
+    if push.is_manager(user) and not push.is_system_admin(user):
+        raise HTTPException(status_code=403, detail="בדיקת התראות זמינה למשקיע או למנהל המערכת בלבד")
+    try:
+        return push.device_delivery_status(db, user, payload.endpoint, payload.delivery_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/subscriptions/status")

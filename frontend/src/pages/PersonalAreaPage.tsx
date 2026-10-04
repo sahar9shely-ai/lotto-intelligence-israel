@@ -6,6 +6,7 @@ import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../services/api";
+import { canUseDevicePush } from "../types/push";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -156,11 +157,12 @@ export function PersonalAreaPage() {
           <a className="btn btn--primary btn--small" href="#change-password">
             החלפת סיסמה
           </a>
+          {canUseDevicePush(user) ? <a className="btn btn--ghost btn--small" href="#push-notifications">התראות</a> : null}
         </nav>
       </header>
       </ScrollReveal>
 
-      {!user?.is_manager && <PushNotificationSettings />}
+      <PushNotificationSettings />
 
       <ScrollReveal>
       <Panel

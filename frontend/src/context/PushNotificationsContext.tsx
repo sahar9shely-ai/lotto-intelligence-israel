@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "./AuthContext";
 import type { AuthUser } from "../types/auth";
+import { canUseDevicePush, isAdminPushAccount, type PushTestResult } from "../types/push";
 import { api, getToken } from "../services/api";
 import { clearBrowserPushOwner, decodePushPublicKey, getBrowserPushOwner, getPushRegistration, PUSH_DETACHING_EVENT, pushSupport, registerPushWorker, setBrowserPushBinding } from "../services/pushNotifications";
 
@@ -12,6 +13,9 @@ type PushContextValue = {
   canEnable: boolean;
   enabled: boolean;
   required: boolean | null;
+  testBusy: boolean;
+  testResult: PushTestResult | null;
+  testDelivery: () => Promise<void>;
   enable: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -19,13 +23,18 @@ const PushContext = createContext<PushContextValue | null>(null);
 
 export function PushNotificationsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  return <PushSession key={`${user?.id ?? "guest"}:${Boolean(user?.is_manager)}`} user={user}>{children}</PushSession>;
+  return <PushSession key={`${user?.id ?? "guest"}:${Boolean(user?.is_manager)}:${user?.username ?? ""}`} user={user}>{children}</PushSession>;
 }
 
 function PushSession({ user, children }: { user: AuthUser | null; children: ReactNode }) {
   const [state, setState] = useState<PushState>("checking");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState<PushTestResult | null>(null);
+  const testRunning = useRef(false);
+  const testVersion = useRef(0);
+  const testController = useRef<AbortController | null>(null);
   const configuration = useRef<{ enabled: boolean; public_key: string | null; require_notifications: boolean } | null>(null);
   const currentState = useRef<PushState>("checking");
   const verifiedBinding = useRef<{ user_id: number; endpoint: string } | null>(null);
@@ -38,6 +47,14 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
   const detaching = useRef(false);
   const valid = (request: number) => active.current && version.current === request;
   const updateState = (nextState: PushState) => { currentState.current = nextState; setState(nextState); };
+  const cancelTest = () => {
+    testVersion.current += 1;
+    testController.current?.abort();
+    testController.current = null;
+    testRunning.current = false;
+    setTestBusy(false);
+    setTestResult(null);
+  };
   const usesCurrentKey = (subscription: PushSubscription, publicKey: string) => {
     const registeredKey = subscription.options?.applicationServerKey;
     if (!registeredKey) return false;
@@ -73,11 +90,12 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
     const invalidate = async (nextState: PushState) => {
       if (!valid(request)) return;
       verifiedBinding.current = null;
+      cancelTest();
       updateState(nextState);
       await setBrowserPushBinding(null);
     };
     const check = async () => {
-      if (!user || user.is_manager) {
+      if (!user || !canUseDevicePush(user)) {
         await setBrowserPushBinding(null);
         if (valid(request)) updateState("ready");
         return;
@@ -92,8 +110,9 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
         await setBrowserPushBinding(null);
         if (!valid(request)) return;
       }
-      const config = await api.pushConfig();
+      const serverConfig = await api.pushConfig();
       if (!valid(request)) return;
+      const config = { ...serverConfig, require_notifications: isAdminPushAccount(user) ? false : serverConfig.require_notifications };
       configuration.current = config;
       if (!config.enabled || !config.public_key) {
         await invalidate(config.require_notifications ? "unavailable" : "ready");
@@ -192,7 +211,7 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
     });
     checking.current = { request, promise };
     return promise;
-  }, [user?.id, user?.is_manager]);
+  }, [user?.id, user?.is_manager, user?.username]);
 
   useEffect(() => {
     let effectAlive = true;
@@ -204,6 +223,7 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
         version.current += 1;
         checking.current = null;
         verifiedBinding.current = null;
+        cancelTest();
         updateState(Notification.permission === "denied" ? "denied" : "needs_permission");
         void setBrowserPushBinding(null).catch(() => undefined);
       }
@@ -214,6 +234,7 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
       version.current += 1;
       checking.current = null;
       verifiedBinding.current = null;
+      cancelTest();
       busyRef.current = false;
       setBusy(false);
       updateState("checking");
@@ -234,6 +255,7 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
       version.current += 1;
       checking.current = null;
       verifiedBinding.current = null;
+      cancelTest();
       window.removeEventListener("focus", onFocus);
       window.removeEventListener(PUSH_DETACHING_EVENT, onDetaching);
       document.removeEventListener("visibilitychange", onVisible);
@@ -244,7 +266,7 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
   }, [refresh]);
 
   async function enable() {
-    if (!user || user.is_manager || busyRef.current || detaching.current || pushSupport() !== "supported") return;
+    if (!user || !canUseDevicePush(user) || busyRef.current || detaching.current || pushSupport() !== "supported") return;
     const config = configuration.current;
     if (!config?.enabled || !config.public_key) return;
     const request = ++version.current;
@@ -290,9 +312,68 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
     }
   }
 
+  async function testDelivery() {
+    const binding = verifiedBinding.current;
+    if (!canUseDevicePush(user) || currentState.current !== "ready" || !binding
+      || binding.user_id !== user?.id || testRunning.current || detaching.current) return;
+    const operation = ++testVersion.current;
+    const controller = new AbortController();
+    testController.current = controller;
+    testRunning.current = true;
+    setTestBusy(true);
+    setTestResult({ status: "sending", message: "שולחים התראת בדיקה למכשיר הזה…" });
+    const validTest = () => active.current && testVersion.current === operation && !detaching.current
+      && verifiedBinding.current?.user_id === binding.user_id && verifiedBinding.current.endpoint === binding.endpoint;
+    let queued = false;
+    const timeout = window.setTimeout(() => controller.abort(), 30000);
+    try {
+      const test = await api.pushTest({ endpoint: binding.endpoint }, controller.signal);
+      if (!validTest()) return;
+      queued = test.queued;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        controller.signal.throwIfAborted();
+        const result = await api.pushDeliveryStatus({ endpoint: binding.endpoint, delivery_id: test.delivery_id }, controller.signal);
+        if (!validTest()) return;
+        if (!result.subscribed) {
+          setTestResult({ status: "failed", message: "רישום המכשיר אינו פעיל. יש לבדוק מחדש את ההתראות ולהפעיל אותן." });
+          return;
+        }
+        const delivery = result.last_delivery;
+        if (delivery?.status === "sent") {
+          setTestResult({ status: "sent", message: "שירות ההתראות קיבל את התראת הבדיקה. יש לבדוק שהיא הופיעה במכשיר הזה." });
+          return;
+        }
+        if (delivery?.status === "failed" || delivery?.status === "cancelled") {
+          setTestResult({ status: delivery.status, message: delivery.error === "provider_rejected"
+            ? "שירות ההתראות דחה את השליחה. יש לבדוק מחדש את רישום המכשיר."
+            : "השליחה לא הושלמה. אפשר לבדוק שוב בעוד רגע." });
+          return;
+        }
+        if (attempt < 5) await new Promise<void>(resolve => {
+          const finish = () => { window.clearTimeout(delay); controller.signal.removeEventListener("abort", finish); resolve(); };
+          const delay = window.setTimeout(finish, 5000);
+          controller.signal.addEventListener("abort", finish, { once: true });
+        });
+      }
+      if (validTest()) setTestResult({ status: "queued", message: "התראת הבדיקה ממתינה למשלוח. עדיין לא התקבל אישור משירות ההתראות." });
+    } catch (failure) {
+      if (!validTest()) return;
+      setTestResult(controller.signal.aborted && queued
+        ? { status: "queued", message: "התראת הבדיקה ממתינה למשלוח. עדיין לא התקבל אישור משירות ההתראות." }
+        : { status: "failed", message: failure instanceof Error ? failure.message : "לא ניתן לשלוח את התראת הבדיקה כרגע." });
+    } finally {
+      window.clearTimeout(timeout);
+      if (validTest()) {
+        testRunning.current = false;
+        testController.current = null;
+        setTestBusy(false);
+      }
+    }
+  }
+
   const canEnable = Boolean(configuration.current?.enabled && configuration.current.public_key
-    && user && !user.is_manager && pushSupport() === "supported");
-  return <PushContext.Provider value={{ state, busy, error, canEnable, enabled: Boolean(configuration.current?.enabled), required: configuration.current?.require_notifications ?? null, enable, refresh }}>{children}</PushContext.Provider>;
+    && canUseDevicePush(user) && pushSupport() === "supported");
+  return <PushContext.Provider value={{ state, busy, error, canEnable, enabled: Boolean(configuration.current?.enabled), required: configuration.current?.require_notifications ?? null, testBusy, testResult, testDelivery, enable, refresh }}>{children}</PushContext.Provider>;
 }
 
 export function usePushNotifications() {
