@@ -36,7 +36,7 @@ export function PushNotificationAccess({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const push = usePushNotifications();
   const [loggingOut, setLoggingOut] = useState(false);
-  if (!user || user.is_manager || push.state === "ready") return <>{children}</>;
+  if (!user || user.is_manager || push.state === "ready" || push.required === false) return <>{children}</>;
   const canEnable = push.canEnable && ["needs_permission", "error"].includes(push.state);
   return <main className="push-activation" dir="rtl">
     <section className="push-activation__card" aria-labelledby="push-activation-title" aria-busy={push.busy}>
@@ -64,7 +64,8 @@ export function PushNotificationSettings() {
   const push = usePushNotifications();
   return <section id="push-notifications" className="push-settings panel">
     <h2>התראות במכשיר הזה</h2>
-    <p>{!push.enabled ? "התראות אינן זמינות כרגע במערכת." : push.state === "ready" ? "התראות פעילות לבקשות אישור קבלת תשלום ולמסמכים לחתימה." : "צריך להפעיל התראות כדי להיכנס לתיק מהמכשיר הזה."}</p>
+    <p>{!push.enabled ? "התראות אינן זמינות כרגע במערכת." : push.state === "ready" ? "התראות פעילות לבקשות אישור קבלת תשלום ולמסמכים לחתימה." : push.required === false ? "אפשר להפעיל התראות על בקשות אישור קבלת תשלום ועל מסמכים לחתימה." : "צריך להפעיל התראות כדי להיכנס לתיק מהמכשיר הזה."}</p>
+    {push.error ? <p className="push-settings__hint" role="status">{push.error}</p> : null}
     <p className="push-settings__hint">אפשר לשנות את ההרשאה בהגדרות האתר או בהגדרות ההתראות במכשיר.</p>
     <button type="button" className="btn btn--ghost" onClick={() => void push.refresh()} disabled={push.busy || push.state === "checking"}>בדיקת ההתראות</button>
   </section>;

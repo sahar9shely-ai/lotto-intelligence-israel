@@ -16,7 +16,65 @@ export function setBrowserPushBinding(binding: BrowserPushBinding): Promise<void
     open.onsuccess = () => {
       const db = open.result;
       const transaction = db.transaction(BINDING_STORE, "readwrite");
-      transaction.objectStore(BINDING_STORE).put(binding, "current");
+      const store = transaction.objectStore(BINDING_STORE);
+      store.put(binding, "current");
+      // Enrollment survives logout, but delivery/navigation never uses this owner hint.
+      if (binding) store.put(binding, "owner");
+      transaction.oncomplete = () => { db.close(); resolve(); };
+      transaction.onerror = () => { db.close(); reject(transaction.error); };
+      transaction.onabort = () => { db.close(); reject(transaction.error); };
+    };
+  }));
+  bindingQueue = write;
+  return write;
+}
+
+/** A non-authenticating hint. The current account must still verify ownership with the server. */
+export function getBrowserPushOwner(): Promise<BrowserPushBinding> {
+  return bindingQueue.catch(() => undefined).then(() => new Promise<BrowserPushBinding>((resolve, reject) => {
+    const open = indexedDB.open(BINDING_DB, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore(BINDING_STORE);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const transaction = db.transaction(BINDING_STORE, "readonly");
+      const store = transaction.objectStore(BINDING_STORE);
+      const read = store.get("owner");
+      let owner: BrowserPushBinding = null;
+      const accept = (value: unknown) => {
+        if (value && typeof value === "object" && "user_id" in value && "endpoint" in value
+          && typeof value.user_id === "number" && Number.isSafeInteger(value.user_id) && value.user_id > 0
+          && typeof value.endpoint === "string") {
+          owner = { user_id: Number(value.user_id), endpoint: value.endpoint };
+        }
+      };
+      read.onsuccess = () => {
+        if (read.result !== undefined) { accept(read.result); return; }
+        // Existing installations stored only the active marker before enrollment persistence was introduced.
+        const legacy = store.get("current");
+        legacy.onsuccess = () => accept(legacy.result);
+      };
+      transaction.oncomplete = () => { db.close(); resolve(owner); };
+      transaction.onerror = () => { db.close(); reject(transaction.error); };
+      transaction.onabort = () => { db.close(); reject(transaction.error); };
+    };
+  }));
+}
+
+/** Forget only the endpoint being removed, so a delayed cleanup cannot erase a newer owner. */
+export function clearBrowserPushOwner(endpoint?: string): Promise<void> {
+  const write = bindingQueue.catch(() => undefined).then(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open(BINDING_DB, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore(BINDING_STORE);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const transaction = db.transaction(BINDING_STORE, "readwrite");
+      const store = transaction.objectStore(BINDING_STORE);
+      const read = store.get("owner");
+      read.onsuccess = () => {
+        if (!endpoint || read.result?.endpoint === endpoint) store.put(null, "owner");
+      };
       transaction.oncomplete = () => { db.close(); resolve(); };
       transaction.onerror = () => { db.close(); reject(transaction.error); };
       transaction.onabort = () => { db.close(); reject(transaction.error); };
@@ -75,8 +133,11 @@ export async function registerPushWorker(): Promise<ServiceWorkerRegistration> {
   return registration;
 }
 
-/** Clear local delivery first, then remove the authenticated server binding before logout. */
-export async function detachBrowserPush({ serverCleanup = true }: { serverCleanup?: boolean } = {}): Promise<void> {
+/** Suspend account delivery; retain opt-in enrollment on logout, remove it on account replacement. */
+export async function detachBrowserPush({ serverCleanup = true, preserveSubscription = false }: {
+  serverCleanup?: boolean;
+  preserveSubscription?: boolean;
+} = {}): Promise<void> {
   const cleanupToken = getToken();
   window.dispatchEvent(new Event(PUSH_DETACHING_EVENT));
   await setBrowserPushBinding(null).catch(() => undefined);
@@ -84,8 +145,10 @@ export async function detachBrowserPush({ serverCleanup = true }: { serverCleanu
   if (!registration) return;
   const notifications = await registration.getNotifications().catch(() => []);
   notifications.forEach(notification => notification.close());
+  // The worker's active marker is already empty: retained pushes are generic and cannot open an account item.
+  if (preserveSubscription) return;
   const subscription = await registration.pushManager.getSubscription().catch(() => null);
-  if (!subscription) return;
+  if (!subscription) { await clearBrowserPushOwner().catch(() => undefined); return; }
   let timeout: number | undefined;
   try {
     if (serverCleanup && cleanupToken) await Promise.race([
@@ -97,5 +160,6 @@ export async function detachBrowserPush({ serverCleanup = true }: { serverCleanu
   } finally {
     window.clearTimeout(timeout);
     await subscription.unsubscribe().catch(() => false);
+    await clearBrowserPushOwner(subscription.endpoint).catch(() => undefined);
   }
 }

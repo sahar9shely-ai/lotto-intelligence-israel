@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,7 @@ MAX_SUBSCRIPTIONS = 10
 MAX_ATTEMPTS = 4
 CLAIM_LEASE_SECONDS = 120
 RETRY_SECONDS = (60, 300, 1800)
+logger = logging.getLogger(__name__)
 
 
 class SubscriptionConflict(ValueError):
@@ -195,28 +197,83 @@ def _revision(value: datetime) -> str:
     return value.replace(tzinfo=timezone.utc).isoformat(timespec="microseconds")
 
 
-def _enqueue(db: Session, *, investor_id: int, kind: str, entity_id: int, revision: str, expires_at: datetime) -> int:
+def _enqueue(db: Session, *, investor_id: int, kind: str, entity_id: int, revision: str,
+             expires_at: datetime, device: PushSubscription | None = None) -> int:
     count = 0
     # Legacy stores can contain multiple accounts for one investor; each opted-in
     # account receives only its own deliveries and retains its own device binding.
     users = db.query(User).filter_by(investor_id=investor_id, is_active=True).all()
-    event_key = f"{kind}:{entity_id}:{revision}"
+    if device is not None:
+        users = [user for user in users if user.id == device.user_id]
+    base_event_key = f"{kind}:{entity_id}:{revision}"
     for user in users:
-        subscriptions = db.query(PushSubscription).filter_by(user_id=user.id).all()
+        subscriptions = [device] if device is not None else db.query(PushSubscription).filter_by(user_id=user.id).all()
         if not subscriptions:
             continue
-        inserted = _insert_ignore(db, PushNotice, {
+        event_key = base_event_key
+        if device is not None:
+            previous = db.query(PushNotice).filter_by(event_key=event_key, user_id=user.id).one_or_none()
+            if previous and previous.expires_at.replace(tzinfo=timezone.utc) <= utcnow():
+                # Do not revive expired work on older devices. The pending
+                # request can have one fresh catch-up on this device instead.
+                event_key = f"{base_event_key}:device:{device.endpoint_hash[:24]}"
+        _insert_ignore(db, PushNotice, {
             "event_key": event_key, "user_id": user.id, "investor_id": investor_id,
             "kind": kind, "entity_id": entity_id, "entity_revision": revision,
             "created_at": utcnow(), "expires_at": expires_at,
         }, ["event_key", "user_id"])
-        if not inserted:
-            continue
         notice = db.query(PushNotice).filter_by(event_key=event_key, user_id=user.id).one()
+        # A newly opted-in device may need a still-pending request even when an
+        # earlier device received it. Keep that earlier delivery immutable.
         for subscription in subscriptions:
-            db.add(PushDelivery(notice_id=notice.id, subscription_id=subscription.id))
-            count += 1
+            if _insert_ignore(db, PushDelivery, {
+                "notice_id": notice.id, "subscription_id": subscription.id,
+                "status": "queued", "attempts": 0, "next_attempt_at": utcnow(),
+            }, ["notice_id", "subscription_id"]):
+                count += 1
     db.flush()
+    return count
+
+
+def enqueue_outstanding_for_device(db: Session, device: PushSubscription) -> int:
+    """Catch up a newly enabled device, in the registration transaction only.
+
+    Requests created before opt-in had no deliveries. Reconcile the account's
+    current outstanding work without re-sending to devices that already saw it,
+    and without sending network traffic before registration has committed.
+    """
+    if not is_enabled():
+        return 0
+    user = db.get(User, device.user_id)
+    if not user or not user.is_active or user.role == "manager" or not user.investor_id or user.investor.is_manager:
+        return 0
+    now = utcnow()
+    count = 0
+    payments = db.query(Payment).filter(
+        Payment.investor_id == user.investor_id,
+        Payment.status == "awaiting_confirmation",
+        Payment.confirmation_requested_at.isnot(None),
+    ).all()
+    for payment in payments:
+        count += _enqueue(db, investor_id=user.investor_id, kind="payment", entity_id=payment.id,
+                          revision=_revision(payment.confirmation_requested_at),
+                          expires_at=now + timedelta(days=7), device=device)
+    agreements = db.query(PlanAgreement).filter(
+        PlanAgreement.investor_id == user.investor_id, PlanAgreement.status == "pending",
+        PlanAgreement.signed_at.is_(None), PlanAgreement.expires_at > now,
+    ).all()
+    for agreement in agreements:
+        count += _enqueue(db, investor_id=user.investor_id, kind="agreement", entity_id=agreement.id,
+                          revision=agreement.token_hash, expires_at=agreement.expires_at, device=device)
+    topups = db.query(InvestmentTopupRequest).filter(
+        InvestmentTopupRequest.investor_id == user.investor_id,
+        InvestmentTopupRequest.status == "contract", InvestmentTopupRequest.investor_signed_at.is_(None),
+        InvestmentTopupRequest.offered_at.isnot(None),
+    ).all()
+    for request in topups:
+        count += _enqueue(db, investor_id=user.investor_id, kind="topup", entity_id=request.id,
+                          revision=_revision(request.offered_at),
+                          expires_at=now + timedelta(days=14), device=device)
     return count
 
 
@@ -362,6 +419,7 @@ def run_pending_pushes(*, session_factory=InvestmentSessionLocal, limit: int = 2
                     # Query deletion relies on CASCADE, preventing stale retries.
                     db.query(PushDelivery).filter_by(subscription_id=subscription.id).delete(synchronize_session=False)
                     db.delete(subscription)
+                    logger.info("Push delivery endpoint expired; device registration removed")
                 else:
                     retryable = not isinstance(status_code, int) or status_code == 429 or status_code >= 500
                     result = {"last_error_code": f"http_{status_code}" if isinstance(status_code, int) else "transport_error",
@@ -371,10 +429,12 @@ def run_pending_pushes(*, session_factory=InvestmentSessionLocal, limit: int = 2
                     else:
                         result["status"] = "failed"
                     db.execute(update(PushDelivery).where(PushDelivery.id == delivery_id, PushDelivery.claim_token == token).values(**result))
+                    logger.warning("Push delivery %s (%s)", result["status"], result["last_error_code"])
             else:
                 db.execute(update(PushDelivery).where(PushDelivery.id == delivery_id, PushDelivery.claim_token == token).values(
                     status="sent", sent_at=utcnow(), last_error_code=None, claim_token=None,
                 ))
+                logger.info("Push notification accepted by provider")
             db.commit()
             processed += 1
     return processed

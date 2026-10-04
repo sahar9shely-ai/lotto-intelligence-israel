@@ -12,9 +12,10 @@ function fakeIndexedDB(record, events = []) {
   return {open() {
     const request = {};
     request.result = {createObjectStore() {},close() {},transaction() {
+      let pending=0;
       const transaction = {objectStore() {return {
-        put(value) {record.current=value;events.push(value ? 'bind:'+value.user_id : 'clear');queueMicrotask(()=>transaction.oncomplete?.());},
-        get() {const read={};queueMicrotask(()=>{read.result=record.current;read.onsuccess?.();transaction.oncomplete?.();});return read;},
+        put(value,key) {record[key]=value;if(key==='current') events.push(value ? 'bind:'+value.user_id : 'clear');pending++;queueMicrotask(()=>{if(--pending===0)transaction.oncomplete?.();});},
+        get(key) {const read={};pending++;queueMicrotask(()=>{read.result=record[key];read.onsuccess?.();if(--pending===0)transaction.oncomplete?.();});return read;},
       };}};
       return transaction;
     }};
@@ -47,10 +48,21 @@ async function main() {
   assert.deepEqual([...new Uint8Array(service.decodePushPublicKey('AQIDBA'))],[1,2,3,4]);
   await Promise.all([service.setBrowserPushBinding({user_id:1,endpoint}),service.setBrowserPushBinding(null),service.setBrowserPushBinding({user_id:2,endpoint})]);
   assert.equal(record.current.user_id,2,'Serialized writes must keep latest account binding');
+  assert.equal((await service.getBrowserPushOwner()).user_id,2,'The persisted hint records only the confirmed endpoint owner');
+  events.length=0;await service.detachBrowserPush({serverCleanup:false,preserveSubscription:true});
+  assert.deepEqual(events,['clear','close'],'Ordinary logout/expiry clears delivery and existing notices while retaining opt-in enrollment');
+  assert.equal(record.current,null);assert.equal((await service.getBrowserPushOwner()).user_id,2,'Returning investor keeps an ownership hint without an active delivery marker');
   events.length=0;const oldCleanup=service.detachBrowserPush();token='synthetic-new-session';await oldCleanup;
   assert.equal(record.current,null);assert.deepEqual(events,['clear','close','server-delete','unsubscribe'],'Clear marker and server binding before local unsubscribe');
+  assert.equal(await service.getBrowserPushOwner(),null,'Explicit account replacement forgets the removed endpoint owner');
   events.length=0;await service.detachBrowserPush({serverCleanup:false});
   assert.deepEqual(events,['clear','close','unsubscribe'],'Auth expiry must not recursively call authenticated server cleanup');
+  const replacementEndpoint='https://push.example.test/device-2';
+  await service.setBrowserPushBinding({user_id:3,endpoint:replacementEndpoint});
+  await service.clearBrowserPushOwner(endpoint);
+  assert.equal((await service.getBrowserPushOwner()).user_id,3,'Delayed cleanup for another endpoint cannot erase a new owner');
+  delete record.owner;record.current={user_id:3,endpoint:replacementEndpoint};
+  assert.equal((await service.getBrowserPushOwner()).user_id,3,'Older installations recover the owner hint from their existing active marker');
 
   const handlers={};const displayed=[];const navigation=[];
   const swRecord={current:{user_id:2,endpoint}};
@@ -76,10 +88,13 @@ async function main() {
   assert.equal(displayed.length,2);assert.equal(Object.keys(displayed[1].options.data).length,0,'Wrong-account push must carry no navigation target or account identifier');
   await emit('notificationclick',{notification:{data:displayed[1].options.data,close(){}}});assert.equal(navigation.length,0);
   swRecord.current=null;
+  swRecord.owner={user_id:2,endpoint};
   await emit('notificationclick',{notification:{data:displayed[0].options.data,close(){}}});assert.equal(navigation.length,0,'Logout must disable clicks on previously displayed notifications');
+  await emit('push',{data:{json:()=>({data:{owner_user_id:2,href:'/payments?payment_id=7'}})}});
+  assert.equal(Object.keys(displayed[2].options.data).length,0,'Retained owner hint alone must never authorize a private notification destination');
   swRecord.current={user_id:2,endpoint};
   await emit('notificationclick',{notification:{data:displayed[0].options.data,close(){}}});assert.deepEqual(navigation,['https://tazrim.test/payments?payment_id=7']);
-  await emit('push',{data:{json(){throw Error('invalid json');}}});assert.equal(Object.keys(displayed[2].options.data).length,0,'Malformed pushes still use a generic visible notification without navigation');
+  await emit('push',{data:{json(){throw Error('invalid json');}}});assert.equal(Object.keys(displayed[3].options.data).length,0,'Malformed pushes still use a generic visible notification without navigation');
 
   let user={id:2,is_manager:false};let push={state:'needs_permission',busy:false,error:null,canEnable:true,enable:async()=>{},refresh:async()=>{}};
   const component=loadTs('components/PushNotificationAccess.tsx',{'../context/AuthContext':{useAuth:()=>({user,logout:async()=>{}})},'../context/PushNotificationsContext':{usePushNotifications:()=>push},'../services/tutorialMedia':{loadTutorialMedia:async()=>{}},'./pushNotificationAccess.css':{}});
@@ -89,6 +104,6 @@ async function main() {
   }
   push.state='ready';assert(render().includes('PRIVATE_LEDGER'));
   user={id:1,is_manager:true};push.state='unavailable';assert(render().includes('PRIVATE_LEDGER'),'Manager must remain accessible');
-  console.log('PASS: push binding, cleanup order, secure worker destinations, generic delivery, stale-account click protection, permission support, and 9 access gate states. No browser or network used.');
+  console.log('PASS: persistent opt-in ownership, logout suspension, cleanup order, legacy hints, secure worker destinations, generic logged-out delivery, stale-account click protection, permission support, and 9 access gate states. No browser or network used.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

@@ -32,16 +32,20 @@ async function main() {
   logins[0].resolve({access_token:'synthetic-B',user:{id:2,username:'B'}});await loginB;assert.equal(token,'synthetic-B');assert.equal(state[0].username,'B');
 
   const oldLogout=auth.logout();await tick();
+  assert.equal(cleanups[1].options.preserveSubscription,true,'Ordinary logout must retain device opt-in');assert.equal(cleanups[1].options.serverCleanup,false,'Logout suspends private navigation without erasing enrollment');
   const loginC=auth.login('C','synthetic');await tick();assert.equal(cleanups.length,2,'New login waits for the already running browser cleanup');
   cleanups[1].resolve();await tick();assert.equal(cleanups.length,3);assert.equal(cleanups[2].token,'synthetic-B');
+  assert.equal(cleanups[2].options.preserveSubscription,false,'Replacing an authenticated account still removes its old endpoint');
   cleanups[2].resolve();await tick();logins[1].resolve({access_token:'synthetic-C',user:{id:3,username:'C'}});await Promise.all([oldLogout,loginC]);
   assert.equal(token,'synthetic-C','Older logout must not clear the next login');assert.equal(state[0].username,'C');
 
   const expiredRefresh=auth.refresh();await tick();
   handlers.expired();await tick();assert.equal(token,null);assert.equal(cleanups[3].options.serverCleanup,false);
+  assert.equal(cleanups[3].options.preserveSubscription,true,'An expired session must not erase the investor device enrollment');
   const loginD=auth.login('D','synthetic');await tick();assert.equal(logins.length,2,'Login must wait for delayed auth-expiry cleanup');
   me[1].reject(Error('expired old request'));await expiredRefresh;
   cleanups[3].resolve();await tick();assert.equal(cleanups.length,5);cleanups[4].resolve();await tick();
+  assert.equal(cleanups[4].options.preserveSubscription,true,'Login without a prior token retains an endpoint for authenticated ownership verification');
   logins[2].resolve({access_token:'synthetic-D',user:{id:4,username:'D'}});await loginD;assert.equal(token,'synthetic-D');assert.equal(state[0].username,'D');
 
   const loginE=auth.login('E','synthetic');await tick();

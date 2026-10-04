@@ -60,7 +60,7 @@ def push_env(tmp_path, monkeypatch):
         plan = InvestmentPlan(investor_id=first.id, principal=99777, start_date=date(2026, 1, 1))
         db.add(plan); db.flush()
         payment = Payment(plan_id=plan.id, investor_id=first.id, month_number=1, due_date=date(2026, 2, 1),
-                          investor_amount=6543, status="awaiting_confirmation", confirmation_requested_at=utcnow())
+                          investor_amount=6543, status="scheduled", confirmation_requested_at=None)
         db.add(payment); db.commit()
         ids = [user.id for user in users]
         payment_id = payment.id
@@ -90,7 +90,10 @@ def register(env, index=0, endpoint=None):
 
 def enqueue_payment(env):
     with env.sessions() as db:
-        assert push.enqueue_payment(db, db.get(Payment, env.payment_id)) == 1
+        payment = db.get(Payment, env.payment_id)
+        payment.status = "awaiting_confirmation"
+        payment.confirmation_requested_at = payment.confirmation_requested_at or utcnow()
+        assert push.enqueue_payment(db, payment) == 1
         db.commit()
 
 
@@ -205,7 +208,9 @@ def test_transaction_rollback_has_no_fanout_and_duplicates_do_not_resend(push_en
     env = push_env; register(env)
     with patch.object(push, "_send_push") as send:
         with env.sessions() as db:
-            assert push.enqueue_payment(db, db.get(Payment, env.payment_id)) == 1
+            payment = db.get(Payment, env.payment_id)
+            payment.status = "awaiting_confirmation"; payment.confirmation_requested_at = utcnow()
+            assert push.enqueue_payment(db, payment) == 1
             db.rollback()
         assert push.run_pending_pushes(session_factory=env.sessions) == 0
         send.assert_not_called()
@@ -511,3 +516,120 @@ def test_topup_business_hook_enqueues_and_unsigned_reoffer_creates_new_revision(
             assert db.query(PushNotice).count() == 2
         assert push.run_pending_pushes(session_factory=env.sessions) == 2
         assert send.call_count == 1
+
+
+def test_enable_notifications_catches_up_requests_created_before_opt_in_once(push_env):
+    env = push_env
+    with env.sessions() as db:
+        payment = db.get(Payment, env.payment_id)
+        payment.status = "awaiting_confirmation"; payment.confirmation_requested_at = utcnow()
+        assert push.enqueue_payment(db, payment) == 0
+        assert db.query(PushNotice).count() == 0
+        db.commit()
+    with patch.object(push, "_send_push") as send:
+        register(env)
+        send.assert_not_called()
+        register(env)
+        with env.sessions() as db:
+            assert db.query(PushNotice).count() == 1
+            assert db.query(PushDelivery).count() == 1
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+        assert send.call_count == 1
+        register(env)
+        assert push.run_pending_pushes(session_factory=env.sessions) == 0
+        assert send.call_count == 1
+
+
+def test_new_device_catches_up_without_replaying_other_device_or_other_account(push_env):
+    env = push_env; register(env); enqueue_payment(env)
+    with patch.object(push, "_send_push") as send:
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+        first_device = send.call_args.args[0].id
+        register(env, index=1, endpoint="https://fcm.googleapis.com/wpush/other-owner")
+        assert push.run_pending_pushes(session_factory=env.sessions) == 0
+        register(env, endpoint="https://fcm.googleapis.com/wpush/second-device")
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+        assert send.call_count == 2
+        assert send.call_args.args[0].id != first_device
+        assert send.call_args.args[0].user_id == env.user_ids[0]
+        register(env)
+        register(env, endpoint="https://fcm.googleapis.com/wpush/second-device")
+        assert push.run_pending_pushes(session_factory=env.sessions) == 0
+
+
+def test_expired_event_catchup_does_not_revive_stale_delivery_on_other_device(push_env):
+    env = push_env; register(env); enqueue_payment(env)
+    with env.sessions() as db:
+        old = db.query(PushNotice).one()
+        old.expires_at = utcnow() - timedelta(days=1)
+        old_id = old.id
+        db.commit()
+    register(env, endpoint="https://fcm.googleapis.com/wpush/fresh-device")
+    with env.sessions() as db:
+        assert db.get(PushNotice, old_id).expires_at.replace(tzinfo=utcnow().tzinfo) < utcnow()
+        assert db.query(PushNotice).count() == 2
+    with patch.object(push, "_send_push") as send:
+        assert push.run_pending_pushes(session_factory=env.sessions) == 2
+        assert send.call_count == 1
+        assert send.call_args.args[0].endpoint.endswith("fresh-device")
+        register(env, endpoint="https://fcm.googleapis.com/wpush/fresh-device")
+        assert push.run_pending_pushes(session_factory=env.sessions) == 0
+
+
+def test_device_catchup_only_unsigned_unexpired_owned_agreements_and_contracts(push_env):
+    env = push_env
+    with env.sessions() as db:
+        notice = PlanNotice(investor_id=env.investor_id, purpose="new", requested_on=date(2026, 1, 1), actor_user_id=env.user_ids[0])
+        db.add(notice); db.flush()
+        for index, (status, signed, expired, owner) in enumerate([
+            ("pending", False, False, env.investor_id),
+            ("signed", True, False, env.investor_id),
+            ("pending", False, True, env.investor_id),
+            ("cancelled", False, False, env.investor_id),
+            ("pending", False, False, db.get(User, env.user_ids[1]).investor_id),
+        ]):
+            db.add(PlanAgreement(investor_id=owner, kind="open", status=status, snapshot={}, private_terms={},
+                token_hash=f"{index:064x}", document_hash="b" * 64, notice_id=notice.id,
+                actor_user_id=env.user_ids[0], signed_at=utcnow() if signed else None,
+                expires_at=utcnow() + timedelta(days=-1 if expired else 14)))
+        for status, signed in [("contract", False), ("contract", True), ("executed", False), ("pending", False)]:
+            db.add(InvestmentTopupRequest(investor_id=env.investor_id, amount=99777, status=status,
+                offered_at=utcnow(), investor_signed_at=utcnow() if signed else None))
+        db.commit()
+    register(env)
+    with patch.object(push, "_send_push") as send:
+        assert push.run_pending_pushes(session_factory=env.sessions) == 2
+        assert send.call_count == 2
+        for call in send.call_args_list:
+            assert call.args[0].user_id == env.user_ids[0]
+            assert call.args[1]["data"]["owner_user_id"] == env.user_ids[0]
+    with env.sessions() as db:
+        assert {notice.kind for notice in db.query(PushNotice).all()} == {"agreement", "topup"}
+
+
+def test_catchup_registration_transaction_can_roll_back_without_delivery(push_env):
+    env = push_env
+    with env.sessions() as db:
+        payment = db.get(Payment, env.payment_id)
+        payment.status = "awaiting_confirmation"; payment.confirmation_requested_at = utcnow()
+        db.commit()
+        device = push.subscribe(db, db.get(User, env.user_ids[0]), endpoint=env.payload["endpoint"], **env.payload["keys"])
+        assert push.enqueue_outstanding_for_device(db, device) == 1
+        db.rollback()
+    with patch.object(push, "_send_push") as send:
+        assert push.run_pending_pushes(session_factory=env.sessions) == 0
+        send.assert_not_called()
+    with env.sessions() as db:
+        assert db.query(PushSubscription).count() == 0
+        assert db.query(PushNotice).count() == 0
+
+
+def test_fixed_provider_diagnostics_never_include_private_exception_or_device(push_env, caplog):
+    env = push_env; register(env); enqueue_payment(env)
+    failure = ProviderFailure(403)
+    failure.args = ("synthetic-secret Private investor name 6543 Bearer provider secret",)
+    with patch.object(push, "_send_push", side_effect=failure):
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+    assert "Push delivery failed (http_403)" in caplog.text
+    for value in ("synthetic-secret", "Private investor name", "6543", "Bearer", env.payload["keys"]["auth"]):
+        assert value not in caplog.text

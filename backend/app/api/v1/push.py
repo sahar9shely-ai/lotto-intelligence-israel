@@ -47,7 +47,8 @@ def subscribe(payload: SubscriptionRequest, user: User = Depends(get_current_use
     if not push.is_enabled():
         raise HTTPException(status_code=503, detail="התראות לטלפון אינן זמינות כרגע")
     try:
-        push.subscribe(db, user, endpoint=payload.endpoint, p256dh=payload.keys.p256dh, auth=payload.keys.auth)
+        device = push.subscribe(db, user, endpoint=payload.endpoint, p256dh=payload.keys.p256dh, auth=payload.keys.auth)
+        push.enqueue_outstanding_for_device(db, device)
         db.commit()
     except push.SubscriptionConflict as exc:
         db.rollback()

@@ -30,10 +30,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const transitioning = useRef(false);
   const cleanupQueue = useRef<Promise<void>>(Promise.resolve());
 
-  function queueCleanup(operation: number, serverCleanup = true) {
+  function queueCleanup(operation: number, serverCleanup = true, preserveSubscription = false) {
     const cleanup = cleanupQueue.current.catch(() => undefined).then(async () => {
       if (sessionVersion.current !== operation) return;
-      await detachBrowserPush({ serverCleanup: serverCleanup && Boolean(getToken()) });
+      await detachBrowserPush({ serverCleanup: serverCleanup && Boolean(getToken()), preserveSubscription });
     });
     cleanupQueue.current = cleanup;
     return cleanup;
@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // An intentional account transition already owns cleanup. Preserve its pending new login.
       if (!transitioning.current) {
         const operation = ++sessionVersion.current;
-        void queueCleanup(operation, false).catch(() => undefined);
+        void queueCleanup(operation, false, true).catch(() => undefined);
       }
       setToken(null);
       setUser(null);
@@ -87,7 +87,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const operation = ++sessionVersion.current;
     transitioning.current = true;
     try {
-      await queueCleanup(operation);
+      const replacingSession = Boolean(getToken());
+      await queueCleanup(operation, replacingSession, !replacingSession);
       if (sessionVersion.current !== operation) throw new Error("בקשת ההתחברות הוחלפה. נסו שוב.");
       setToken(null);
       setUser(null);
@@ -107,7 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const operation = ++sessionVersion.current;
     transitioning.current = true;
     try {
-      await queueCleanup(operation);
+      // Logout disables this account's delivery marker without erasing the device's notification opt-in.
+      await queueCleanup(operation, false, true);
       if (sessionVersion.current !== operation) return;
       setToken(null);
       setUser(null);
