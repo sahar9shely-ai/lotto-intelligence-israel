@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { PlanTrackFields } from "./PlanTrackFields";
 import { FirstPaymentPreview } from "./FirstPaymentPreview";
 import { SignaturePad } from "./SignaturePad";
-import { api } from "../services/api";
+import { api, getToken } from "../services/api";
+import { useAuth } from "../context/AuthContext";
+import { matchesTopupDetail, ownedTopupFocus } from "../utils/topupFocus";
 import type { Settings, TopupRequest } from "../types/investments";
 import { formatDate, formatMoney, formatPercent, statusLabel, todayISO } from "../utils/format";
 import { downloadContractPdf } from "../utils/contractPdf";
@@ -258,6 +260,9 @@ export function TopupRequestsPanel({
   showHistory = true,
   onOpenDocuments,
   onCreateOpenChange,
+  focusRequestId = null,
+  requestsLoading = false,
+  requestsError = null,
 }: {
   isManager: boolean;
   investorId?: number | null;
@@ -270,7 +275,19 @@ export function TopupRequestsPanel({
   showHistory?: boolean;
   onOpenDocuments?: () => void;
   onCreateOpenChange?: (open: boolean) => void;
+  focusRequestId?: number | null;
+  requestsLoading?: boolean;
+  requestsError?: string | null;
 }) {
+  const { user } = useAuth();
+  const mounted = useRef(true);
+  const contractVersion = useRef(0);
+  const attemptedFocus = useRef<string | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    attemptedFocus.current = null;
+    return () => { mounted.current = false; contractVersion.current += 1; };
+  }, [user?.id, user?.investor_id, user?.is_manager, investorId]);
   const [internalCreate, setInternalCreate] = useState(false);
   const showCreate = onCreateOpenChange ? createOpen : internalCreate;
   const setShowCreate = onCreateOpenChange ?? setInternalCreate;
@@ -371,17 +388,44 @@ export function TopupRequestsPanel({
     }
   }
 
-  async function openContract(req: TopupRequest) {
+  const openContract = useCallback(async (req: TopupRequest) => {
+    if (!user || (!user.is_manager && req.investor_id !== user.investor_id)
+      || (investorId != null && req.investor_id !== investorId)) return;
+    const version = ++contractVersion.current;
+    const token = getToken();
+    const current = () => mounted.current && contractVersion.current === version && getToken() === token;
     setFormError(null);
     setBusyId(req.id);
     try {
       const detail = await api.topupRequest(req.id);
+      if (!current()) return;
+      if (!matchesTopupDetail(detail, req, user)) throw new Error("החוזה אינו שייך לתיק הזה.");
       setContract(detail);
     } catch (err) {
+      if (!current()) return;
       onMessage(err instanceof Error ? err.message : "טעינת החוזה נכשלה");
     } finally {
-      setBusyId(null);
+      if (current()) setBusyId(null);
     }
+  }, [user?.id, user?.investor_id, user?.is_manager, investorId, onMessage]);
+
+  useEffect(() => {
+    if (focusRequestId == null || !user || user.is_manager || requestsLoading) return;
+    const key = `${user.id}:${focusRequestId}`;
+    if (attemptedFocus.current === key) return;
+    attemptedFocus.current = key;
+    const target = ownedTopupFocus(visible, focusRequestId, user);
+    if (!target || requestsError) {
+      onMessage(requestsError || "החוזה מההתראה אינו זמין בתיק הזה. אפשר לבדוק את הבקשות העדכניות.");
+      return;
+    }
+    void openContract(target);
+  }, [focusRequestId, requestsLoading, requestsError, visible, user?.id, user?.investor_id, user?.is_manager, onMessage, openContract]);
+
+  function closeContract() {
+    contractVersion.current += 1;
+    setBusyId(null);
+    setContract(null);
   }
 
   async function offerContract(e: FormEvent<HTMLFormElement>) {
@@ -720,7 +764,7 @@ export function TopupRequestsPanel({
         <RequestModal
           title={`חוזה ${contract.contract_number || `#${contract.id}`}`}
           kicker={`${contract.investor_name} · ${formatMoney(contract.amount)}`}
-          onClose={() => setContract(null)}
+          onClose={closeContract}
           wide
         >
           <div className="contract-view">
@@ -786,7 +830,7 @@ export function TopupRequestsPanel({
               />
             </div>
             <div className="request-form__actions modal__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => setContract(null)}>
+              <button type="button" className="btn btn--ghost" onClick={closeContract}>
                 סגירה
               </button>
               <button type="button" className="btn btn--primary" onClick={downloadPdf} disabled={pdfBusy}>

@@ -88,7 +88,7 @@ export function InvestorTutorialsPage() {
           <span className="tutorials-eyebrow">סרטון {selectedIndex + 1} מתוך {lessons.length}</span>
           <h2>{selected.title}</h2><p>{selected.summary}</p>
         </header>
-        <div className="tutorials-screen" aria-busy={mediaLoading}>
+        <div className={`tutorials-screen${selected.id === "08-notifications" ? " tutorials-screen--portrait" : ""}`} aria-busy={mediaLoading}>
           {currentMedia ? <video ref={videoRef} key={selected.id} className="tutorials-video" controls playsInline preload="metadata"
             src={currentMedia.video} poster={currentMedia.poster} aria-label={selected.title}
             onLoadedMetadata={applyCaptionPreference}

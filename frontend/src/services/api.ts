@@ -30,6 +30,7 @@ import type {
   BalanceTransferResult,
 } from "../types/investments";
 import type { TutorialCatalogue } from "../types/tutorials";
+import type { AssistantActionConfirmation, AssistantChatResponse } from "../types/assistant";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const TOKEN_KEY = "tazrim_token";
@@ -93,15 +94,13 @@ function formatApiError(detail: unknown): string {
   return "בקשה נכשלה";
 }
 
-async function request<T>(path: string, init?: RequestInit, auth = true): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, auth = true, authToken?: string | null, expireSession = true): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(init?.headers as Record<string, string> | undefined),
   };
-  if (auth) {
-    const token = getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
+  const requestToken = auth ? authToken === undefined ? getToken() : authToken : null;
+  if (requestToken) headers.Authorization = `Bearer ${requestToken}`;
 
   let response: Response;
   try {
@@ -113,7 +112,7 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
     throw new Error("אין חיבור לשרת — בדקו את הרשת או נסו שוב בעוד רגע");
   }
 
-  if (response.status === 401) {
+  if (response.status === 401 && auth && expireSession && getToken() === requestToken) {
     setToken(null);
     notifyAuthExpired();
   }
@@ -134,6 +133,14 @@ async function request<T>(path: string, init?: RequestInit, auth = true): Promis
 }
 
 export const api = {
+  pushConfig: () => request<{ enabled: boolean; public_key: string | null; require_notifications: boolean }>("/api/v1/push/config"),
+  pushSubscribe: (body: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+    request<{ subscribed: boolean }>("/api/v1/push/subscriptions", { method: "POST", body: JSON.stringify(body) }),
+  pushUnsubscribe: (body: { endpoint: string }, authToken?: string | null) =>
+    request<void>("/api/v1/push/subscriptions", { method: "DELETE", body: JSON.stringify(body) }, true, authToken, false),
+  pushSubscriptionStatus: (endpoint: string) =>
+    request<{ subscribed: boolean }>("/api/v1/push/subscriptions/status", { method: "POST", body: JSON.stringify({ endpoint }) }),
+  pushUnsubscribeAll: () => request<void>("/api/v1/push/subscriptions/all", { method: "DELETE" }),
   tutorials: () => request<TutorialCatalogue>("/api/v1/tutorials"),
   agreements: (investorId: number) => request<PlanAgreement[]>(`/api/v1/investments/investors/${investorId}/agreements`),
   notices: (investorId: number) => request<{id: number; purpose: string; requested_on: string; eligible_on: string; notes: string | null}[]>(`/api/v1/investments/investors/${investorId}/notices`),
@@ -680,14 +687,12 @@ export const api = {
     message: string;
     history: Array<{ role: "user" | "assistant"; content: string }>;
   }) =>
-    request<{
-      reply: string;
-      pdf_suggested: boolean;
-      what_if?: Record<string, unknown> | null;
-      configured: boolean;
-      cta?: { href: string; label: string } | null;
-      suggestions?: Array<{ label: string; message: string }>;
-    }>("/api/v1/assistant/chat", {
+    request<AssistantChatResponse>("/api/v1/assistant/chat", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  assistantConfirmAction: (body: { token: string }) =>
+    request<AssistantActionConfirmation>("/api/v1/assistant/actions/confirm", {
       method: "POST",
       body: JSON.stringify(body),
     }),

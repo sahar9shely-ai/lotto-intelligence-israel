@@ -4,18 +4,20 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { AUTH_EXPIRED_EVENT, api, getToken, setToken } from "../services/api";
 import type { AuthUser } from "../types/auth";
 import { resetWelcomeSeen } from "../utils/welcomeSplash";
+import { detachBrowserPush } from "../services/pushNotifications";
 
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refresh: () => Promise<void>;
 };
 
@@ -24,21 +26,40 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const sessionVersion = useRef(0);
+  const transitioning = useRef(false);
+  const cleanupQueue = useRef<Promise<void>>(Promise.resolve());
+
+  function queueCleanup(operation: number, serverCleanup = true) {
+    const cleanup = cleanupQueue.current.catch(() => undefined).then(async () => {
+      if (sessionVersion.current !== operation) return;
+      await detachBrowserPush({ serverCleanup: serverCleanup && Boolean(getToken()) });
+    });
+    cleanupQueue.current = cleanup;
+    return cleanup;
+  }
 
   const refresh = useCallback(async () => {
-    if (!getToken()) {
+    if (transitioning.current) return;
+    const operation = sessionVersion.current;
+    const token = getToken();
+    const current = () => operation === sessionVersion.current && getToken() === token;
+    if (!token) {
       setUser(null);
       setLoading(false);
       return;
     }
     try {
       const me = await api.me();
+      if (!current()) return;
       setUser(me);
     } catch {
+      if (!current()) return;
       setToken(null);
       setUser(null);
-    } finally {
       setLoading(false);
+    } finally {
+      if (current()) setLoading(false);
     }
   }, []);
 
@@ -48,6 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onExpired = () => {
+      // An intentional account transition already owns cleanup. Preserve its pending new login.
+      if (!transitioning.current) {
+        const operation = ++sessionVersion.current;
+        void queueCleanup(operation, false).catch(() => undefined);
+      }
       setToken(null);
       setUser(null);
       setLoading(false);
@@ -58,15 +84,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
-    const result = await api.login(username, password);
-    setToken(result.access_token);
-    setUser(result.user);
+    const operation = ++sessionVersion.current;
+    transitioning.current = true;
+    try {
+      await queueCleanup(operation);
+      if (sessionVersion.current !== operation) throw new Error("בקשת ההתחברות הוחלפה. נסו שוב.");
+      setToken(null);
+      setUser(null);
+      const result = await api.login(username, password);
+      if (sessionVersion.current !== operation) throw new Error("בקשת ההתחברות הוחלפה. נסו שוב.");
+      setToken(result.access_token);
+      setUser(result.user);
+    } finally {
+      if (sessionVersion.current === operation) {
+        transitioning.current = false;
+        setLoading(false);
+      }
+    }
   }, []);
 
-  const logout = useCallback(() => {
-    setToken(null);
-    setUser(null);
-    resetWelcomeSeen();
+  const logout = useCallback(async () => {
+    const operation = ++sessionVersion.current;
+    transitioning.current = true;
+    try {
+      await queueCleanup(operation);
+      if (sessionVersion.current !== operation) return;
+      setToken(null);
+      setUser(null);
+      resetWelcomeSeen();
+    } finally {
+      if (sessionVersion.current === operation) {
+        transitioning.current = false;
+        setLoading(false);
+      }
+    }
   }, []);
 
   const value = useMemo(

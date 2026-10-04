@@ -31,6 +31,7 @@ import {
 } from "../utils/paymentOps";
 import type { Plan } from "../types/investments";
 import "./paymentClarity.css";
+import "./paymentHistoryToggle.css";
 
 function visibleFocusEl(selector: string): HTMLElement | null {
   const nodes = [...document.querySelectorAll<HTMLElement>(selector)];
@@ -969,10 +970,12 @@ export function PaymentsPage() {
           </select>
         </label>
         <label className="payment-history-toggle">
-          <input type="checkbox" checked={showCancellationHistory || allYears || status === "skipped"}
+          <input className="payment-history-toggle__input" type="checkbox" role="switch"
+            checked={showCancellationHistory || allYears || status === "skipped"}
             disabled={allYears || status === "skipped"}
             onChange={(e) => setShowCancellationHistory(e.target.checked)} />
-          הצגת היסטוריית ביטולים
+          <span className="payment-history-toggle__track" aria-hidden="true" />
+          <span className="payment-history-toggle__label">הצגת היסטוריית ביטולים</span>
         </label>
         {isManager ? (
           <label>

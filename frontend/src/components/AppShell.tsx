@@ -255,9 +255,9 @@ export function AppShell() {
     }
   }
 
-  function signOut() {
+  async function signOut() {
     setMoreOpen(false);
-    logout();
+    await logout();
     navigate("/login", { replace: true });
   }
 

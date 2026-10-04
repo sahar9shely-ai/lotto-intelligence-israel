@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from app.db.investment_session import get_investment_db
 from app.models.auth import User
 from app.security.auth import get_current_user, is_system_admin
 from app.services import assistant_service as asst
+from app.services import assistant_actions as actions
 from app.services import investment_service as inv_svc
 
 router = APIRouter(prefix="/api/v1/assistant", tags=["assistant"])
@@ -25,6 +27,16 @@ class ChatRequest(BaseModel):
     history: list[ChatMessageIn] = Field(default_factory=list, max_length=40)
 
 
+class AssistantActionOut(BaseModel):
+    token: str
+    kind: Literal["payment_confirmation_request"]
+    investor_name: str
+    payment_id: int
+    amount: float
+    due_date: date
+    month_label: str
+
+
 class ChatResponse(BaseModel):
     reply: str
     pdf_suggested: bool = False
@@ -32,6 +44,17 @@ class ChatResponse(BaseModel):
     configured: bool = False
     cta: Optional[dict] = None
     suggestions: list[dict] = Field(default_factory=list)
+    action: Optional[AssistantActionOut] = None
+
+
+class ConfirmActionRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=4000)
+
+
+class ConfirmActionResponse(BaseModel):
+    reply: str
+    action: None = None
+    payment_id: Optional[int] = None
 
 
 class AssistantOpeningOut(BaseModel):
@@ -102,6 +125,25 @@ def assistant_chat(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result
+
+
+@router.post("/actions/confirm", response_model=ConfirmActionResponse)
+def confirm_assistant_action(
+    body: ConfirmActionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_investment_db),
+):
+    if not is_system_admin(user):
+        raise HTTPException(status_code=403, detail="הפעולה זמינה למנהל המערכת בלבד")
+    try:
+        result = actions.execute_payment_confirmation(db, user=user, token=body.token)
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"reply": result["reply"], "action": None, "payment_id": result.get("payment_id")}
 
 
 @router.get("/opening", response_model=AssistantOpeningOut)

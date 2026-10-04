@@ -103,6 +103,8 @@ def issue_date_amendment(db: Session, plan_id: int, *, start_date: date, first_p
         private_terms={"before_state": state}, token_hash=hashlib.sha256(token.encode()).hexdigest(), document_hash=preview["document_hash"],
         actor_user_id=actor_id, notice_id=notice.id, expires_at=utcnow() + timedelta(days=14))
     db.add(row); db.flush()
+    from app.services import push_service
+    push_service.enqueue_agreement(db, row)
     from app.services.activity_service import log_activity
     log_activity(db, kind="plan_agreement_prepared", title=f"הסכם עדכון מועדי מסלול · {plan.investor.name}",
         body="המסלול ולוח התשלומים טרם השתנו; העדכון ממתין לחתימת המשקיע", investor_id=plan.investor_id,

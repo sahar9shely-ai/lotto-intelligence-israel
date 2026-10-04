@@ -4098,6 +4098,43 @@ input[type="date"] {
   border-end-end-radius: 6px;
 }
 
+.assistant-action {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(31, 107, 85, 0.2);
+  border-radius: 16px;
+  background: #eef7f1;
+  color: var(--ink);
+}
+
+.assistant-action h3 {
+  margin: 0 0 10px;
+  color: var(--accent-strong);
+  font-size: 0.95rem;
+}
+
+.assistant-action__details {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.assistant-action__details > div {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.assistant-action__details dt { color: var(--ink-soft); }
+.assistant-action__details dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.assistant-action__note,
+.assistant-action__error { margin: 10px 0 0; font-size: 0.78rem; line-height: 1.5; }
+.assistant-action__note { color: var(--ink-soft); }
+.assistant-action__error { color: #8a382f; }
+.assistant-action__buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.assistant-action__buttons .btn { min-height: 44px; font-size: 0.8rem; padding: 8px 12px; }
+
 .assistant-typing {
   display: inline-flex;
   align-items: center;

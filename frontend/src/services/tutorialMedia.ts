@@ -19,7 +19,7 @@ export async function loadTutorialMedia(lessonId: string, signal: AbortSignal): 
       signal,
       cache: "no-store",
     });
-    if (response.status === 401) {
+    if (response.status === 401 && getToken() === token) {
       setToken(null);
       window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }

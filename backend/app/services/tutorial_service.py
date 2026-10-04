@@ -21,6 +21,7 @@ LESSONS = (
     ("05-balance-ending", "סיום מסלול ויתרה זמינה", "חתימה על הסכם סיום ומעקב אחרי היתרה הזמינה."),
     ("06-help-requests", "בקשות, מסמכים ועוזר אישי", "שליחת בקשה, פתיחת מסמכים ושימוש בעוזר האישי."),
     ("07-closing", "מוכנים להמשיך", "סיום קצר וחזרה לתיק שלך."),
+    ("08-notifications", "הפעלת התראות בטלפון", "הפעלת התראות על בקשות אישור קבלת תשלום ועל מסמכים לחתימה."),
 )
 ASSET_TYPES = {
     "video": ("videos", ".mp4", "video/mp4", 50 * 1024 * 1024),
@@ -72,7 +73,7 @@ def _validated_package(root_str: str, signature: tuple) -> tuple[TutorialLessonO
         raise ValueError("Tutorial package is not cleared for the investor app")
     entries = manifest.get("lessons", [])
     if not isinstance(entries, list) or len(entries) != len(LESSONS):
-        raise ValueError("Tutorial package must contain all seven lessons")
+        raise ValueError(f"Tutorial package must contain all {len(LESSONS)} lessons")
     by_id = {entry.get("id"): entry for entry in entries if isinstance(entry, dict)}
     if set(by_id) != {row[0] for row in LESSONS}:
         raise ValueError("Tutorial lesson list is incomplete")

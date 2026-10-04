@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -17,19 +17,21 @@ from app.db.investment_base import InvestmentBase
 from app.db.investment_session import get_investment_db
 from app.models.auth import User
 from app.models.investments import Investor
-from app.security.auth import create_access_token
+from app.models.push import PushSubscription  # Registers the synthetic gate table before create_all.
+from app.security.auth import create_access_token, enforce_notification_access
 from app.services import tutorial_service as tutorials
 
 
 class InvestorTutorialTests(unittest.TestCase):
     def setUp(self):
         self.old_settings = (settings.investor_tutorials_enabled, settings.investor_tutorials_media_dir,
-                             settings.admin_only_maintenance)
+                             settings.admin_only_maintenance, settings.web_push_require_notifications)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         settings.investor_tutorials_enabled = True
         settings.investor_tutorials_media_dir = str(self.root)
         settings.admin_only_maintenance = False
+        settings.web_push_require_notifications = False
         self.make_package()
         self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         InvestmentBase.metadata.create_all(self.engine)
@@ -79,7 +81,8 @@ class InvestorTutorialTests(unittest.TestCase):
                                                                        investor_id=user.investor_id)}
 
     def tearDown(self):
-        settings.investor_tutorials_enabled, settings.investor_tutorials_media_dir, settings.admin_only_maintenance = self.old_settings
+        (settings.investor_tutorials_enabled, settings.investor_tutorials_media_dir,
+         settings.admin_only_maintenance, settings.web_push_require_notifications) = self.old_settings
         self.client.close()
         self.engine.dispose()
         tutorials._validated_package.cache_clear()
@@ -93,7 +96,9 @@ class InvestorTutorialTests(unittest.TestCase):
 
     def test_every_asset_and_catalogue_require_authentication(self):
         for path in ["/api/v1/tutorials", "/api/v1/tutorials/media/01-welcome/video",
-                     "/api/v1/tutorials/media/01-welcome/poster", "/api/v1/tutorials/media/01-welcome/captions"]:
+                     "/api/v1/tutorials/media/01-welcome/poster", "/api/v1/tutorials/media/01-welcome/captions",
+                     "/api/v1/tutorials/media/08-notifications/video", "/api/v1/tutorials/media/08-notifications/poster",
+                     "/api/v1/tutorials/media/08-notifications/captions"]:
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 401)
 
@@ -103,12 +108,14 @@ class InvestorTutorialTests(unittest.TestCase):
             self.assertEqual(self.client.get("/api/v1/tutorials", headers=headers).status_code, 403)
             self.assertEqual(self.client.get("/api/v1/tutorials/media/01-welcome/video", headers=headers).status_code, 403)
 
-    def test_catalogue_has_seven_lessons_and_no_private_package_metadata(self):
+    def test_catalogue_has_eight_lessons_and_no_private_package_metadata(self):
         result = self.client.get("/api/v1/tutorials", headers=self.investor_headers)
         self.assertEqual(result.status_code, 200)
         payload = result.json()
         self.assertTrue(payload["available"])
-        self.assertEqual(len(payload["lessons"]), 7)
+        self.assertEqual(len(payload["lessons"]), 8)
+        self.assertEqual(payload["lessons"][-1]["id"], "08-notifications")
+        self.assertEqual(payload["lessons"][-1]["title"], "הפעלת התראות בטלפון")
         self.assertEqual(set(payload["lessons"][0]), {"id", "title", "summary", "duration_seconds", "transcript"})
         for term in [str(self.root), "voice_provider", "sha256", "private_review", "commercial_license_confirmed"]:
             self.assertNotIn(term, result.text)
@@ -121,6 +128,21 @@ class InvestorTutorialTests(unittest.TestCase):
             self.assertEqual(result.headers["cache-control"], "private, no-store")
             self.assertEqual(result.headers["x-content-type-options"], "nosniff")
         self.assertEqual(self.client.get("/api/v1/tutorials/media/01-welcome/transcript", headers=self.investor_headers).status_code, 404)
+
+    def test_activation_guide_remains_accessible_before_notification_requirement_is_met(self):
+        settings.web_push_require_notifications = True
+        with self.sessions() as db:
+            user = db.query(User).filter_by(username="demo").one()
+            with self.assertRaises(HTTPException) as missing_subscription:
+                enforce_notification_access(user, db, "/api/v1/investments/payments")
+            self.assertEqual(missing_subscription.exception.status_code, 428)
+        catalogue = self.client.get("/api/v1/tutorials", headers=self.investor_headers)
+        self.assertEqual(catalogue.status_code, 200)
+        self.assertEqual(catalogue.json()["lessons"][-1]["id"], "08-notifications")
+        for asset in ["video", "poster", "captions"]:
+            result = self.client.get(f"/api/v1/tutorials/media/08-notifications/{asset}", headers=self.investor_headers)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.headers["cache-control"], "private, no-store")
 
     def test_incomplete_package_is_not_exposed(self):
         tutorials.asset_path(self.root, "07-closing", "video").unlink()
@@ -171,7 +193,7 @@ class InvestorTutorialTests(unittest.TestCase):
         settings.investor_tutorials_media_dir = str(package)
         payload = self.client.get("/api/v1/tutorials", headers=self.investor_headers).json()
         self.assertTrue(payload["available"])
-        self.assertEqual(len(payload["lessons"]), 7)
+        self.assertEqual(len(payload["lessons"]), 8)
         manifest = json.loads((package / "manifest.json").read_text("utf-8"))
         for row in manifest["lessons"]:
             for asset in ["video", "poster", "captions"]:

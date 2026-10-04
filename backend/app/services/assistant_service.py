@@ -902,7 +902,7 @@ def chat(
     message: str,
     history: list[dict[str, str]],
 ) -> dict[str, Any]:
-    """Answer one user message. Read-only. Scoped to the logged-in investor."""
+    """Answer one message; admin commands can prepare a separately confirmed action."""
     message = (message or "").strip()
     if not message:
         raise ValueError("נא לכתוב שאלה")
@@ -924,6 +924,23 @@ def chat(
             "cta": _manager_cta() if manager else _investor_cta(),
             "suggestions": [],
         }
+
+    if manager:
+        # Only the current authenticated admin message can prepare an action.
+        # Neither model tool calls nor browser-supplied history authorize writes.
+        from app.services import assistant_actions
+
+        proposal = assistant_actions.prepare_payment_confirmation(db, user=user, message=message)
+        if proposal is not None:
+            return {
+                "reply": proposal["reply"],
+                "action": proposal.get("action"),
+                "configured": assistant_configured(db),
+                "pdf_suggested": False,
+                "what_if": None,
+                "cta": None,
+                "suggestions": [],
+            }
 
     retrieval: dict[str, Any] = {}
     if manager and not _is_greeting(message):

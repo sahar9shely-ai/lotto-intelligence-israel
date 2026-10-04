@@ -89,8 +89,8 @@ export function ChangePasswordPage() {
             <button
               type="button"
               className="text-link"
-              onClick={() => {
-                logout();
+              onClick={async () => {
+                await logout();
                 navigate("/login", { replace: true });
               }}
             >

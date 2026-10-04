@@ -2473,6 +2473,8 @@ def request_payment_confirmation(
     if payment.confirmation_requested_at is None:
         payment.confirmation_requested_at = utcnow()
     _notify_payment_confirmation_request(db, payment)
+    from app.services import push_service
+    push_service.enqueue_payment(db, payment)
     if commit:
         db.commit()
     return {
@@ -3160,6 +3162,8 @@ def offer_topup_contract(
     request.manager_party_name = (settings.manager_display_name or "סהר").strip() or "סהר"
     request.contract_number = _contract_number_for(request)
     _clear_contract_signatures(request)
+    from app.services import push_service
+    push_service.enqueue_topup_contract(db, request)
     db.commit()
     loaded = _load_topup_request(db, request.id)
     assert loaded is not None

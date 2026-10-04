@@ -22,6 +22,7 @@ import type { Investor, Plan, Settings } from "../types/investments";
 import { addMonthsISO, formatDate, formatMoney, formatPercent, todayISO, yearStartISO } from "../utils/format";
 import { planTypeLabel } from "../utils/planTypes";
 import { isAdminAccount, isAdminShellInvestor } from "../utils/roles";
+import { parseTopupFocusId } from "../utils/topupFocus";
 import {
   copyAccessWhatsAppMessage,
   formatPhoneDisplay,
@@ -66,22 +67,24 @@ export function InvestorsPage() {
     [isManager],
   );
   const { data: plans, reload: reloadPlans } = useAsync(() => api.plans(), []);
-  const { data: topupRequests, reload: reloadTopups } = useAsync(
+  const { data: topupRequests, loading: topupsLoading, error: topupsError, reload: reloadTopups } = useAsync(
     () => api.topupRequests(),
     [],
   );
   const [scope, setScope] = useState<Scope | null>(null);
   const [investorSearch, setInvestorSearch] = useState("");
   const sectionParam = searchParams.get("section");
-  const workspaceSection: WorkspaceSection = WORKSPACE_SECTIONS.some(s => s.id === sectionParam) ? sectionParam as WorkspaceSection : "plans";
+  const focusedTopupId = !isManager ? parseTopupFocusId(searchParams.get("topup_request_id")) : null;
+  const workspaceSection: WorkspaceSection = focusedTopupId != null ? "requests"
+    : WORKSPACE_SECTIONS.some(s => s.id === sectionParam) ? sectionParam as WorkspaceSection : "plans";
   const [agreementRevision, setAgreementRevision] = useState(0);
   function goToSection(section: WorkspaceSection) {
-    setSearchParams(previous => {const next = new URLSearchParams(previous); next.set("section",section); next.delete("action"); next.delete("plan_id"); return next;}, {replace:true});
+    setSearchParams(previous => {const next = new URLSearchParams(previous); next.set("section",section); next.delete("action"); next.delete("plan_id"); next.delete("topup_request_id"); return next;}, {replace:true});
   }
   function selectInvestor(id: Scope, section?: WorkspaceSection) {
     setScope(id); setTrackView("active"); setEditingPlanId(null); setReportPlanId(null);
     setShowTopupCreate(false); setIssuedAgreement(null);
-    setSearchParams(previous => {const next = new URLSearchParams(previous); next.delete("plan_id"); next.delete("action"); if(section) next.set("section",section); if(id === "all") next.delete("investor_id"); else next.set("investor_id",String(id)); return next;}, {replace:true});
+    setSearchParams(previous => {const next = new URLSearchParams(previous); next.delete("plan_id"); next.delete("action"); next.delete("topup_request_id"); if(section) next.set("section",section); if(id === "all") next.delete("investor_id"); else next.set("investor_id",String(id)); return next;}, {replace:true});
   }
   const [trackView, setTrackView] = useState<TrackView>("active");
   const [editingPlanId, setEditingPlanId] = useState<number | null>(null);
@@ -563,6 +566,10 @@ export function InvestorsPage() {
             <NoticePanel investorId={selected.id}/>
             {!isManager && !pendingRequests.length ? <button className="btn btn--primary" onClick={() => setShowTopupCreate(true)}>בקשה להוספת מסלול</button> : null}
             <TopupRequestsPanel
+        key={`${user?.id}:${selected.id}`}
+        focusRequestId={focusedTopupId}
+        requestsLoading={topupsLoading}
+        requestsError={topupsError}
         onOpenDocuments={() => goToSection("documents")}
         isManager={isManager}
         investorId={effectiveScope === "all" ? null : selected?.id ?? null}

@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     app_public_url: str = "http://localhost:5173"
     reset_token_hours: int = 48
 
+    web_push_enabled: bool = False
+    web_push_require_notifications: bool = False
+    web_push_vapid_public_key: str = ""
+    web_push_vapid_private_key: str = ""
+    web_push_vapid_subject: str = ""
+
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

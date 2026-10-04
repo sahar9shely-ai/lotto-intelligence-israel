@@ -1,0 +1,121 @@
+.payments-page .filters label.payment-history-toggle {
+  position: relative;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-strong);
+  color: var(--ink-soft);
+  line-height: 1.4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.payments-page .filters .payment-history-toggle input[type="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.payments-page .payment-history-toggle__track {
+  position: relative;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 24px;
+  border: 1px solid #7b9187;
+  border-radius: 999px;
+  background: #82978f;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.payments-page .payment-history-toggle__track::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(10 28 26 / 18%);
+  transition: inset-inline-start 160ms ease;
+}
+
+.payments-page .payment-history-toggle__input:checked + .payment-history-toggle__track {
+  border-color: var(--accent-strong);
+  background: var(--accent);
+}
+
+.payments-page .payment-history-toggle__input:checked + .payment-history-toggle__track::after {
+  inset-inline-start: 20px;
+}
+
+.payments-page .payment-history-toggle__input:focus-visible + .payment-history-toggle__track {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 3px;
+}
+
+.payments-page .payment-history-toggle__input:checked ~ .payment-history-toggle__label {
+  color: var(--accent-strong);
+}
+
+.payments-page .payment-history-toggle:has(input:disabled) {
+  cursor: default;
+  background: var(--foam);
+}
+
+.payments-page .payment-history-toggle__input:disabled + .payment-history-toggle__track {
+  opacity: 0.55;
+}
+
+.payments-page .payment-history-toggle__input:disabled ~ .payment-history-toggle__label {
+  color: var(--ink-soft);
+}
+
+@media (max-width: 700px) {
+  .payments-page .filters label.payment-history-toggle {
+    flex-basis: 100%;
+    justify-content: space-between;
+    flex-direction: row-reverse;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .payments-page .payment-history-toggle__track,
+  .payments-page .payment-history-toggle__track::after {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .payments-page .payment-history-toggle__track {
+    border-color: ButtonText;
+    background: Canvas;
+  }
+
+  .payments-page .payment-history-toggle__track::after {
+    background: ButtonText;
+  }
+
+  .payments-page .payment-history-toggle__input:checked + .payment-history-toggle__track {
+    border-color: Highlight;
+    background: Highlight;
+    forced-color-adjust: none;
+  }
+
+  .payments-page .payment-history-toggle__input:checked + .payment-history-toggle__track::after {
+    background: HighlightText;
+  }
+}

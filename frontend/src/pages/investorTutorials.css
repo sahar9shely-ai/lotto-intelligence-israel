@@ -11,6 +11,8 @@
 .tutorials-player__head h2 {font-family:var(--font-display); font-size:1.2rem; margin:4px 0 6px;}
 .tutorials-player__head p {margin:0; color:var(--ink-soft);}
 .tutorials-screen {background:#091e1c; aspect-ratio:16/9; display:grid; position:relative;}
+.tutorials-screen--portrait {aspect-ratio:9/16; width:min(100%,39.375vh); width:min(100%,39.375dvh); max-height:70vh; max-height:70dvh; margin-inline:auto;}
+.tutorials-screen--portrait .tutorials-video {object-fit:contain;}
 .tutorials-video {width:100%; height:100%; max-height:70vh; display:block; background:#091e1c;}
 .tutorials-screen__state {display:flex; flex-direction:column; justify-content:center; align-items:center; padding:24px; text-align:center; color:#e5f8f0;}
 .tutorials-screen__state .btn {background:#d4efea; color:#085a52;}

@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +16,7 @@ from app.api.v1.imports import router as imports_router
 from app.api.v1.investments import init_investment_db, router as investments_router
 from app.api.v1.stats import router as stats_router
 from app.api.v1.tutorials import router as tutorials_router
+from app.api.v1.push import router as push_router
 from app.core.config import settings
 from app.core.error_handlers import register_error_handlers
 from app.core.logging import configure_logging
@@ -46,20 +49,43 @@ app.include_router(investments_router)
 app.include_router(agreements_router)
 app.include_router(assistant_router)
 app.include_router(tutorials_router)
+app.include_router(push_router)
 
 # Production: same-origin UI (built Vite app). Dev without dist keeps API-only.
 FRONTEND_DIST_MOUNTED = mount_frontend(app)
 
 
+async def _push_delivery_loop() -> None:
+    from app.services.push_service import run_pending_pushes
+    while True:
+        try:
+            await asyncio.to_thread(run_pending_pushes, limit=10)
+        except Exception:
+            # Avoid logging subscription endpoints or device encryption keys.
+            logging.getLogger(__name__).warning("Push delivery scan failed; queued notices will be retried")
+        await asyncio.sleep(5)
+
+
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
     init_investment_db()
     if settings.investor_tutorials_enabled:
-        from app.services.tutorial_service import published_lessons
+        from app.services.tutorial_service import LESSONS, published_lessons
 
         count = len(published_lessons())
         logging.getLogger(__name__).log(
-            logging.INFO if count == 7 else logging.WARNING,
+            logging.INFO if count == len(LESSONS) else logging.WARNING,
             "Investor tutorials publication check: %s lessons available", count,
         )
+    if settings.web_push_enabled:
+        app.state.push_delivery_task = asyncio.create_task(_push_delivery_loop())
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    task = getattr(app.state, "push_delivery_task", None)
+    if task is not None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 

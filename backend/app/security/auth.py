@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session, joinedload
 
@@ -70,6 +70,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     db: Session = Depends(get_investment_db),
+    request: Request = None,
 ) -> User:
     if credentials is None or not credentials.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="נדרשת התחברות")
@@ -89,7 +90,24 @@ def get_current_user(
             detail="אין סיסמה לחשבון זה עדיין. פנו למנהל להגדרת סיסמה.",
         )
     enforce_maintenance_access(user)
+    if request is not None:
+        enforce_notification_access(user, db, request.url.path)
     return user
+
+
+def enforce_notification_access(user: User, db: Session, path: str) -> None:
+    """Keep activation/help accessible while investor access requires an opt-in.
+
+    Subscription state is a product precondition, never an identity or financial
+    authorization source. Normal authenticated ownership checks still apply.
+    """
+    if not settings.web_push_require_notifications or is_manager(user):
+        return
+    if path.startswith(("/api/v1/auth/", "/api/v1/push/", "/api/v1/tutorials")):
+        return
+    from app.services import push_service
+    if not push_service.has_active_subscription(db, user):
+        raise HTTPException(status_code=428, detail="יש להפעיל התראות בטלפון לפני כניסה לתיק. פתח את מסך הפעלת ההתראות.")
 
 
 def require_manager(user: User = Depends(get_current_user)) -> User:

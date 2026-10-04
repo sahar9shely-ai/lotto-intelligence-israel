@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { api } from "../services/api";
 import { downloadAssistantPdf } from "../utils/assistantPdf";
 import type { AuthUser } from "../types/auth";
+import type { AssistantPaymentAction } from "../types/assistant";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Suggestion = { label: string; message: string };
@@ -20,9 +21,14 @@ export function PersonalAssistant() {
 function AssistantConversation({user}: {user: AuthUser}) {
   const canQueryAll = user.username === "admin" && user.is_manager;
   const mounted = useRef(true);
+  const requestVersion = useRef(0);
+  const busyRef = useRef(false);
   useEffect(() => {
     mounted.current = true;
-    return () => {mounted.current = false;};
+    return () => {
+      mounted.current = false;
+      requestVersion.current += 1;
+    };
   }, []);
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -30,6 +36,9 @@ function AssistantConversation({user}: {user: AuthUser}) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [cta, setCta] = useState<Cta | null>(null);
+  const [action, setAction] = useState<AssistantPaymentAction | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [llmReady, setLlmReady] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -37,22 +46,42 @@ function AssistantConversation({user}: {user: AuthUser}) {
   useEffect(() => {
     if (!open) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, open]);
+  }, [messages, open, action, actionError]);
+
+  function isCurrent(version: number) {
+    return mounted.current && version === requestVersion.current;
+  }
+
+  function clearAction() {
+    setAction(null);
+    setActionError(null);
+  }
+
+  function closeConversation() {
+    requestVersion.current += 1;
+    busyRef.current = false;
+    setBusy(false);
+    setConfirming(false);
+    clearAction();
+    setOpen(false);
+  }
 
   useEffect(() => {
-    if (!open || !user) return;
+    if (!open) return;
     let cancelled = false;
+    const version = ++requestVersion.current;
+    clearAction();
     api
       .assistantOpening()
       .then((opening) => {
-        if (cancelled) return;
+        if (cancelled || !isCurrent(version)) return;
         setMessages([{ role: "assistant", content: opening.greeting }]);
         setSuggestions(opening.suggestions || []);
         setCta(opening.cta || null);
         setLlmReady(Boolean(opening.configured));
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || !isCurrent(version)) return;
         setMessages([{ role: "assistant", content: FALLBACK_GREETING }]);
         setSuggestions([
           { label: "מה המצב שלי", message: "מה המצב שלי?" },
@@ -67,23 +96,33 @@ function AssistantConversation({user}: {user: AuthUser}) {
     return () => {
       cancelled = true;
     };
-  }, [open, user]);
+  }, [open, canQueryAll]);
 
   async function sendText(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
+    if (!trimmed || busyRef.current) return;
+    const version = ++requestVersion.current;
+    busyRef.current = true;
+    clearAction();
+    setCta(null);
     setInput("");
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setBusy(true);
     try {
       const res = await api.assistantChat({ message: trimmed, history });
-      if (!mounted.current) return;
+      if (!isCurrent(version)) return;
       setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
       if (typeof res.configured === "boolean") setLlmReady(res.configured);
-      if (res.cta?.href && res.cta.label) setCta(res.cta);
-      if (res.suggestions?.length) setSuggestions(res.suggestions);
+      const nextAction = canQueryAll && res.action?.kind === "payment_confirmation_request"
+        ? res.action
+        : null;
+      setAction(nextAction);
+      setCta(nextAction ? null : res.cta || null);
+      if (nextAction) setSuggestions([]);
+      else if (res.suggestions) setSuggestions(res.suggestions);
     } catch (err) {
+      if (!isCurrent(version)) return;
       setMessages((prev) => [
         ...prev,
         {
@@ -92,7 +131,33 @@ function AssistantConversation({user}: {user: AuthUser}) {
         },
       ]);
     } finally {
+      if (!isCurrent(version)) return;
+      busyRef.current = false;
       setBusy(false);
+    }
+  }
+
+  async function confirmAction() {
+    if (!canQueryAll || !action || busyRef.current) return;
+    const version = ++requestVersion.current;
+    busyRef.current = true;
+    setBusy(true);
+    setConfirming(true);
+    setActionError(null);
+    try {
+      const result = await api.assistantConfirmAction({ token: action.token });
+      if (!isCurrent(version)) return;
+      clearAction();
+      setCta(null);
+      setMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
+    } catch (err) {
+      if (!isCurrent(version)) return;
+      setActionError(err instanceof Error ? err.message : "לא הצלחתי לשלוח כרגע. אפשר לנסות שוב.");
+    } finally {
+      if (!isCurrent(version)) return;
+      busyRef.current = false;
+      setBusy(false);
+      setConfirming(false);
     }
   }
 
@@ -102,6 +167,10 @@ function AssistantConversation({user}: {user: AuthUser}) {
   }
 
   async function closeAndNotify() {
+    if (busyRef.current) return;
+    const version = ++requestVersion.current;
+    busyRef.current = true;
+    clearAction();
     setBusy(true);
     try {
       const history = messages
@@ -111,16 +180,18 @@ function AssistantConversation({user}: {user: AuthUser}) {
     } catch {
       /* ignore */
     } finally {
-      setBusy(false);
-      setOpen(false);
+      if (isCurrent(version)) closeConversation();
     }
   }
 
   async function exportPdf() {
+    if (busyRef.current) return;
+    const version = requestVersion.current;
+    busyRef.current = true;
     setBusy(true);
     try {
       const brief = await api.assistantPortfolioBrief();
-      if (!mounted.current) return;
+      if (!isCurrent(version)) return;
       await downloadAssistantPdf({
         name: brief.investor_name,
         brief,
@@ -129,6 +200,8 @@ function AssistantConversation({user}: {user: AuthUser}) {
     } catch {
       /* silent — keep the chat clean */
     } finally {
+      if (!isCurrent(version)) return;
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -141,7 +214,7 @@ function AssistantConversation({user}: {user: AuthUser}) {
         aria-expanded={open}
         aria-controls="personal-assistant-panel"
         aria-label={open ? "סגירת העוזר האישי" : "עוזר אישי"}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => open ? closeConversation() : setOpen(true)}
       >
         <svg className="assistant-mascot" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
           <ellipse cx="32" cy="59" rx="18" ry="3" fill="#143b30" opacity=".12"/>
@@ -206,6 +279,24 @@ function AssistantConversation({user}: {user: AuthUser}) {
                 ))}
               </div>
             ))}
+            {canQueryAll && action ? (
+              <section className="assistant-action" aria-label="אישור שליחת בקשת קבלה" aria-busy={confirming}>
+                <h3>בקשת אישור קבלה</h3>
+                <dl className="assistant-action__details">
+                  <div><dt>משקיע</dt><dd>{action.investor_name}</dd></div>
+                  <div><dt>חודש</dt><dd>{action.month_label}</dd></div>
+                  <div><dt>סכום</dt><dd>{new Intl.NumberFormat("he-IL", { style: "currency", currency: "ILS", maximumFractionDigits: 2 }).format(action.amount)}</dd></div>
+                </dl>
+                <p className="assistant-action__note">הבקשה מיועדת לאישור קבלת תשלום שכבר הועבר.</p>
+                {actionError ? <p className="assistant-action__error" role="alert">{actionError}</p> : null}
+                <div className="assistant-action__buttons">
+                  <button type="button" className="btn btn--primary" onClick={() => void confirmAction()} disabled={busy}>
+                    {confirming ? "שולח בקשת אישור…" : "שלח בקשת אישור קבלה"}
+                  </button>
+                  <button type="button" className="btn btn--ghost" onClick={clearAction} disabled={busy}>ביטול</button>
+                </div>
+              </section>
+            ) : null}
             {busy ? (
               <div className="assistant-bubble assistant-bubble--bot assistant-typing" aria-hidden>
                 <span />
@@ -235,7 +326,7 @@ function AssistantConversation({user}: {user: AuthUser}) {
           {canQueryAll && llmReady === false ? (
             <p className="assistant-llm-hint">
               המודל לא מחובר. חברו מפתח ב
-              <Link to="/settings" onClick={() => setOpen(false)}>
+              <Link to="/settings" onClick={closeConversation}>
                 הגדרות
               </Link>
               {" "}
@@ -244,7 +335,7 @@ function AssistantConversation({user}: {user: AuthUser}) {
           ) : null}
 
           {cta?.href ? (
-            <Link className="assistant-cta" to={cta.href} onClick={() => setOpen(false)}>
+            <Link className="assistant-cta" to={cta.href} onClick={closeConversation}>
               {cta.label}
             </Link>
           ) : null}

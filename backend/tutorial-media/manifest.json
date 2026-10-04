@@ -77,6 +77,17 @@
         "captions": "dc5cc833761ffd9fabe6efbffee938f3ef31e4e67861b24939f8ad5f322919c7",
         "transcript": "48b53e4e1d990f8db639b1db741d67f87a6dfff552362fce44eb3c2d5a7a1909"
       }
+    },
+    {
+      "id": "08-notifications",
+      "duration_seconds": 45.458333,
+      "approved_on": "2026-10-04",
+      "sha256": {
+        "video": "7fd50d39dbc36c401fab84e018f51384d4836048439cff99cbad98512c4363d0",
+        "poster": "7f0bfc8947b915fde4ab10435515fd79c9d78819ae5a030ccbaa567e42af8810",
+        "captions": "9b14a5fc32e6a4ec22501fa3b523bc1dcd6d2715afbd1903eb2eb138598f6b9b",
+        "transcript": "a902818a3ec91fa0fadecca1103cf3fba89fc5e354d6e4988778b8432fa65dad"
+      }
     }
   ],
   "ux_refresh_source_commit": "17365c12957d7882069bd4e34e05898645ea1dfc"

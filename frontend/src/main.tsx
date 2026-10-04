@@ -12,13 +12,21 @@ async function purgeStale() {
       const keys = await caches.keys();
       await Promise.all(keys.map((k) => caches.delete(k)));
     }
-    if ("serviceWorker" in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-    }
+    await removeLegacyWorkers();
   } catch {
     /* ignore */
   }
+}
+
+async function removeLegacyWorkers() {
+  if (!("serviceWorker" in navigator)) return;
+  const registrations = await navigator.serviceWorker.getRegistrations().catch(() => []);
+  await Promise.all(registrations.map(registration => {
+    const workers = [registration.active, registration.waiting, registration.installing].filter(Boolean);
+    const hasPushWorker = workers.some(worker => new URL(worker!.scriptURL).pathname === "/push-sw.js");
+    const hasLegacyWorker = workers.some(worker => new URL(worker!.scriptURL).pathname === "/sw.js");
+    return hasLegacyWorker && !hasPushWorker ? registration.unregister() : Promise.resolve(false);
+  }));
 }
 
 async function bootstrap() {
@@ -26,10 +34,8 @@ async function bootstrap() {
   if (prev !== CACHE_BUST) {
     localStorage.setItem("tazrim-cache-bust", CACHE_BUST);
     await purgeStale();
-  } else if ("serviceWorker" in navigator) {
-    // Keep killing any resurrected SW from old builds
-    const regs = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(regs.map((r) => r.unregister()));
+  } else {
+    await removeLegacyWorkers();
   }
 
   ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -40,22 +46,6 @@ async function bootstrap() {
     </React.StrictMode>,
   );
 
-  // Register killer SW once so old clients purge themselves, then never re-register a caching SW.
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      void navigator.serviceWorker
-        .register(`/sw.js?v=${CACHE_BUST}`)
-        .then((reg) => {
-          // After activate unregisters itself; no ongoing control needed.
-          window.setTimeout(() => {
-            void reg.unregister();
-          }, 5000);
-        })
-        .catch(() => {
-          /* optional */
-        });
-    });
-  }
 }
 
 void bootstrap();

@@ -11,6 +11,7 @@ from app.db.investment_base import InvestmentBase
 from app.db.investment_session import get_investment_db, investment_engine
 from app.models import auth as auth_models  # noqa: F401
 from app.models import investments as investment_models  # noqa: F401
+from app.models import push as push_models  # noqa: F401
 from app.models.auth import User
 from app.models.investments import Investor, InvestmentPlan, InvestmentTopupRequest, Payment, Quote
 from app.schemas.investments import (

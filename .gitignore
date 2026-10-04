@@ -35,3 +35,7 @@ backend/app/data/
 .public-url-backup
 .slack-webhook
 
+# Local notification QA contains synthetic server state and private VAPID keys.
+output/push-qa-2026-10-04/
+frontend/vite.assistant-qa.config.ts
+

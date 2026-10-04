@@ -175,6 +175,8 @@ def issue(db: Session, *, investor_id: int, kind: str, actor_id: int, notice_id:
         snapshot=snapshot, private_terms=private, token_hash=hashlib.sha256(token.encode()).hexdigest(),
         document_hash=digest(snapshot), actor_user_id=actor_id, notice_id=notice_id, expires_at=utcnow() + timedelta(days=14))
     db.add(agreement); db.flush()
+    from app.services import push_service
+    push_service.enqueue_agreement(db, agreement)
     if superseded:
         changed = db.execute(update(PlanAgreement).where(PlanAgreement.id == superseded.id, PlanAgreement.status == "pending")
             .values(status="cancelled").execution_options(synchronize_session=False))

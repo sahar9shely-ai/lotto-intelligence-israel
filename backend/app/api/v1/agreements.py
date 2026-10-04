@@ -200,6 +200,8 @@ def new_link(agreement_id: int, user: User = Depends(require_manager), db: Sessi
     row.token_hash = hashlib.sha256(token.encode()).hexdigest()
     row.failed_attempts = 0
     row.expires_at = svc.utcnow() + timedelta(days=14)
+    from app.services import push_service
+    push_service.enqueue_agreement(db, row)
     db.commit()
     return {"token": token}
 

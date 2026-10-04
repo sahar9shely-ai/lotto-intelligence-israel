@@ -5,6 +5,8 @@ import { PageTransition } from "./components/motion/PageTransition";
 import { RequireAuth, RequireManager } from "./components/RequireAuth";
 import { WelcomeSplash } from "./components/WelcomeSplash";
 import { AuthProvider } from "./context/AuthContext";
+import { PushNotificationsProvider } from "./context/PushNotificationsContext";
+import { PushNotificationAccess } from "./components/PushNotificationAccess";
 import { ActivityPage } from "./pages/ActivityPage";
 import { AgreementSigningPage } from "./pages/AgreementSigningPage";
 import { AuthenticatedAgreementSigningPage } from "./pages/AuthenticatedAgreementSigningPage";
@@ -23,8 +25,10 @@ import { UsersPage } from "./pages/UsersPage";
 export function App() {
   return (
     <AuthProvider>
+      <PushNotificationsProvider>
       <WelcomeSplash />
       <AnimatedRoutes />
+      </PushNotificationsProvider>
     </AuthProvider>
   );
 }
@@ -57,7 +61,7 @@ function AnimatedRoutes() {
 
         <Route element={<RequireAuth />}>
           <Route path="change-password" element={<ChangePasswordPage />} />
-          <Route element={<AppShell />}>
+          <Route element={<PushNotificationAccess><AppShell /></PushNotificationAccess>}>
             <Route index element={<DashboardPage />} />
             <Route path="agreements/:id/sign" element={<AuthenticatedAgreementSigningPage />} />
             <Route path="investors" element={<InvestorsPage />} />

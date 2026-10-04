@@ -62,6 +62,7 @@ def ensure_schema(engine: Engine) -> None:
     # Ensure model tables (including savings_actions) are registered.
     from app.models import investments as _investment_models  # noqa: F401
     from app.models import auth as _auth_models  # noqa: F401
+    from app.models import push as _push_models  # noqa: F401
 
     InvestmentBase.metadata.create_all(bind=engine)
 

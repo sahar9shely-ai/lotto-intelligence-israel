@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Panel } from "../components/Panel";
 import { PasswordField } from "../components/PasswordField";
+import { PushNotificationSettings } from "../components/PushNotificationAccess";
 import { ScrollReveal } from "../components/motion/ScrollReveal";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
@@ -158,6 +159,8 @@ export function PersonalAreaPage() {
         </nav>
       </header>
       </ScrollReveal>
+
+      <PushNotificationSettings />
 
       <ScrollReveal>
       <Panel
