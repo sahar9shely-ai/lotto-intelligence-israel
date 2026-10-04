@@ -3,10 +3,11 @@
 All outbound delivery is mocked. These tests never contact a push provider.
 """
 import base64
+import asyncio
 import json
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -852,3 +853,49 @@ def test_waking_with_unsent_original_does_not_double_send_reminder_same_day(push
     next_day = waking + timedelta(days=1)
     with patch.object(push, "utcnow", return_value=next_day):
         assert push.run_scheduled_reminders(session_factory=env.sessions, now=next_day) == 1
+
+
+def test_reminder_scan_failure_does_not_block_normal_outbox_delivery(caplog):
+    from app.main import _push_delivery_loop
+
+    with patch.object(push, "run_scheduled_reminders", side_effect=RuntimeError("private endpoint")) as scan, \
+         patch.object(push, "run_pending_pushes", return_value=0) as drain, \
+         patch("app.main.asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(_push_delivery_loop())
+        scan.assert_called_once()
+        drain.assert_called_once_with(limit=10)
+    assert "Push reminder scan failed" in caplog.text
+    assert "private endpoint" not in caplog.text
+
+
+def test_login_push_transaction_rollback_never_notifies(push_env):
+    from app.services import auth_service
+
+    env = push_env; _, header = add_manager(env)
+    assert env.client.post("/api/v1/push/subscriptions", headers=header, json=env.payload).status_code == 200
+    with env.sessions() as db:
+        auth_service.notify_manager_login(db, db.get(User, env.user_ids[0]))
+        assert db.query(PushNotice).count() == 1
+        db.rollback()
+    with patch.object(push, "_send_push") as send:
+        assert push.run_pending_pushes(session_factory=env.sessions) == 0
+        send.assert_not_called()
+
+
+@pytest.mark.parametrize("change", ["signed", "cancelled", "expired", "revision"])
+def test_daily_reminder_revalidates_document_after_queue(push_env, change):
+    env = push_env; register(env); agreement_id = old_pending_agreement(env)
+    now = datetime(2026, 10, 5, 10, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    with patch.object(push, "utcnow", return_value=now):
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=now) == 1
+        with env.sessions() as db:
+            agreement = db.get(PlanAgreement, agreement_id)
+            if change == "signed": agreement.signed_at = now; agreement.status = "signed"
+            if change == "cancelled": agreement.status = "cancelled"
+            if change == "expired": agreement.expires_at = now - timedelta(seconds=1)
+            if change == "revision": agreement.token_hash = "c" * 64
+            db.commit()
+        with patch.object(push, "_send_push") as send:
+            assert push.run_pending_pushes(session_factory=env.sessions) == 1
+            send.assert_not_called()
