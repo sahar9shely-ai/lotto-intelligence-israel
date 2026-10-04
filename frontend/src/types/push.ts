@@ -22,3 +22,10 @@ export type PushTestResult = {
   status: "sending" | "queued" | "sent" | "failed" | "cancelled";
   message: string;
 };
+
+export type AgreementReminderResult = {
+  queued: boolean;
+  devices: number;
+  reason: "queued" | "already_pending" | "recently_sent" | "no_devices";
+  next_eligible_at?: string | null;
+};

@@ -10,6 +10,7 @@ import { savePdfBlob } from "../utils/pdfDocument";
 import { DateAmendmentAction } from "./DateAmendmentAction";
 import { useAuth } from "../context/AuthContext";
 import { isAgreementExpired } from "../utils/agreementSigning";
+import { AgreementReminderAction } from "./AgreementReminderAction";
 
 export function AgreementContent({row}: {row: Pick<PlanAgreement, "snapshot" | "kind"> & Partial<Pick<PlanAgreement, "id" | "created_at" | "signed_at" | "signed_name" | "signature_png" | "execution_details" | "status">>}) {
   return <div className="agreement-document"><h2>{row.snapshot.title}{row.id ? ` · ${row.id}` : " · תצוגה מקדימה"}</h2>
@@ -80,6 +81,7 @@ export function AgreementPanel({rows,loading,error,canManage,canManageClosing=fa
       <div><strong>{row.snapshot.title} · {row.plan_id?`מסלול #${row.plan_id}`:"מסלול שטרם הופעל"}</strong><p className="hint">{formatDate(row.created_at)} · {row.status==="signed"?"חתום ובוצע":row.status==="cancelled"?"בוטל":isAgreementExpired(row)?"פג תוקף לחתימה":"ממתין לחתימה"}</p></div>
       <button className="btn btn--ghost" onClick={()=>setSelected(row)}>{canManage&&row.status==="pending"?"מסמך וקישור לחתימה":"צפייה במסמך"}</button>
       {ownsAgreement(row)&&row.status==="pending"&&!isAgreementExpired(row)?<Link className="btn btn--primary" to={`/agreements/${row.id}/sign`}>קריאת ההסכם וחתימה</Link>:null}
+      <AgreementReminderAction agreement={row} />
       {canManageClosing && row.kind === "open" && row.status === "pending" ? <DateAmendmentAction mode="pending" sourceId={row.id} sourceName={row.snapshot.investor_name} currentStart={String(row.snapshot.terms.start_date || "")} sourceVersion={row.document_hash} canManage={canManageClosing} onPrepared={replacement => {setSelected(replacement); onChanged();}}/> : null}
       {canManage&&(row.kind==="open"||canManageClosing)&&row.status==="pending"?<button className="btn btn--ghost" disabled={busyId!==null} onClick={async()=>{
         setBusyId(row.id);setFailure("");try{await api.cancelAgreement(row.id);setSelected(null);onChanged();}catch(e){setFailure(e instanceof Error?e.message:"ביטול נכשל");}finally{setBusyId(null);}

@@ -31,7 +31,7 @@ import type {
 } from "../types/investments";
 import type { TutorialCatalogue } from "../types/tutorials";
 import type { AssistantActionConfirmation, AssistantChatResponse } from "../types/assistant";
-import type { PushDeliveryStatus } from "../types/push";
+import type { AgreementReminderResult, PushDeliveryStatus } from "../types/push";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const TOKEN_KEY = "tazrim_token";
@@ -146,6 +146,8 @@ export const api = {
     request<{ queued: boolean; delivery_id: number }>("/api/v1/push/test", { method: "POST", body: JSON.stringify(body), signal }),
   pushDeliveryStatus: (body: { endpoint: string; delivery_id?: number }, signal?: AbortSignal) =>
     request<PushDeliveryStatus>("/api/v1/push/delivery-status", { method: "POST", body: JSON.stringify(body), signal }),
+  remindAgreement: (id: number, body: { document_hash: string }, signal?: AbortSignal) =>
+    request<AgreementReminderResult>(`/api/v1/push/agreements/${id}/reminder`, { method: "POST", body: JSON.stringify(body), signal }),
   tutorials: () => request<TutorialCatalogue>("/api/v1/tutorials"),
   agreements: (investorId: number) => request<PlanAgreement[]>(`/api/v1/investments/investors/${investorId}/agreements`),
   notices: (investorId: number) => request<{id: number; purpose: string; requested_on: string; eligible_on: string; notes: string | null}[]>(`/api/v1/investments/investors/${investorId}/notices`),

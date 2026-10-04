@@ -281,7 +281,7 @@ def make_agreement(env):
         db.add(notice); db.flush()
         agreement = PlanAgreement(investor_id=env.investor_id, kind="open", status="pending", snapshot={"secret": "99777"},
             private_terms={"secret": "private financial terms"}, token_hash="a" * 64, document_hash="b" * 64,
-            notice_id=notice.id, actor_user_id=env.user_ids[0], expires_at=utcnow() + timedelta(days=14))
+            notice_id=notice.id, actor_user_id=env.user_ids[0], created_at=push.utcnow(), expires_at=utcnow() + timedelta(days=14))
         db.add(agreement); db.flush()
         assert push.enqueue_agreement(db, agreement) == 1
         db.commit()
@@ -820,10 +820,10 @@ def test_initial_request_not_reminded_again_today_signature_and_new_revision_rev
 
 def test_unsigned_topup_reminder_and_reminder_disable_setting(push_env, monkeypatch):
     env = push_env; register(env)
-    with env.sessions() as db:
-        request = InvestmentTopupRequest(investor_id=env.investor_id, amount=99777, status="contract", offered_at=utcnow() - timedelta(days=1))
-        db.add(request); db.commit(); request_id = request.id
     now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    with env.sessions() as db:
+        request = InvestmentTopupRequest(investor_id=env.investor_id, amount=99777, status="contract", offered_at=now - timedelta(days=1))
+        db.add(request); db.commit(); request_id = request.id
     with patch.object(push, "utcnow", return_value=now):
         monkeypatch.setattr(settings, "web_push_agreement_reminders_enabled", False)
         assert push.run_scheduled_reminders(session_factory=env.sessions, now=now) == 0
@@ -899,3 +899,371 @@ def test_daily_reminder_revalidates_document_after_queue(push_env, change):
         with patch.object(push, "_send_push") as send:
             assert push.run_pending_pushes(session_factory=env.sessions) == 1
             send.assert_not_called()
+
+
+def current_reminder_agreement(env, now, *, offered_at=None):
+    from app.services.agreement_service import digest
+
+    agreement_id = old_pending_agreement(env, offered_on=offered_at or now - timedelta(days=2))
+    with env.sessions() as db:
+        agreement = db.get(PlanAgreement, agreement_id)
+        agreement.document_hash = digest(agreement.snapshot)
+        agreement.expires_at = now + timedelta(days=14)
+        db.commit()
+        return agreement_id, agreement.document_hash
+
+
+@pytest.mark.parametrize("actor", ["investor", "other_manager", "fake_admin"])
+def test_manual_signature_reminder_exact_admin_authorization(push_env, actor):
+    env = push_env
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, document_hash = current_reminder_agreement(env, now)
+    if actor == "investor":
+        header = env.headers[0]
+    elif actor == "other_manager":
+        _, header = add_manager(env, username="another-manager")
+    else:
+        _, header = add_manager(env, username="admin", role="investor", manager_investor=False)
+    response = env.client.post(f"/api/v1/push/agreements/{agreement_id}/reminder", headers=header,
+        json={"document_hash": document_hash})
+    assert response.status_code == 403
+    assert env.client.post(f"/api/v1/push/agreements/{agreement_id}/reminder",
+        json={"document_hash": document_hash}).status_code == 401
+    with env.sessions() as db:
+        assert db.query(PushDelivery).count() == 0
+
+
+@pytest.mark.parametrize("change", ["stale_hash", "changed_snapshot", "signed", "cancelled", "expired", "missing"])
+def test_manual_signature_reminder_rejects_stale_or_completed_document(push_env, change):
+    env = push_env; register(env); _, header = add_manager(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, document_hash = current_reminder_agreement(env, now)
+    with env.sessions() as db:
+        agreement = db.get(PlanAgreement, agreement_id)
+        if change == "stale_hash": document_hash = "0" * 64
+        if change == "changed_snapshot": agreement.snapshot = {"changed": "document"}
+        if change == "signed": agreement.status = "signed"; agreement.signed_at = now
+        if change == "cancelled": agreement.status = "cancelled"
+        if change == "expired": agreement.expires_at = now
+        db.commit()
+    target = agreement_id + 1000 if change == "missing" else agreement_id
+    with patch.object(push, "utcnow", return_value=now), patch.object(push, "_send_push") as send:
+        response = env.client.post(f"/api/v1/push/agreements/{target}/reminder", headers=header,
+            json={"document_hash": document_hash})
+        assert response.status_code == (404 if change == "missing" else 409)
+        send.assert_not_called()
+    with env.sessions() as db:
+        assert db.query(PushDelivery).count() == 0
+
+
+def test_manual_signature_reminder_no_device_and_disabled_are_honest(push_env, monkeypatch):
+    env = push_env; _, header = add_manager(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, document_hash = current_reminder_agreement(env, now)
+    url = f"/api/v1/push/agreements/{agreement_id}/reminder"
+    with patch.object(push, "utcnow", return_value=now), patch.object(push, "_send_push") as send:
+        response = env.client.post(url, headers=header, json={"document_hash": document_hash})
+        assert response.json() == {"queued": False, "devices": 0, "reason": "no_devices", "next_eligible_at": None}
+        assert env.client.post(url, headers=header, json={"document_hash": document_hash, "investor_id": 2}).status_code == 422
+        assert env.client.post(url, headers=header, json={"document_hash": "bad"}).status_code == 422
+        monkeypatch.setattr(settings, "web_push_enabled", False)
+        assert env.client.post(url, headers=header, json={"document_hash": document_hash}).status_code == 503
+        send.assert_not_called()
+    with env.sessions() as db:
+        assert db.query(PushNotice).count() == 0
+
+
+def test_manual_signature_reminder_scopes_devices_and_preserves_agreement(push_env):
+    env = push_env; register(env)
+    register(env, endpoint="https://fcm.googleapis.com/wpush/own-second")
+    register(env, index=1, endpoint="https://fcm.googleapis.com/wpush/foreign-investor")
+    admin_id, header = add_manager(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, document_hash = current_reminder_agreement(env, now)
+    with env.sessions() as db:
+        push.subscribe(db, db.get(User, admin_id), endpoint="https://fcm.googleapis.com/wpush/admin-device", **env.payload["keys"])
+        before = dict(db.get(PlanAgreement, agreement_id).snapshot)
+        balance = db.get(Investor, env.investor_id).available_balance_cents
+        db.commit()
+    with patch.object(push, "utcnow", return_value=now), patch.object(push, "_send_push") as send:
+        response = env.client.post(f"/api/v1/push/agreements/{agreement_id}/reminder", headers=header,
+            json={"document_hash": document_hash})
+        assert response.status_code == 200
+        assert response.json()["queued"] and response.json()["devices"] == 2
+        assert response.json()["reason"] == "queued"
+        send.assert_not_called()
+        assert push.run_pending_pushes(session_factory=env.sessions) == 2
+        assert {call.args[0].user_id for call in send.call_args_list} == {env.user_ids[0]}
+        assert all(call.args[1]["kind"] == "agreement_reminder" for call in send.call_args_list)
+        assert all(call.args[1]["data"]["href"] == f"/agreements/{agreement_id}/sign" for call in send.call_args_list)
+        assert "99777" not in response.text and env.payload["endpoint"] not in response.text
+    with env.sessions() as db:
+        agreement = db.get(PlanAgreement, agreement_id)
+        assert agreement.snapshot == before and agreement.status == "pending" and agreement.signed_at is None
+        assert db.get(Investor, env.investor_id).available_balance_cents == balance
+
+
+@pytest.mark.parametrize("change", ["inactive", "role_manager", "investor_manager"])
+def test_manual_signature_reminder_excludes_inactive_or_manager_owner(push_env, change):
+    env = push_env; register(env); _, header = add_manager(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, document_hash = current_reminder_agreement(env, now)
+    with env.sessions() as db:
+        owner = db.get(User, env.user_ids[0])
+        if change == "inactive": owner.is_active = False
+        if change == "role_manager": owner.role = "manager"
+        if change == "investor_manager": owner.investor.is_manager = True
+        db.commit()
+    with patch.object(push, "utcnow", return_value=now):
+        result = env.client.post(f"/api/v1/push/agreements/{agreement_id}/reminder", headers=header,
+            json={"document_hash": document_hash}).json()
+        assert result["reason"] == "no_devices" and result["devices"] == 0
+    with env.sessions() as db:
+        assert db.query(PushDelivery).count() == 0
+
+
+def test_manual_signature_reminder_inflight_suppression_and_elapsed_hour_cooldown(push_env):
+    env = push_env; register(env); _, header = add_manager(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, document_hash = current_reminder_agreement(env, now, offered_at=now)
+    url = f"/api/v1/push/agreements/{agreement_id}/reminder"
+    payload = {"document_hash": document_hash}
+    with patch.object(push, "utcnow", return_value=now):
+        with env.sessions() as db:
+            assert push.enqueue_agreement(db, db.get(PlanAgreement, agreement_id)) == 1
+            db.commit()
+        assert env.client.post(url, headers=header, json=payload).json()["reason"] == "already_pending"
+        with env.sessions() as db:
+            db.query(PushDelivery).one().status = "sending"
+            db.query(PushDelivery).one().claimed_at = now
+            db.commit()
+        assert env.client.post(url, headers=header, json=payload).json()["reason"] == "already_pending"
+        with env.sessions() as db:
+            db.query(PushDelivery).one().status = "queued"
+            db.commit()
+        with patch.object(push, "_send_push"):
+            assert push.run_pending_pushes(session_factory=env.sessions) == 1
+        # Explicit admin follow-up is allowed after initial issuance on the same day.
+        assert env.client.post(url, headers=header, json=payload).json()["reason"] == "queued"
+        assert env.client.post(url, headers=header, json=payload).json()["reason"] == "already_pending"
+    accepted = now + timedelta(minutes=10)
+    with patch.object(push, "utcnow", return_value=accepted), patch.object(push, "_send_push"):
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+    with patch.object(push, "utcnow", return_value=now + timedelta(hours=1)):
+        recent = env.client.post(url, headers=header, json=payload).json()
+        assert recent["reason"] == "recently_sent" and not recent["queued"]
+        assert datetime.fromisoformat(recent["next_eligible_at"]) == accepted + timedelta(hours=1)
+    with patch.object(push, "utcnow", return_value=accepted + timedelta(hours=1)):
+        assert env.client.post(url, headers=header, json=payload).json()["reason"] == "queued"
+    with env.sessions() as db:
+        assert db.query(PushNotice).count() == 3
+
+
+def test_automatic_signature_reminder_waits_24_hours_from_delayed_acceptance(push_env):
+    env = push_env; register(env)
+    issued = datetime(2026, 10, 5, 19, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, _ = current_reminder_agreement(env, issued, offered_at=issued)
+    with patch.object(push, "utcnow", return_value=issued):
+        with env.sessions() as db:
+            push.enqueue_agreement(db, db.get(PlanAgreement, agreement_id)); db.commit()
+    accepted = issued + timedelta(minutes=15)
+    with patch.object(push, "utcnow", return_value=accepted), patch.object(push, "_send_push"):
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+    for check in [issued + timedelta(hours=15), accepted + timedelta(hours=24, seconds=-1)]:
+        with patch.object(push, "utcnow", return_value=check):
+            assert push.run_scheduled_reminders(session_factory=env.sessions, now=check) == 0
+    eligible = accepted + timedelta(hours=24)
+    with patch.object(push, "utcnow", return_value=eligible):
+        assert push.run_scheduled_reminders(session_factory=env.sessions, now=eligible) == 1
+    reminder_accepted = eligible + timedelta(minutes=30)
+    with patch.object(push, "utcnow", return_value=reminder_accepted), patch.object(push, "_send_push"):
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+    with patch.object(push, "utcnow", return_value=reminder_accepted + timedelta(hours=24, seconds=-1)):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 0
+    with patch.object(push, "utcnow", return_value=reminder_accepted + timedelta(hours=24)):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 1
+
+
+def test_manual_reminder_resets_automatic_24_hour_interval(push_env):
+    env = push_env; register(env); _, header = add_manager(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, document_hash = current_reminder_agreement(env, now)
+    with patch.object(push, "utcnow", return_value=now):
+        assert env.client.post(f"/api/v1/push/agreements/{agreement_id}/reminder", headers=header,
+            json={"document_hash": document_hash}).json()["queued"]
+    accepted = now + timedelta(minutes=5)
+    with patch.object(push, "utcnow", return_value=accepted), patch.object(push, "_send_push"):
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+    with patch.object(push, "utcnow", return_value=accepted + timedelta(hours=24, seconds=-1)):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 0
+    with patch.object(push, "utcnow", return_value=accepted + timedelta(hours=24)):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 1
+
+
+def test_automatic_offer_age_and_dst_use_elapsed_utc_hours(push_env):
+    env = push_env; register(env)
+    # Israel's spring transition makes 10:00 -> next-day 10:00 only 23 hours.
+    offered = datetime(2027, 3, 25, 10, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    next_local_morning = datetime(2027, 3, 26, 10, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    assert next_local_morning - offered == timedelta(hours=23)
+    current_reminder_agreement(env, offered, offered_at=offered)
+    with patch.object(push, "utcnow", return_value=next_local_morning):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 0
+    with patch.object(push, "utcnow", return_value=offered + timedelta(hours=24)):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 1
+
+
+def test_reissued_link_resets_24_hour_interval_for_current_revision(push_env):
+    env = push_env; register(env)
+    reissued = datetime(2026, 10, 5, 19, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    original = reissued - timedelta(days=2)
+    agreement_id, _ = current_reminder_agreement(env, reissued, offered_at=original)
+    with patch.object(push, "utcnow", return_value=original), patch.object(push, "_send_push"):
+        with env.sessions() as db:
+            push.enqueue_agreement(db, db.get(PlanAgreement, agreement_id)); db.commit()
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+    with patch.object(push, "utcnow", return_value=reissued), patch.object(push, "_send_push"):
+        with env.sessions() as db:
+            agreement = db.get(PlanAgreement, agreement_id)
+            agreement.token_hash = "c" * 64
+            assert push.enqueue_agreement(db, agreement) == 1
+            db.commit()
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+    with patch.object(push, "utcnow", return_value=reissued + timedelta(hours=15)):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 0
+    with patch.object(push, "utcnow", return_value=reissued + timedelta(hours=24, seconds=-1)):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 0
+    with patch.object(push, "utcnow", return_value=reissued + timedelta(hours=24)):
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 1
+    with env.sessions() as db:
+        reminder = db.query(PushNotice).filter_by(kind="agreement_reminder").one()
+        assert reminder.entity_revision == "c" * 64
+
+
+@pytest.mark.parametrize("second_action", ["manual", "automatic"])
+def test_manual_and_automatic_signature_reminders_share_concurrent_guard(push_env, second_action):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    env = push_env; register(env); admin_id, _ = add_manager(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    agreement_id, document_hash = current_reminder_agreement(env, now)
+    ready = Barrier(2)
+
+    def attempt(action):
+        with env.sessions() as db:
+            ready.wait(timeout=5)
+            if action == "manual":
+                result = push.enqueue_manual_agreement_reminder(db, db.get(User, admin_id), agreement_id, document_hash)
+                count = result["devices"]
+            else:
+                count = push.enqueue_agreement_reminders(db, now=now)
+            db.commit()
+            return count
+
+    with patch.object(push, "utcnow", return_value=now), patch.object(push, "_send_push") as send:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(attempt, "manual"), pool.submit(attempt, second_action)]
+            assert sum(future.result(timeout=10) for future in futures) == 1
+        send.assert_not_called()
+    with env.sessions() as db:
+        assert db.query(PushNotice).filter_by(kind="agreement_reminder").count() == 1
+        assert db.query(PushDelivery).count() == 1
+
+
+def test_postgresql_registration_lock_and_document_mutex_avoid_financial_row_locks(push_env):
+    from sqlalchemy.dialects import postgresql
+
+    env = push_env
+    dialect = postgresql.dialect()
+    db = Mock()
+    db.get_bind.return_value.dialect.name = "postgresql"
+    owner = SimpleNamespace(id=env.user_ids[0])
+    existing = SimpleNamespace(user_id=owner.id)
+    db.query.return_value.filter_by.return_value.one_or_none.return_value = existing
+    push.subscribe(db, owner, endpoint=env.payload["endpoint"], **env.payload["keys"])
+    cap_sql = str(db.execute.call_args_list[0].args[0].compile(dialect=dialect))
+    assert "FOR NO KEY UPDATE" in cap_sql
+    assert "FOR UPDATE" not in cap_sql
+    db.reset_mock()
+    push._lock_reminder_item(db, PlanAgreement, 123)
+    first = db.execute.call_args.args[0].compile(dialect=dialect)
+    assert "pg_advisory_xact_lock" in str(first)
+    assert "FOR UPDATE" not in str(first)
+    assert -(2 ** 63) <= next(iter(first.params.values())) < 2 ** 63
+    db.query.return_value.filter.return_value.with_for_update.assert_not_called()
+    push._lock_reminder_item(db, PlanAgreement, 123)
+    assert first.params == db.execute.call_args.args[0].compile(dialect=dialect).params
+    push._lock_reminder_item(db, InvestmentTopupRequest, 123)
+    assert first.params != db.execute.call_args.args[0].compile(dialect=dialect).params
+
+
+def stale_original_with_current_document(env, now, kind):
+    issued = now - timedelta(days=17)
+    if kind == "agreement":
+        entity_id, _ = current_reminder_agreement(env, now, offered_at=issued)
+        with patch.object(push, "utcnow", return_value=issued), env.sessions() as db:
+            push.enqueue_agreement(db, db.get(PlanAgreement, entity_id))
+            # Synthetic old notice expiry while the document remains live.
+            db.query(PushNotice).one().expires_at = now - timedelta(days=1)
+            db.commit()
+        return entity_id
+    with patch.object(push, "utcnow", return_value=issued), env.sessions() as db:
+        request = InvestmentTopupRequest(investor_id=env.investor_id, amount=99777,
+            status="contract", offered_at=issued)
+        db.add(request); db.flush()
+        push.enqueue_topup_contract(db, request)
+        db.commit()
+        return request.id
+
+
+@pytest.mark.parametrize("kind", ["agreement", "topup"])
+def test_signature_reminder_and_same_device_catchup_do_not_duplicate(push_env, kind):
+    env = push_env; register(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    stale_original_with_current_document(env, now, kind)
+    with patch.object(push, "utcnow", return_value=now), patch.object(push, "_send_push") as send:
+        assert push.run_scheduled_reminders(session_factory=env.sessions) == 1
+        register(env); register(env)
+        assert push.run_pending_pushes(session_factory=env.sessions) == 2
+        assert send.call_count == 1
+        assert send.call_args.args[1]["kind"] == f"{kind}_reminder"
+        # Reconciliation after provider acceptance is also not another message.
+        register(env)
+        assert push.run_pending_pushes(session_factory=env.sessions) == 0
+        # A new device still receives the outstanding document immediately.
+        register(env, endpoint="https://fcm.googleapis.com/wpush/new-device-catchup")
+        assert push.run_pending_pushes(session_factory=env.sessions) == 1
+        assert send.call_count == 2
+        assert send.call_args.args[0].endpoint.endswith("new-device-catchup")
+
+
+@pytest.mark.parametrize("kind", ["agreement", "topup"])
+def test_concurrent_existing_device_reconciliation_and_auto_reminder_share_guard(push_env, kind):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    env = push_env; register(env)
+    now = datetime(2026, 10, 5, 11, tzinfo=push.ISRAEL_TZ).astimezone(timezone.utc)
+    stale_original_with_current_document(env, now, kind)
+    ready = Barrier(2)
+
+    def reconcile():
+        ready.wait(timeout=5)
+        response = env.client.post("/api/v1/push/subscriptions", headers=env.headers[0], json=env.payload)
+        assert response.status_code == 200, response.text
+
+    def automatic():
+        ready.wait(timeout=5)
+        return push.run_scheduled_reminders(session_factory=env.sessions, now=now)
+
+    with patch.object(push, "utcnow", return_value=now), patch.object(push, "_send_push") as send:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(reconcile), pool.submit(automatic)]
+            for future in futures:
+                future.result(timeout=10)
+        send.assert_not_called()
+        assert push.run_pending_pushes(session_factory=env.sessions) == 2
+        assert send.call_count == 1
+    with env.sessions() as db:
+        assert db.query(PushDelivery).filter_by(status="sent").count() == 1

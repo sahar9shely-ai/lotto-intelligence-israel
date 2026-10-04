@@ -1,0 +1,18 @@
+.agreement-reminder { margin-block-start: 10px; min-width: 0; }
+.agreement-reminder .btn { min-height: 44px; white-space: normal; }
+.agreement-reminder__review { border: 1px solid #cfdfd3; border-radius: 12px; padding: 14px; background: #f5faf5; }
+.agreement-reminder__review > strong { color: var(--ink); font-size: .9rem; }
+.agreement-reminder__review dl { margin: 12px 0; display: grid; gap: 8px; }
+.agreement-reminder__review dl > div { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 10px; }
+.agreement-reminder__review dt { color: var(--ink-soft); font-size: .82rem; }
+.agreement-reminder__review dd { margin: 0; font-size: .87rem; overflow-wrap: anywhere; }
+.agreement-reminder__review p, .agreement-reminder__result { font-size: .84rem; line-height: 1.6; overflow-wrap: anywhere; }
+.agreement-reminder__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.agreement-reminder__result { margin: 10px 0 0; color: #245b43; }
+.agreement-reminder__result--warning { color: #79572b; }
+.agreement-history-row > .agreement-reminder { flex: 0 1 auto; min-width: 0; }
+.agreement-history-row > .agreement-reminder--review { flex: 1 1 100%; }
+@media (max-width: 500px) {
+  .agreement-reminder__review dl > div { grid-template-columns: 1fr; gap: 3px; }
+  .agreement-reminder__actions .btn { width: 100%; }
+}

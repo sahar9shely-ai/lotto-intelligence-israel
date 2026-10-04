@@ -35,6 +35,8 @@ MAX_SUBSCRIPTIONS = 10
 MAX_ATTEMPTS = 4
 CLAIM_LEASE_SECONDS = 120
 RETRY_SECONDS = (60, 300, 1800)
+AUTOMATIC_REMINDER_INTERVAL = timedelta(hours=24)
+MANUAL_REMINDER_INTERVAL = timedelta(hours=1)
 logger = logging.getLogger(__name__)
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 
@@ -150,8 +152,10 @@ def _insert_ignore(db: Session, model, values: dict, conflict_columns: list[str]
 def subscribe(db: Session, user: User, *, endpoint: str, p256dh: str, auth: str) -> PushSubscription:
     endpoint = validate_endpoint(endpoint)
     p256dh, auth = validate_keys(p256dh, auth)
-    # Serialize registrations for this account (and its cap) on PostgreSQL.
-    db.execute(select(User.id).where(User.id == user.id).with_for_update()).scalar_one()
+    # Serialize registrations for this account (and its cap). NO KEY UPDATE
+    # still excludes another registration but permits notification inserts'
+    # foreign-key KEY SHARE locks while catch-up waits for a document mutex.
+    db.execute(select(User.id).where(User.id == user.id).with_for_update(key_share=True)).scalar_one()
     endpoint_hash = _hash_endpoint(endpoint)
     existing = db.query(PushSubscription).filter_by(endpoint_hash=endpoint_hash).one_or_none()
     if existing:
@@ -281,19 +285,120 @@ def device_delivery_status(db: Session, user: User, endpoint: str, delivery_id: 
     return {"subscribed": True, "pending": pending, "last_delivery": result}
 
 
-def enqueue_agreement_reminders(db: Session, *, now: datetime | None = None, limit: int = 100) -> int:
-    """At most one reminder per agreement/account/Israel day, during daytime.
+def _as_utc(value: datetime) -> datetime:
+    # The investment database stores UTC in timezone-naive DateTime columns.
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
-    The current state and document revision are checked again by the outbox.
-    A request first issued or reconciled today waits until the following day.
+
+def _lock_reminder_item(db: Session, model, entity_id: int):
+    """Serialize manual and automatic reminders for the same document.
+
+    PostgreSQL uses a transaction advisory mutex, without locking financial
+    rows: signing locks Investor before Agreement, and reversing that order
+    would deadlock against an outbox insert's investor foreign-key lock.
+    SQLite reserves its writer before reading. Neither path changes terms.
+    """
+    if db.get_bind().dialect.name == "sqlite":
+        connection = db.connection()
+        if not connection.connection.driver_connection.in_transaction:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+    else:
+        key = int.from_bytes(hashlib.sha256(f"tazrim:signature-reminder:{model.__tablename__}:{entity_id}".encode()).digest()[:8], signed=True)
+        db.execute(select(func.pg_advisory_xact_lock(key)))
+    return db.query(model).filter(model.id == entity_id).populate_existing().one_or_none()
+
+
+def _reminder_state(db: Session, *, owner_id: int, entity_id: int, revision: str,
+                    original: str, kind: str, now: datetime) -> tuple[bool, datetime | None, datetime | None]:
+    """Current revision's queued/accepted activity, without provider secrets."""
+    rows = db.query(PushNotice.kind, PushNotice.created_at, PushNotice.expires_at,
+                    PushDelivery.status, PushDelivery.sent_at).outerjoin(PushDelivery).filter(
+        PushNotice.user_id == owner_id, PushNotice.entity_id == entity_id,
+        PushNotice.entity_revision == revision, PushNotice.kind.in_((original, kind)),
+    ).all()
+    pending = False
+    latest = None
+    latest_reminder = None
+    for notice_kind, created_at, expires_at, status, sent_at in rows:
+        contact = _as_utc(created_at)
+        if status == "sent" and sent_at is not None:
+            contact = max(contact, _as_utc(sent_at))
+        latest = max(latest, contact) if latest else contact
+        if notice_kind == kind:
+            latest_reminder = max(latest_reminder, contact) if latest_reminder else contact
+        if status in {"queued", "sending"} and _as_utc(expires_at) > now:
+            pending = True
+    return pending, latest, latest_reminder
+
+
+def _queue_signature_reminder(db: Session, owner: User, *, entity_id: int, revision: str,
+                              kind: str, now: datetime, expires_at: datetime) -> int:
+    # Both manual and scheduled paths use the same event namespace. Mutexes
+    # enforce the elapsed interval; the unique outbox key also deduplicates a
+    # replay of the same transaction across processes.
+    hour = int(now.timestamp()) // 3600
+    return _enqueue_for_account(db, owner, kind=kind, entity_id=entity_id, revision=revision,
+        event_key=f"{kind}:{entity_id}:{revision}:{hour}", expires_at=expires_at)
+
+
+def enqueue_manual_agreement_reminder(db: Session, actor: User, agreement_id: int,
+                                      document_hash: str) -> dict:
+    """Queue an explicit admin reminder; never send or change financial state."""
+    if not is_system_admin(actor):
+        raise PermissionError("שליחת תזכורת לחתימה זמינה למנהל המערכת בלבד")
+    now = _as_utc(utcnow())
+    agreement = _lock_reminder_item(db, PlanAgreement, agreement_id)
+    if not agreement:
+        raise LookupError("המסמך לא נמצא")
+    if (agreement.status != "pending" or agreement.signed_at is not None
+        or _as_utc(agreement.expires_at) <= now):
+        raise SubscriptionConflict("ההסכם אינו ממתין לחתימה או שפג תוקפו. יש לרענן את הרשימה")
+    from app.services.agreement_service import digest
+    if agreement.document_hash != document_hash or digest(agreement.snapshot) != document_hash:
+        raise SubscriptionConflict("גרסת המסמך השתנתה. יש לטעון את ההסכם מחדש")
+    owners = db.query(User).join(Investor, Investor.id == User.investor_id).filter(
+        User.investor_id == agreement.investor_id, User.is_active.is_(True),
+        User.role != "manager", Investor.is_manager.is_(False),
+        select(PushSubscription.id).where(PushSubscription.user_id == User.id).exists(),
+    ).all()
+    count = 0
+    has_pending = False
+    next_times = []
+    for owner in owners:
+        pending, _, latest_reminder = _reminder_state(db, owner_id=owner.id, entity_id=agreement.id,
+            revision=agreement.token_hash, original="agreement", kind="agreement_reminder", now=now)
+        if pending:
+            has_pending = True
+            continue
+        next_eligible = latest_reminder + MANUAL_REMINDER_INTERVAL if latest_reminder else None
+        if next_eligible and now < next_eligible:
+            next_times.append(next_eligible)
+            continue
+        count += _queue_signature_reminder(db, owner, entity_id=agreement.id, revision=agreement.token_hash,
+            kind="agreement_reminder", now=now,
+            expires_at=min(_as_utc(agreement.expires_at), now + MANUAL_REMINDER_INTERVAL))
+    if count:
+        return {"queued": True, "devices": count, "reason": "queued",
+                "next_eligible_at": now + MANUAL_REMINDER_INTERVAL}
+    reason = "already_pending" if has_pending else "recently_sent" if next_times else "no_devices"
+    return {"queued": False, "devices": 0, "reason": reason,
+            "next_eligible_at": min(next_times) if next_times and not has_pending else None}
+
+
+def enqueue_agreement_reminders(db: Session, *, now: datetime | None = None, limit: int = 100) -> int:
+    """Queue one current reminder only after 24 elapsed UTC hours, in daytime.
+
+    Original notices, manual reminders and actual provider acceptance all reset
+    the interval. Queued work suppresses another reminder, including after a
+    sleeping service wakes. The outbox revalidates unsigned/current documents.
     """
     if not is_enabled() or not settings.web_push_agreement_reminders_enabled:
         return 0
-    now = now or utcnow()
+    now = _as_utc(now or utcnow())
     local = now.astimezone(ISRAEL_TZ)
     if not settings.web_push_agreement_reminder_hour <= local.hour < 20:
         return 0
-    start = datetime.combine(local.date(), time.min, tzinfo=ISRAEL_TZ).astimezone(timezone.utc)
+    cutoff = now - AUTOMATIC_REMINDER_INTERVAL
     end = datetime.combine(local.date(), time(20), tzinfo=ISRAEL_TZ).astimezone(timezone.utc)
     has_device = select(PushSubscription.id).where(PushSubscription.user_id == User.id).exists()
     max_items = max(0, min(limit, 200))
@@ -302,32 +407,56 @@ def enqueue_agreement_reminders(db: Session, *, now: datetime | None = None, lim
         (PlanAgreement, "agreement_reminder", "agreement", PlanAgreement.token_hash, PlanAgreement.signed_at, None),
         (InvestmentTopupRequest, "topup_reminder", "topup", InvestmentTopupRequest.offered_at, InvestmentTopupRequest.investor_signed_at, InvestmentTopupRequest.offered_at),
     ):
-        already_today = select(PushNotice.id).where(
-            PushNotice.user_id == User.id, PushNotice.entity_id == model.id,
-            PushNotice.kind.in_((original, kind)), PushNotice.created_at >= start,
-        ).exists()
-        outstanding_or_delivered_today = select(PushDelivery.id).join(PushNotice).where(
+        notice_scope = [
             PushNotice.user_id == User.id, PushNotice.entity_id == model.id,
             PushNotice.kind.in_((original, kind)),
+        ]
+        if model is PlanAgreement:
+            notice_scope.append(PushNotice.entity_revision == PlanAgreement.token_hash)
+        # SQL prefilter prevents recently reminded early rows from starving
+        # later eligible documents in the bounded scan. The locked check below
+        # also checks the exact top-up revision, whose key is an ISO timestamp.
+        recently_queued = select(PushNotice.id).where(*notice_scope, PushNotice.created_at > cutoff).exists()
+        outstanding_or_recently_sent = select(PushDelivery.id).join(PushNotice).where(
+            *notice_scope,
             or_(
                 PushDelivery.status.in_(("queued", "sending")) & (PushNotice.expires_at > now),
-                (PushDelivery.status == "sent") & (PushDelivery.sent_at >= start),
+                (PushDelivery.status == "sent") & (PushDelivery.sent_at > cutoff),
             ),
         ).exists()
-        query = db.query(model, User).join(User, User.investor_id == model.investor_id).join(Investor, Investor.id == User.investor_id).filter(
+        query = db.query(model.id, User.id).join(User, User.investor_id == model.investor_id).join(Investor, Investor.id == User.investor_id).filter(
             User.is_active.is_(True), User.role != "manager", Investor.is_manager.is_(False),
-            has_device, ~already_today, ~outstanding_or_delivered_today, signed_field.is_(None),
+            has_device, ~recently_queued, ~outstanding_or_recently_sent, signed_field.is_(None),
         )
         if model is PlanAgreement:
-            query = query.filter(PlanAgreement.status == "pending", PlanAgreement.expires_at > now)
+            query = query.filter(PlanAgreement.status == "pending", PlanAgreement.expires_at > now,
+                                 PlanAgreement.created_at <= cutoff)
         else:
-            query = query.filter(InvestmentTopupRequest.status == "contract", offered_field.isnot(None))
-        for item, owner in query.order_by(model.id, User.id).limit(max_items).all():
+            query = query.filter(InvestmentTopupRequest.status == "contract", offered_field <= cutoff)
+        for item_id, owner_id in query.order_by(model.id, User.id).limit(max_items).all():
+            item = _lock_reminder_item(db, model, item_id)
+            owner = db.query(User).filter_by(id=owner_id).populate_existing().one_or_none()
+            if (not item or not owner or not owner.is_active or is_manager(owner)
+                or owner.investor_id != item.investor_id or getattr(item, signed_field.key) is not None):
+                continue
+            if model is PlanAgreement:
+                if item.status != "pending" or _as_utc(item.expires_at) <= now:
+                    continue
+                offered_at = _as_utc(item.created_at)
+            else:
+                if item.status != "contract" or item.offered_at is None:
+                    continue
+                offered_at = _as_utc(item.offered_at)
             revision = getattr(item, revision_field.key)
             revision = revision if isinstance(revision, str) else _revision(revision)
-            expires = min(item.expires_at.replace(tzinfo=timezone.utc), end) if model is PlanAgreement else end
-            count += _enqueue_for_account(db, owner, kind=kind, entity_id=item.id, revision=revision,
-                event_key=f"{kind}:{item.id}:{revision}:{local.date().isoformat()}", expires_at=expires)
+            pending, latest, _ = _reminder_state(db, owner_id=owner.id, entity_id=item.id,
+                revision=revision, original=original, kind=kind, now=now)
+            anchor = max(offered_at, latest) if latest else offered_at
+            if pending or now < anchor + AUTOMATIC_REMINDER_INTERVAL:
+                continue
+            expires = min(_as_utc(item.expires_at), end) if model is PlanAgreement else end
+            count += _queue_signature_reminder(db, owner, kind=kind, entity_id=item.id, revision=revision,
+                now=now, expires_at=expires)
     return count
 
 
@@ -348,6 +477,27 @@ def _enqueue(db: Session, *, investor_id: int, kind: str, entity_id: int, revisi
     users = db.query(User).filter_by(investor_id=investor_id, is_active=True).all()
     if device is not None:
         users = [user for user in users if user.id == device.user_id]
+        if kind in {"agreement", "topup"}:
+            # Reconciliation of an existing endpoint must not race a reminder
+            # into two notices for the same device. A genuinely new device has
+            # no delivery history and still receives its immediate catch-up.
+            model = PlanAgreement if kind == "agreement" else InvestmentTopupRequest
+            item = _lock_reminder_item(db, model, entity_id)
+            current_revision = item.token_hash if kind == "agreement" and item else _revision(item.offered_at) if item and item.offered_at else None
+            if (not item or item.investor_id != investor_id or current_revision != revision
+                or (kind == "agreement" and (item.status != "pending" or item.signed_at is not None
+                    or _as_utc(item.expires_at) <= _as_utc(utcnow())))
+                or (kind == "topup" and (item.status != "contract" or item.investor_signed_at is not None))):
+                return 0
+            existing_delivery = db.query(PushDelivery.id).join(PushNotice).filter(
+                PushDelivery.subscription_id == device.id, PushNotice.user_id == device.user_id,
+                PushNotice.entity_id == entity_id, PushNotice.entity_revision == revision,
+                PushNotice.kind.in_((kind, f"{kind}_reminder")),
+                or_(PushDelivery.status == "sent",
+                    PushDelivery.status.in_(("queued", "sending")) & (PushNotice.expires_at > utcnow())),
+            ).first()
+            if existing_delivery:
+                return 0
     base_event_key = f"{kind}:{entity_id}:{revision}"
     for user in users:
         subscriptions = [device] if device is not None else db.query(PushSubscription).filter_by(user_id=user.id).all()
@@ -394,7 +544,7 @@ def enqueue_outstanding_for_device(db: Session, device: PushSubscription) -> int
     agreements = db.query(PlanAgreement).filter(
         PlanAgreement.investor_id == user.investor_id, PlanAgreement.status == "pending",
         PlanAgreement.signed_at.is_(None), PlanAgreement.expires_at > now,
-    ).all()
+    ).order_by(PlanAgreement.id).all()
     for agreement in agreements:
         count += _enqueue(db, investor_id=user.investor_id, kind="agreement", entity_id=agreement.id,
                           revision=agreement.token_hash, expires_at=agreement.expires_at, device=device)
@@ -402,7 +552,7 @@ def enqueue_outstanding_for_device(db: Session, device: PushSubscription) -> int
         InvestmentTopupRequest.investor_id == user.investor_id,
         InvestmentTopupRequest.status == "contract", InvestmentTopupRequest.investor_signed_at.is_(None),
         InvestmentTopupRequest.offered_at.isnot(None),
-    ).all()
+    ).order_by(InvestmentTopupRequest.id).all()
     for request in topups:
         count += _enqueue(db, investor_id=user.investor_id, kind="topup", entity_id=request.id,
                           revision=_revision(request.offered_at),

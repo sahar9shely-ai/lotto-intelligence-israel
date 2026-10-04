@@ -7,6 +7,7 @@ import type { Investor, PlanAgreement, TopupRequest } from "../types/investments
 import { isAgreementExpired } from "../utils/agreementSigning";
 import { investorOperationsHref, isActionQueueAdmin, loadPendingAgreementQueue, pendingInvestorRequests, requestOperationsHint } from "../utils/adminActionQueue";
 import { isAdminShellInvestor } from "../utils/roles";
+import { AgreementReminderAction } from "./AgreementReminderAction";
 import "./adminActionQueue.css";
 import { formatCalendarMonth, formatMoney, todayISO } from "../utils/format";
 import {
@@ -244,6 +245,7 @@ function AdminActionQueue({ investorId, investors, investorsError, onReloadInves
         <Link className="text-link" to={`/agreements/${row.id}/sign`}>צפייה בהסכם</Link>
         <Link className="text-link" to={investorOperationsHref(row.investor_id, "documents")}>להסכמים בתיק</Link>
       </div>
+      <AgreementReminderAction agreement={row} recipientName={book.find(inv => inv.id === row.investor_id)?.name} />
     </>;
   }
   function requestRow(row: TopupRequest) {

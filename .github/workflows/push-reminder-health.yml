@@ -1,12 +1,11 @@
-name: Daily notification service health
+name: Notification service health
 
 on:
   schedule:
-    # UTC: daytime in Israel in both summer and winter, away from peak hour.
-    # The second health check recovers a delayed/failed morning startup. The
-    # server deduplicates reminders per document/account/Israel calendar day.
-    - cron: '17 8 * * *'
-    - cron: '47 12 * * *'
+    # An hourly readiness check avoids waiting for the next calendar day when
+    # a 24-hour reminder becomes due just after the morning wake-up. The server
+    # enforces Israel daytime (including DST) and elapsed-time deduplication.
+    - cron: '17 7-17 * * *'
   workflow_dispatch:
 
 permissions:

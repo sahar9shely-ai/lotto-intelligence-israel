@@ -33,6 +33,11 @@ class DeliveryStatusRequest(UnsubscribeRequest):
     delivery_id: int | None = Field(default=None, ge=1)
 
 
+class AgreementReminderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 @router.get("/config")
 def config(_: User = Depends(get_current_user)):
     return push.public_config()
@@ -95,6 +100,25 @@ def delivery_status(payload: DeliveryStatusRequest, user: User = Depends(get_cur
         return push.device_delivery_status(db, user, payload.endpoint, payload.delivery_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/agreements/{agreement_id}/reminder")
+def agreement_reminder(agreement_id: int, payload: AgreementReminderRequest,
+                       user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
+    if not push.is_system_admin(user):
+        raise HTTPException(status_code=403, detail="שליחת תזכורת לחתימה זמינה למנהל המערכת בלבד")
+    if not push.is_enabled():
+        raise HTTPException(status_code=503, detail="התראות לטלפון אינן זמינות כרגע")
+    try:
+        result = push.enqueue_manual_agreement_reminder(db, user, agreement_id, payload.document_hash)
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except push.SubscriptionConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return result
 
 
 @router.post("/subscriptions/status")
