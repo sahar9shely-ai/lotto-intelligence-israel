@@ -24,7 +24,22 @@ class NoticeInput(BaseModel):
 
 
 class OpeningInput(PlanCreate):
-    notice_id: int
+    # Either an existing notice, or the request date to record together with the
+    # agreement in one transaction (a refused agreement then leaves no notice behind).
+    notice_id: int | None = None
+    notice_requested_on: date | None = None
+
+
+class AgreementCancelInput(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class NoticeCancelInput(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class RevisionInput(PlanCreate):
+    revision_notes: str | None = Field(default=None, max_length=500)
 
 
 class ClosingInput(BaseModel):
@@ -73,11 +88,71 @@ def owned(user, investor_id):
         raise HTTPException(status_code=403, detail="אין הרשאה לתיק זה")
 
 
+def notice_block_reason(db: Session, notice: PlanNotice) -> str | None:
+    """Why a recorded notice cannot be cancelled (None = it can)."""
+    if notice.cancelled_at is not None:
+        return "הבקשה כבר בוטלה"
+    used = db.query(PlanAgreement).filter(PlanAgreement.notice_id == notice.id,
+                                          PlanAgreement.status.in_(("pending", "signed"))).all()
+    if any(row.status == "signed" for row in used):
+        return "הבקשה שימשה להסכם חתום ונשמרת בהיסטוריה"
+    if used:
+        return "הבקשה משמשת הסכם הממתין לחתימה. בטלו קודם את ההסכם"
+    if notice.purpose == "withdraw":
+        from app.models.investments import WalletEntry
+        eligible = svc.svc.add_months(notice.requested_on, 1)
+        withdrawals = db.query(WalletEntry).filter(WalletEntry.investor_id == notice.investor_id,
+                                                   WalletEntry.operation_type == "withdraw").all()
+        if any(row.created_at and row.created_at.date() >= eligible for row in withdrawals):
+            return "על סמך הבקשה כבר נרשמה משיכה; הבקשה נשמרת בהיסטוריה"
+    return None
+
+
+def serialize_notice(db: Session, n: PlanNotice, *, manager: bool) -> dict:
+    row = {"id": n.id, "purpose": n.purpose, "requested_on": n.requested_on,
+           "eligible_on": svc.svc.add_months(n.requested_on, 1) if n.purpose == "withdraw" else n.requested_on,
+           "notes": n.notes, "created_at": n.created_at, "cancelled_at": n.cancelled_at}
+    if manager:
+        block = notice_block_reason(db, n)
+        row["cancellable"] = block is None
+        row["cancel_blocked_reason"] = block if n.cancelled_at is None else None
+    return row
+
+
 @router.get("/investors/{investor_id}/notices")
 def notices(investor_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
     owned(user, investor_id)
-    return [{"id": n.id, "purpose": n.purpose, "requested_on": n.requested_on, "eligible_on": svc.svc.add_months(n.requested_on, 1) if n.purpose == "withdraw" else n.requested_on, "notes": n.notes}
+    return [serialize_notice(db, n, manager=is_manager(user))
             for n in db.query(PlanNotice).filter(PlanNotice.investor_id == investor_id).order_by(PlanNotice.id.desc()).all()]
+
+
+@router.post("/investors/{investor_id}/notices/{notice_id}/cancel")
+def cancel_notice(investor_id: int, notice_id: int, payload: NoticeCancelInput | None = None,
+                  user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
+    """Admin correction for a request recorded by mistake. The row is kept and marked cancelled."""
+    svc.wallet.begin_wallet_write(db)
+    svc.wallet.lock_investor(db, investor_id)
+    notice = db.query(PlanNotice).filter(PlanNotice.id == notice_id, PlanNotice.investor_id == investor_id).populate_existing().first()
+    if not notice:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה בתיק זה")
+    block = notice_block_reason(db, notice)
+    if block:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=block)
+    notice.cancelled_at = svc.utcnow().replace(tzinfo=None)
+    notice.cancelled_by_user_id = user.id
+    reason = (payload.reason or "").strip() if payload else ""
+    if reason:
+        notice.notes = ((notice.notes or "") + f"\nבוטל: {reason}").strip()[:1000]
+    investor = db.get(Investor, investor_id)
+    from app.services.activity_service import log_activity
+    purpose = {"withdraw": "משיכה", "renew": "המשך מסלול", "new": "מסלול חדש"}.get(notice.purpose, notice.purpose)
+    log_activity(db, kind="notice_cancelled", title=f"בקשה מתועדת בוטלה · {investor.name if investor else ''}",
+                 body=f"{purpose} · התקבלה {notice.requested_on.strftime('%d/%m/%Y')}" + (f" · סיבה: {reason}" if reason else ""),
+                 severity="warning", actor=user, investor_id=investor_id, investor_name=investor.name if investor else None,
+                 entity_type="notice", entity_id=notice.id, href=f"/investors?investor_id={investor_id}&section=documents")
+    db.commit()
+    return serialize_notice(db, notice, manager=True)
 
 
 @router.post("/investors/{investor_id}/notices", status_code=201)
@@ -89,17 +164,68 @@ def create_notice(investor_id: int, payload: NoticeInput, user: User = Depends(g
     if requested > svc.israel_today() or (not is_manager(user) and requested != svc.israel_today()):
         raise HTTPException(status_code=409, detail="תאריך בקשה אינו תקין")
     row = PlanNotice(investor_id=investor_id, purpose=payload.purpose, requested_on=requested, notes=payload.notes, actor_user_id=user.id)
-    db.add(row); db.commit()
+    db.add(row); db.flush()
+    investor = db.get(Investor, investor_id)
+    from app.services.activity_service import log_activity
+    purpose = {"withdraw": "משיכה", "renew": "המשך מסלול", "new": "מסלול חדש"}.get(row.purpose, row.purpose)
+    log_activity(db, kind="notice_recorded", title=f"נרשמה בקשה מתועדת · {investor.name if investor else ''}",
+                 body=f"{purpose} · התקבלה {requested.strftime('%d/%m/%Y')}", severity="info", actor=user,
+                 investor_id=investor_id, investor_name=investor.name if investor else None,
+                 entity_type="notice", entity_id=row.id, href=f"/investors?investor_id={investor_id}&section=documents")
+    db.commit()
     return {"id": row.id, "purpose": row.purpose, "requested_on": row.requested_on, "eligible_on": svc.svc.add_months(row.requested_on, 1) if row.purpose == "withdraw" else row.requested_on}
 
 
 @router.post("/agreements/open", status_code=201)
 def opening(payload: OpeningInput, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
     try:
-        row, token = svc.issue(db, investor_id=payload.investor_id, kind="open", actor_id=user.id, notice_id=payload.notice_id,
-                               data=payload.model_dump(exclude={"notice_id"}))
+        notice_id = payload.notice_id
+        if notice_id is None:
+            requested = payload.notice_requested_on or svc.israel_today()
+            if requested > svc.israel_today():
+                raise ValueError("מועד הבקשה אינו יכול להיות בעתיד")
+            if not db.get(Investor, payload.investor_id):
+                raise ValueError("המשקיע לא נמצא")
+            svc.wallet.begin_wallet_write(db)
+            notice = PlanNotice(investor_id=payload.investor_id, purpose="new", requested_on=requested, actor_user_id=user.id)
+            db.add(notice); db.flush()
+            notice_id = notice.id
+        row, token = svc.issue(db, investor_id=payload.investor_id, kind="open", actor_id=user.id, notice_id=notice_id,
+                               data=payload.model_dump(exclude={"notice_id", "notice_requested_on"}))
         db.commit()
-        return {**svc.serialize(row), "token": token}
+        return {**svc.serialize(row), "token": token, "private_terms": row.private_terms}
+    except (ValueError, IntegrityError) as exc:
+        fail(db, exc)
+
+
+@router.post("/agreements/{agreement_id}/revise", status_code=201)
+def revise_opening(agreement_id: int, payload: RevisionInput, user: User = Depends(require_system_admin),
+                   db: Session = Depends(get_investment_db)):
+    """Change any term of an opening agreement that is still waiting for signature.
+
+    A replacement document is issued and the old draft is cancelled atomically, so
+    the investor can only ever sign the version the admin actually reviewed.
+    """
+    old = db.get(PlanAgreement, agreement_id)
+    if not old:
+        raise HTTPException(status_code=404, detail="ההסכם לא נמצא")
+    if old.kind != "open" or old.status != "pending" or old.plan_id is not None:
+        raise HTTPException(status_code=409, detail="ניתן לערוך רק הסכם פתיחה שעדיין ממתין לחתימה")
+    if payload.investor_id != old.investor_id:
+        raise HTTPException(status_code=409, detail="לא ניתן להעביר הסכם למשקיע אחר. בטלו אותו והכינו הסכם חדש")
+    try:
+        data = payload.model_dump(exclude={"revision_notes"})
+        row, token = svc.issue(db, investor_id=old.investor_id, kind="open", actor_id=user.id, notice_id=old.notice_id,
+                               data=data, supersedes_agreement_id=old.id,
+                               replacement_notes=(payload.revision_notes or "").strip() or "עדכון תנאים לפני חתימה")
+        from app.services.activity_service import log_activity
+        investor = db.get(Investor, old.investor_id)
+        log_activity(db, kind="agreement_revised", title=f"הסכם פתיחה עודכן לפני חתימה · {investor.name if investor else ''}",
+                     body=f"הסכם #{old.id} בוטל והוחלף בהסכם #{row.id}" + (f" · {payload.revision_notes.strip()}" if payload.revision_notes and payload.revision_notes.strip() else ""),
+                     severity="warning", actor=user, investor_id=old.investor_id, investor_name=investor.name if investor else None,
+                     entity_type="agreement", entity_id=row.id, href=f"/investors?investor_id={old.investor_id}&section=documents")
+        db.commit()
+        return {**svc.serialize(row), "token": token, "private_terms": row.private_terms}
     except (ValueError, IntegrityError) as exc:
         fail(db, exc)
 
@@ -172,10 +298,18 @@ def closing_preview(plan_id: int, payload: ClosingPreviewInput, user: User = Dep
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+def serialize_for(user: User, row: PlanAgreement) -> dict:
+    data = svc.serialize(row)
+    if is_manager(user):
+        # Managers need the private terms (e.g. management fee) to revise a draft.
+        data["private_terms"] = row.private_terms
+    return data
+
+
 @router.get("/investors/{investor_id}/agreements")
 def history(investor_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_investment_db)):
     owned(user, investor_id)
-    return [svc.serialize(n) for n in db.query(PlanAgreement).filter(PlanAgreement.investor_id == investor_id).order_by(PlanAgreement.id.desc()).all()]
+    return [serialize_for(user, n) for n in db.query(PlanAgreement).filter(PlanAgreement.investor_id == investor_id).order_by(PlanAgreement.id.desc()).all()]
 
 
 @router.get("/agreements/{agreement_id}")
@@ -184,7 +318,7 @@ def detail(agreement_id: int, user: User = Depends(get_current_user), db: Sessio
     if not row:
         raise HTTPException(status_code=404, detail="המסמך לא נמצא")
     owned(user, row.investor_id)
-    return svc.serialize(row)
+    return serialize_for(user, row)
 
 
 @router.post("/agreements/{agreement_id}/link")
@@ -207,7 +341,8 @@ def new_link(agreement_id: int, user: User = Depends(require_manager), db: Sessi
 
 
 @router.post("/agreements/{agreement_id}/cancel")
-def cancel(agreement_id: int, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
+def cancel(agreement_id: int, payload: AgreementCancelInput | None = None, user: User = Depends(require_manager),
+           db: Session = Depends(get_investment_db)):
     row = db.get(PlanAgreement, agreement_id)
     if not row:
         raise HTTPException(status_code=404, detail="המסמך לא נמצא")
@@ -217,8 +352,16 @@ def cancel(agreement_id: int, user: User = Depends(require_manager), db: Session
     db.refresh(row)
     if row.status != "pending":
         raise HTTPException(status_code=409, detail="אפשר לבטל רק הסכם שטרם נחתם")
-    row.status = "cancelled"; db.commit()
-    return svc.serialize(row)
+    row.status = "cancelled"
+    reason = (payload.reason or "").strip() if payload else ""
+    investor = db.get(Investor, row.investor_id)
+    from app.services.activity_service import log_activity
+    log_activity(db, kind="agreement_cancelled", title=f"{row.snapshot.get('title', 'הסכם')} בוטל לפני חתימה · {investor.name if investor else ''}",
+                 body=f"הסכם #{row.id}" + (f" · סיבה: {reason}" if reason else "") + " · לא בוצעה פעולה כספית",
+                 severity="warning", actor=user, investor_id=row.investor_id, investor_name=investor.name if investor else None,
+                 entity_type="agreement", entity_id=row.id, href=f"/investors?investor_id={row.investor_id}&section=documents")
+    db.commit()
+    return serialize_for(user, row)
 
 
 def public_enabled():

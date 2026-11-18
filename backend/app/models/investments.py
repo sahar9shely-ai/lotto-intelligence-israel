@@ -249,6 +249,9 @@ class PlanNotice(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     actor_user_id: Mapped[int] = mapped_column(Integer)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # A notice recorded by mistake is cancelled (never deleted) so history stays visible.
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    cancelled_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class PlanAgreement(Base):

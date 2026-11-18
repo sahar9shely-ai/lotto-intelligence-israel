@@ -20,6 +20,8 @@ ACTIVITY_GROUPS: dict[str, tuple[str, ...]] = {
     "savings": ("savings",),
     "settings": ("settings",),
     "investor": ("investor",),
+    "wallet": ("wallet",),
+    "agreement": ("agreement", "notice"),
 }
 
 

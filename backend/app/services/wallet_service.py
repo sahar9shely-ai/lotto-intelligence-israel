@@ -259,3 +259,110 @@ def fund_plan(db: Session, data: dict, additional_funds, operation_key, actor_id
     movement(db, investor, -declared, "plan_funding", key, digest, actor_id, plan.id)
     svc.generate_payment_schedule(db, plan, commit=False)
     return plan
+
+
+# ---------------------------------------------------------------------------
+# Admin corrections: compensating reversals. The original ledger row is never
+# edited or deleted; a reversal adds an opposite movement that points back to
+# it through a deterministic operation key, so it can happen only once.
+# ---------------------------------------------------------------------------
+
+REVERSIBLE_TYPES = {"deposit", "withdraw", "transfer_out", "transfer_in"}
+REVERSAL_TYPES = {
+    "deposit": "deposit_reversal",
+    "withdraw": "withdraw_reversal",
+}
+
+
+def reversal_key(entry: WalletEntry) -> str:
+    if entry.operation_type in {"transfer_out", "transfer_in"} and entry.transfer_id:
+        return f"reverse-transfer:{entry.transfer_id}:out"
+    return f"reverse:{entry.id}"
+
+
+def reversed_keys(db: Session, keys: list[str]) -> set[str]:
+    if not keys:
+        return set()
+    rows = db.query(WalletEntry.operation_key).filter(WalletEntry.operation_key.in_(keys)).all()
+    return {row[0] for row in rows}
+
+
+def _pending_opening_agreement(db: Session, investor_id: int):
+    from app.models.investments import PlanAgreement
+
+    return (db.query(PlanAgreement.id)
+            .filter(PlanAgreement.investor_id == investor_id, PlanAgreement.kind == "open",
+                    PlanAgreement.status == "pending")
+            .first())
+
+
+def reversal_block_reason(db: Session, entry: WalletEntry, *, already_reversed: bool | None = None) -> str | None:
+    """Why this ledger row cannot be reversed right now (None = it can)."""
+    if entry.operation_type not in REVERSIBLE_TYPES:
+        if entry.operation_type in {"plan_funding", "plan_close"}:
+            return "הפעולה בוצעה מכוח הסכם חתום ואינה ניתנת לביטול כאן"
+        return "פעולה זו אינה ניתנת לביטול"
+    if entry.investor_id is None:
+        return "תיק המשקיע נמחק; לא ניתן לבטל את הפעולה"
+    if already_reversed is None:
+        already_reversed = bool(reversed_keys(db, [reversal_key(entry)]))
+    if already_reversed:
+        return "הפעולה כבר בוטלה"
+    affected = [entry.investor_id]
+    if entry.operation_type in {"transfer_out", "transfer_in"}:
+        transfer_row = db.get(WalletTransfer, entry.transfer_id) if entry.transfer_id else None
+        if not transfer_row:
+            return "קבלת ההעברה המקורית לא נמצאה"
+        affected = [transfer_row.source_investor_id, transfer_row.recipient_investor_id]
+        recipient = db.get(Investor, transfer_row.recipient_investor_id)
+        if not recipient or (recipient.available_balance_cents or 0) < transfer_row.amount_cents:
+            return "ביתרת המשקיע המקבל אין די כסף להחזרת ההעברה"
+    elif entry.operation_type == "deposit":
+        investor = db.get(Investor, entry.investor_id)
+        if not investor or (investor.available_balance_cents or 0) < entry.amount_cents:
+            return "היתרה הזמינה קטנה מסכום התוספת (ייתכן שכבר שימשה למסלול או למשיכה)"
+    for investor_id in affected:
+        if _pending_opening_agreement(db, investor_id):
+            return "קיים הסכם פתיחה הממתין לחתימה שמבוסס על היתרה הנוכחית. בטלו או השלימו אותו קודם"
+    return None
+
+
+def reverse_entry(db: Session, entry_id: int, actor_id: int, reason: str) -> list[WalletEntry]:
+    """Reverse a deposit, a withdrawal or a whole transfer with compensating rows."""
+    from app.models.auth import User
+    from app.security.auth import is_system_admin
+
+    actor = db.get(User, actor_id)
+    if not actor or not actor.is_active or not is_system_admin(actor):
+        raise PermissionError("ביטול תנועות ביתרה זמין למנהל המערכת בלבד")
+    reason = (reason or "").strip()
+    if len(reason) < 2 or len(reason) > 500:
+        raise ValueError("יש לכתוב סיבה קצרה לביטול (עד 500 תווים)")
+    begin_wallet_write(db)
+    entry = db.get(WalletEntry, entry_id)
+    if not entry:
+        raise ValueError("התנועה לא נמצאה")
+    key = reversal_key(entry)
+    digest = fingerprint({"kind": "reversal", "entry_id": entry.id, "operation_key": entry.operation_key})
+    if entry.operation_type in {"transfer_out", "transfer_in"} and entry.transfer_id:
+        transfer_row = db.get(WalletTransfer, entry.transfer_id)
+        if not transfer_row:
+            raise ValueError("קבלת ההעברה המקורית לא נמצאה")
+        investors = {iid: lock_investor(db, iid) for iid in sorted((transfer_row.source_investor_id, transfer_row.recipient_investor_id))}
+        block = reversal_block_reason(db, entry)
+        if block:
+            raise ValueError(block)
+        source = investors[transfer_row.source_investor_id]
+        recipient = investors[transfer_row.recipient_investor_id]
+        value = transfer_row.amount_cents
+        out_row = movement(db, recipient, -value, "transfer_reversal_out", key, digest, actor_id,
+                           transfer_id=transfer_row.id, counterparty=source, admin_notes=reason)
+        in_row = movement(db, source, value, "transfer_reversal_in", f"reverse-transfer:{transfer_row.id}:in", digest, actor_id,
+                          transfer_id=transfer_row.id, counterparty=recipient, admin_notes=reason)
+        return [out_row, in_row]
+    investor = lock_investor(db, entry.investor_id) if entry.investor_id else None
+    block = reversal_block_reason(db, entry)
+    if block or investor is None:
+        raise ValueError(block or "תיק המשקיע לא נמצא")
+    kind = REVERSAL_TYPES[entry.operation_type]
+    return [movement(db, investor, -entry.amount_cents, kind, key, digest, actor_id, admin_notes=reason)]

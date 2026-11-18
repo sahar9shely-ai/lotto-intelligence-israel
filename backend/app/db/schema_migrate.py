@@ -84,6 +84,11 @@ def ensure_schema(engine: Engine) -> None:
             "closing_savings_cents": "INTEGER",
             "closing_accrued_savings": "FLOAT",
         },
+        "plan_notices": {
+            # Nullable: existing notices stay active exactly as before.
+            "cancelled_at": "TIMESTAMP",
+            "cancelled_by_user_id": "INTEGER",
+        },
     }.items():
         columns = _table_columns(engine, table)
         with engine.begin() as conn:

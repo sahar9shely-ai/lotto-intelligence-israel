@@ -141,6 +141,8 @@ def issue(db: Session, *, investor_id: int, kind: str, actor_id: int, notice_id:
     notice = db.get(PlanNotice, notice_id)
     if not notice or notice.investor_id != investor_id or notice.purpose not in ({"withdraw", "renew"} if kind == "close" else {"new", "renew"}):
         raise ValueError("יש לבחור בקשה מתועדת מראש התואמת לפעולה ולמשקיע")
+    if getattr(notice, "cancelled_at", None) is not None:
+        raise ValueError("הבקשה המתועדת בוטלה. יש לרשום בקשה חדשה לפני הכנת ההסכם")
     if notice.requested_on > israel_today():
         raise ValueError("תאריך קבלת הבקשה אינו יכול להיות עתידי")
     eligible_on = svc.add_months(notice.requested_on, 1)

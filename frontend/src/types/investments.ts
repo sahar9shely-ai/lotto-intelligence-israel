@@ -37,11 +37,57 @@ export type AvailableBalanceEntry = {
   counterparty_investor_id?: number | null;
   transfer_id?: string | null;
   notes?: string | null;
+  /** Admin only: the movement was already undone by a compensating entry. */
+  reversed?: boolean;
+  /** Admin only: the movement can be undone right now. */
+  reversible?: boolean;
+  reversal_blocked_reason?: string | null;
 };
 
 export type AvailableBalance = {
   available_balance: number;
   entries: AvailableBalanceEntry[];
+  /** Managers only: earliest date an active withdrawal request allows a withdrawal. */
+  withdrawal_eligible_on?: string | null;
+};
+
+export type PlanNoticeRow = {
+  id: number;
+  purpose: "withdraw" | "renew" | "new" | string;
+  requested_on: string;
+  eligible_on: string;
+  notes: string | null;
+  created_at?: string | null;
+  cancelled_at?: string | null;
+  cancellable?: boolean;
+  cancel_blocked_reason?: string | null;
+};
+
+export type CorrectionPayment = {
+  id: number; plan_id: number; investor_id: number; investor_name: string; month_number: number;
+  due_date: string; paid_at: string | null; status: string; investor_amount: number;
+  confirmation_requested_at: string | null; plan_closed: boolean;
+};
+
+export type IntegrityReport = {
+  checked_at: string; investors: number; plans: number; payments: number; errors: number; warnings: number;
+  issues: {severity: "error" | "warning"; area: string; investor_name: string; title: string; details: string; href: string | null}[];
+};
+
+export type AdminCorrections = {
+  is_system_admin: boolean;
+  wallet_window_days: number;
+  confirmed_window_days: number;
+  wallet: {id: number; investor_id: number | null; investor_name: string; type: string; amount: number;
+    counterparty_name: string | null; created_at: string; notes: string | null; reversible: boolean; blocked_reason: string | null}[];
+  agreements: {id: number; investor_id: number; investor_name: string; kind: "open" | "close" | "amend_dates"; title: string;
+    plan_id: number | null; created_at: string; expires_at: string; expired: boolean; can_cancel: boolean; can_revise: boolean;
+    principal?: number | null}[];
+  notices: {id: number; investor_id: number; investor_name: string; purpose: string; requested_on: string; eligible_on: string;
+    created_at: string; cancellable: boolean; blocked_reason: string | null}[];
+  awaiting_payments: CorrectionPayment[];
+  confirmed_payments: CorrectionPayment[];
+  topups: {id: number; investor_id: number; investor_name: string; amount: number; status: string; created_at: string}[];
 };
 
 export type BalanceTransferRequest = {
@@ -73,6 +119,8 @@ export type PlanAgreement = {
   document_hash: string; created_at: string; expires_at: string; signed_at: string | null;
   signed_name: string | null; signature_png: string | null; token?: string;
   execution_details?: Record<string, string | number | boolean> | null;
+  /** Managers only: the full private terms (incl. management fee) used to revise a draft. */
+  private_terms?: Record<string, string | number | boolean | null> | null;
 };
 
 export type AgreementSignatureInput = {

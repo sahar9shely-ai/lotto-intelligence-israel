@@ -56,6 +56,13 @@ from pydantic import BaseModel, Field, StrictBool, StrictInt, field_validator
 class WalletWithdrawalRequest(BaseModel):
     amount: float = Field(gt=0)
     operation_key: str = Field(min_length=8, max_length=80)
+    # Optional: the date the investor actually asked. Recorded together with the
+    # withdrawal in one transaction, so a refused withdrawal leaves nothing behind.
+    requested_on: date | None = None
+
+
+class WalletReversalRequest(BaseModel):
+    reason: str = Field(min_length=2, max_length=500)
 
 
 class WalletDepositRequest(BaseModel):
@@ -634,12 +641,38 @@ def close_plan_to_wallet(plan_id: int, user: User = Depends(require_manager), db
     raise HTTPException(status_code=409, detail="סגירת מסלול מחייבת הסכם סיום וחתימת המשקיע")
 
 
+def _log_wallet_activity(db: Session, *, kind: str, title: str, body: str, user: User, investor: Investor | None,
+                         entity_id: int | None, severity: str = "info") -> None:
+    from app.services import activity_service as activity_svc
+
+    activity_svc.log_activity(
+        db,
+        kind=kind,
+        title=title,
+        body=body,
+        severity=severity,
+        actor=user,
+        investor_id=investor.id if investor else None,
+        investor_name=investor.name if investor else None,
+        entity_type="wallet",
+        entity_id=entity_id,
+        href=f"/investors?investor_id={investor.id}&section=balance" if investor else "/investors",
+    )
+
+
 @router.post("/investors/{investor_id}/wallet/deposit")
 def deposit_available_balance(investor_id: int, payload: WalletDepositRequest, user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
-    if not db.get(Investor, investor_id):
+    investor = db.get(Investor, investor_id)
+    if not investor:
         raise HTTPException(status_code=404, detail="המשקיע לא נמצא")
     try:
+        before = wallet_svc.replay(db, payload.operation_key, investor_id, wallet_svc.fingerprint(
+            {"investor_id": investor_id, "amount_cents": wallet_svc.cents(payload.amount), "kind": "deposit"}))
         entry = wallet_svc.deposit(db, investor_id, payload.amount, payload.operation_key, user.id)
+        if before is None:
+            _log_wallet_activity(db, kind="wallet_deposit", title=f"תוספת כסף ליתרה · {investor.name}",
+                                 body=f"{entry.amount_cents / 100:,.2f} ₪ · יתרה אחרי: {entry.balance_after_cents / 100:,.2f} ₪",
+                                 user=user, investor=investor, entity_id=entry.id, severity="success")
         db.commit()
         return {"id": entry.id, "amount": entry.amount_cents / 100, "balance_after": entry.balance_after_cents / 100}
     except (ValueError, IntegrityError) as exc:
@@ -647,14 +680,49 @@ def deposit_available_balance(investor_id: int, payload: WalletDepositRequest, u
         raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
 
 
+def _withdrawal_eligible_on(db: Session, investor_id: int):
+    """Earliest date an active (not cancelled) withdrawal notice allows a withdrawal."""
+    from app.models.investments import PlanNotice
+    notices = db.query(PlanNotice).filter(PlanNotice.investor_id == investor_id, PlanNotice.purpose == "withdraw",
+                                          PlanNotice.cancelled_at.is_(None)).all()
+    dates = [svc.add_months(n.requested_on, 1) for n in notices]
+    return min(dates) if dates else None
+
+
 @router.post("/investors/{investor_id}/wallet/withdraw")
 def withdraw_available_balance(investor_id: int, payload: WalletWithdrawalRequest, user: User = Depends(require_manager), db: Session = Depends(get_investment_db)):
     from app.models.investments import PlanNotice
-    notices = db.query(PlanNotice).filter(PlanNotice.investor_id == investor_id, PlanNotice.purpose == "withdraw").all()
-    if not any(svc.add_months(n.requested_on, 1) <= svc.israel_today() for n in notices):
+    investor = db.get(Investor, investor_id)
+    if not investor:
+        raise HTTPException(status_code=404, detail="המשקיע לא נמצא")
+    today = svc.israel_today()
+    eligible = _withdrawal_eligible_on(db, investor_id)
+    new_notice = None
+    if payload.requested_on is not None and not (eligible and eligible <= today):
+        if payload.requested_on > today:
+            raise HTTPException(status_code=409, detail="מועד הבקשה אינו יכול להיות בעתיד")
+        requested_eligible = svc.add_months(payload.requested_on, 1)
+        if requested_eligible > today:
+            raise HTTPException(status_code=409, detail=(
+                f"נדרש חודש מראש: לפי מועד הבקשה ניתן יהיה למשוך החל מ־{requested_eligible.strftime('%d/%m/%Y')}. "
+                "לא נרשם דבר. אפשר לרשום את הבקשה בלבד ולחזור למשיכה במועד."))
+        new_notice = PlanNotice(investor_id=investor_id, purpose="withdraw", requested_on=payload.requested_on,
+                                actor_user_id=user.id, notes="נרשם יחד עם רישום המשיכה")
+        eligible = requested_eligible
+    if not (eligible and eligible <= today):
         raise HTTPException(status_code=409, detail="משיכת כספים מחייבת בקשה מתועדת חודש מראש")
     try:
+        wallet_svc.begin_wallet_write(db)
+        before = wallet_svc.replay(db, payload.operation_key, investor_id, wallet_svc.fingerprint(
+            {"investor_id": investor_id, "amount_cents": wallet_svc.cents(payload.amount), "kind": "withdraw"}))
+        if new_notice is not None and before is None:
+            db.add(new_notice)
+            db.flush()
         entry = wallet_svc.withdraw(db, investor_id, payload.amount, payload.operation_key, user.id)
+        if before is None:
+            _log_wallet_activity(db, kind="wallet_withdraw", title=f"משיכה מהיתרה · {investor.name}",
+                                 body=f"{-entry.amount_cents / 100:,.2f} ₪ · יתרה אחרי: {entry.balance_after_cents / 100:,.2f} ₪",
+                                 user=user, investor=investor, entity_id=entry.id, severity="warning")
         db.commit()
         return {"id": entry.id, "amount": -entry.amount_cents / 100, "balance_after": entry.balance_after_cents / 100}
     except (ValueError, IntegrityError) as exc:
@@ -662,13 +730,53 @@ def withdraw_available_balance(investor_id: int, payload: WalletWithdrawalReques
         raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוצעה. רעננו את הנתונים") from exc
 
 
+@router.post("/investors/{investor_id}/wallet/entries/{entry_id}/reverse")
+def reverse_wallet_entry(investor_id: int, entry_id: int, payload: WalletReversalRequest,
+                         user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
+    """Admin correction: add an opposite movement. History is kept, never edited."""
+    from app.models.investments import WalletEntry
+    entry = db.get(WalletEntry, entry_id)
+    if not entry or entry.investor_id != investor_id:
+        raise HTTPException(status_code=404, detail="התנועה לא נמצאה בתיק זה")
+    original_type = entry.operation_type
+    try:
+        rows = wallet_svc.reverse_entry(db, entry_id, user.id, payload.reason)
+        labels = {"deposit": "תוספת כסף", "withdraw": "משיכה", "transfer_out": "העברה", "transfer_in": "העברה"}
+        amount = abs(entry.amount_cents) / 100
+        for row in rows:
+            investor = db.get(Investor, row.investor_id) if row.investor_id else None
+            _log_wallet_activity(db, kind="wallet_reversal",
+                                 title=f"ביטול {labels.get(original_type, 'תנועה')} · {investor.name if investor else ''}",
+                                 body=f"{amount:,.2f} ₪ · סיבה: {payload.reason.strip()} · יתרה אחרי: {row.balance_after_cents / 100:,.2f} ₪",
+                                 user=user, investor=investor, entity_id=row.id, severity="warning")
+        db.commit()
+        return {"reversed_entry_id": entry_id, "entries": [
+            {"id": row.id, "investor_id": row.investor_id, "type": row.operation_type,
+             "amount": row.amount_cents / 100, "balance_after": row.balance_after_cents / 100} for row in rows]}
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, ValueError) else "הפעולה כבר בוטלה. רעננו את הנתונים") from exc
+
+
 @router.post("/investors/{source_id}/wallet/transfer")
 def transfer_available_balance(source_id: int, payload: WalletTransferRequest,
                                user: User = Depends(require_system_admin), db: Session = Depends(get_investment_db)):
     try:
+        from app.models.investments import WalletTransfer
+        is_replay = db.query(WalletTransfer.id).filter(WalletTransfer.operation_key == payload.operation_key).first() is not None
         receipt = wallet_svc.transfer(db, source_id, payload.recipient_investor_id, payload.amount,
                                       payload.operation_key, user.id, request_confirmed=payload.request_confirmed,
                                       expected_source_balance=payload.expected_source_balance, notes=payload.notes)
+        if not is_replay:
+            source_inv = db.get(Investor, receipt.source_investor_id)
+            recipient_inv = db.get(Investor, receipt.recipient_investor_id)
+            _log_wallet_activity(db, kind="wallet_transfer",
+                                 title=f"העברה בין יתרות · {source_inv.name if source_inv else ''} ← {recipient_inv.name if recipient_inv else ''}",
+                                 body=f"{receipt.amount_cents / 100:,.2f} ₪" + (f" · {payload.notes.strip()}" if payload.notes and payload.notes.strip() else ""),
+                                 user=user, investor=source_inv, entity_id=None, severity="warning")
         db.commit()
         return {"transfer_id": receipt.id, "source_investor_id": receipt.source_investor_id,
                 "recipient_investor_id": receipt.recipient_investor_id, "amount": receipt.amount_cents / 100,
@@ -702,13 +810,26 @@ def investor_wallet_history(investor_id: int, user: User = Depends(get_current_u
     if not investor:
         raise HTTPException(status_code=404, detail="המשקיע לא נמצא")
     entries = db.query(WalletEntry).filter(WalletEntry.investor_id == investor_id).order_by(WalletEntry.id.desc()).all()
+    admin = is_system_admin(user)
+    done = wallet_svc.reversed_keys(db, [wallet_svc.reversal_key(row) for row in entries]) if admin else set()
+
+    def correction(row) -> dict:
+        if not admin:
+            return {}
+        reversed_already = wallet_svc.reversal_key(row) in done
+        block = wallet_svc.reversal_block_reason(db, row, already_reversed=reversed_already) \
+            if row.operation_type in wallet_svc.REVERSIBLE_TYPES else None
+        return {"notes": row.admin_notes, "reversed": reversed_already,
+                "reversible": row.operation_type in wallet_svc.REVERSIBLE_TYPES and block is None,
+                "reversal_blocked_reason": block if row.operation_type in wallet_svc.REVERSIBLE_TYPES else None}
+
     return {"available_balance": (investor.available_balance_cents or 0) / 100, "entries": [
         {"id": row.id, "plan_id": row.plan_id, "type": row.operation_type,
          "amount": row.amount_cents / 100, "balance_after": row.balance_after_cents / 100,
          "created_at": row.created_at, "transfer_id": row.transfer_id,
          "counterparty_investor_id": row.counterparty_investor_id, "counterparty_name": row.counterparty_name,
-         **({"notes": row.admin_notes} if is_system_admin(user) else {})} for row in entries
-    ]}
+         **correction(row)} for row in entries
+    ], **({"withdrawal_eligible_on": _withdrawal_eligible_on(db, investor_id)} if is_manager(user) else {})}
 
 
 @router.delete("/plans/{plan_id}", status_code=204)
@@ -1429,11 +1550,49 @@ def update_payment(
         )
         return svc.serialize_payment(payment)
 
+    previous_status = payment.status
+    next_status = data.get("status")
+    if next_status is not None and next_status != previous_status:
+        plan = db.get(InvestmentPlan, payment.plan_id)
+        if plan is not None and plan.closed_on:
+            raise HTTPException(status_code=409, detail="המסלול נסגר בהסכם חתום; סטטוס התשלומים שלו נשמר כהיסטוריה")
+        if "paid" in {previous_status, next_status}:
+            from app.models.investments import PlanAgreement
+            pending_close = db.query(PlanAgreement.id).filter(
+                PlanAgreement.plan_id == payment.plan_id, PlanAgreement.kind == "close",
+                PlanAgreement.status == "pending").first()
+            if pending_close:
+                raise HTTPException(status_code=409, detail=(
+                    "קיים הסכם סיום הממתין לחתימה שמבוסס על התשלומים הנוכחיים. "
+                    "בטלו אותו לפני שינוי סטטוס התשלום, ואז הכינו הסכם מעודכן"))
     if data.get("status") in {"scheduled", "skipped"}:
         data["paid_at"] = None
         payment.confirmation_requested_at = None
     for key, value in data.items():
         setattr(payment, key, value)
+    if next_status is not None and next_status != previous_status:
+        from app.services import activity_service as activity_svc
+
+        labels = {"scheduled": "מתוכנן", "skipped": "דולג / בוטל", "awaiting_confirmation": "ממתין לאישור", "paid": "בוצע"}
+        title = {
+            ("awaiting_confirmation", "scheduled"): "בקשת אישור תשלום בוטלה",
+            ("paid", "scheduled"): "תשלום שאושר הוחזר למתוכנן",
+        }.get((previous_status, next_status), "סטטוס תשלום עודכן")
+        investor_name = payment.investor.name if payment.investor else ""
+        activity_svc.log_activity(
+            db,
+            kind="payment_status_reverted" if next_status in {"scheduled", "skipped"} else "payment_status_changed",
+            title=f"{title} · {investor_name}",
+            body=(f"{payment.due_date.strftime('%m/%Y')} · {payment.investor_amount:,.2f} ₪ · "
+                  f"{labels.get(previous_status, previous_status)} ← {labels.get(next_status, next_status)}"),
+            severity="warning" if previous_status == "paid" else "info",
+            actor=user,
+            investor_id=payment.investor_id,
+            investor_name=investor_name or None,
+            entity_type="payment",
+            entity_id=payment.id,
+            href="/payments",
+        )
     db.commit()
     db.refresh(payment)
     return svc.serialize_payment(payment)

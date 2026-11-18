@@ -92,7 +92,13 @@ export function ManagerIncomeBoardView({
             <strong className="manager-income__hero-value">{formatMoney(heroTotal)}</strong>
             <span className="muted">
               {feesOnly
-                ? `${data.investors.length} משקיעים פעילים עם עמלה`
+                ? (() => {
+                    // Count only investors whose fee is above zero; the list itself also shows 0% rows.
+                    const withFee = data.investors.filter((row) => (row.monthly_fee ?? 0) > 0).length;
+                    return withFee === data.investors.length
+                      ? `${withFee} משקיעים פעילים עם עמלה`
+                      : `${withFee} משקיעים עם עמלה · ${data.investors.length} פעילים בסך הכול`;
+                  })()
                 : `עמלות ${formatMoney(data.monthly_fees_total)} + החזר ${name} ${formatMoney(own.monthly_total)}`}
             </span>
           </div>

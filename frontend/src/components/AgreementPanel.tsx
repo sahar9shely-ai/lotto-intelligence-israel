@@ -11,6 +11,10 @@ import { DateAmendmentAction } from "./DateAmendmentAction";
 import { useAuth } from "../context/AuthContext";
 import { isAgreementExpired } from "../utils/agreementSigning";
 import { AgreementReminderAction } from "./AgreementReminderAction";
+import { useConfirm } from "./ConfirmDialog";
+import "./adminCorrections.css";
+
+const NOTICE_PURPOSE: Record<string, string> = {withdraw: "משיכה", renew: "המשך מסלול", new: "מסלול חדש"};
 
 export function AgreementContent({row}: {row: Pick<PlanAgreement, "snapshot" | "kind"> & Partial<Pick<PlanAgreement, "id" | "created_at" | "signed_at" | "signed_name" | "signature_png" | "execution_details" | "status">>}) {
   return <div className="agreement-document"><h2>{row.snapshot.title}{row.id ? ` · ${row.id}` : " · תצוגה מקדימה"}</h2>
@@ -42,9 +46,27 @@ export function AgreementShare({row, phone}: {row: PlanAgreement; phone?: string
 }
 
 export function NoticePanel({investorId}: {investorId: number}) {
+  const {user} = useAuth();
+  const isManager = Boolean(user?.is_manager);
   const {data: notices, error, loading, reload} = useAsync(() => api.notices(investorId), [investorId]);
   const [purpose,setPurpose] = useState("withdraw"); const [message,setMessage] = useState("");
   const [busy,setBusy] = useState(false); const [failure,setFailure] = useState("");
+  const {confirmWithReason, dialog} = useConfirm();
+  async function cancelNotice(n: NonNullable<typeof notices>[number]) {
+    const reason = await confirmWithReason({
+      title: "ביטול בקשה מתועדת",
+      message: `לבטל את בקשת ה${NOTICE_PURPOSE[n.purpose] || n.purpose} שהתקבלה ב־${formatDate(n.requested_on)}?`,
+      details: ["הבקשה לא תימחק — היא תסומן כ״בוטלה״ ותישאר בהיסטוריה.", "לא תתאפשר עוד משיכה או הכנת הסכם על סמך בקשה זו.", "לא מתבצעת שום פעולה כספית."],
+      reason: {label: "סיבה (אופציונלי)", placeholder: "לדוגמה: נרשמה בטעות"},
+      confirmLabel: "ביטול הבקשה",
+      danger: true,
+    });
+    if (reason === null) return;
+    setBusy(true); setFailure(""); setMessage("");
+    try { await api.cancelNotice(investorId, n.id, reason); setMessage("הבקשה בוטלה ונשמרה בהיסטוריה."); reload(); }
+    catch (err) { setFailure(err instanceof Error ? err.message : "ביטול הבקשה נכשל"); }
+    finally { setBusy(false); }
+  }
   return <Panel title="בקשות ותיעוד" subtitle="חודש מראש נדרש למשיכת כספים בתום המסלול בלבד">
     <form className="form" onSubmit={async e => {
       e.preventDefault(); if(busy)return; setBusy(true);setFailure("");
@@ -55,14 +77,38 @@ export function NoticePanel({investorId}: {investorId: number}) {
       <p className="hint">רישום הבקשה אינו מבצע פעולה כספית. את הסכם הפתיחה או הסיום מכינים מתוך לשונית המסלולים.</p>
     </form>
     {message?<p role="status">{message}</p>:null}{failure||error?<p role="alert">{failure||error}<button className="btn btn--ghost btn--small" onClick={reload}>נסה שוב</button></p>:null}
-    {loading?<p role="status">טוען בקשות...</p>:notices?.length?<details className="agreement-notice"><summary>בקשות שנרשמו ({notices.length})</summary>{notices.map(n=><p className="hint" key={n.id}>{n.purpose==="withdraw"?"משיכה":n.purpose==="renew"?"המשך":"מסלול חדש"} · התקבלה {formatDate(n.requested_on)}{n.purpose === "withdraw" ? ` · חודש מראש עד ${formatDate(n.eligible_on)}` : " · ללא המתנה של חודש"}</p>)}</details>:<p className="hint">אין בקשות קודמות בתיק.</p>}
+    {loading?<p role="status">טוען בקשות...</p>:notices?.length?<details className="agreement-notice" open={isManager}><summary>בקשות שנרשמו ({notices.filter(n => !n.cancelled_at).length} פעילות{notices.some(n => n.cancelled_at) ? ` · ${notices.filter(n => n.cancelled_at).length} בוטלו` : ""})</summary>
+      <ul className="notice-list">{notices.map(n=><li key={n.id} className={`notice-list__row${n.cancelled_at ? " notice-list__row--cancelled" : ""}`}>
+        <span className="notice-list__text">{NOTICE_PURPOSE[n.purpose] || n.purpose} · התקבלה {formatDate(n.requested_on)}{n.purpose === "withdraw" ? ` · ניתן למשוך מ־${formatDate(n.eligible_on)}` : " · ללא המתנה של חודש"}{n.cancelled_at ? <span className="status-chip status-chip--muted">בוטלה {formatDate(n.cancelled_at)}</span> : null}</span>
+        {isManager && !n.cancelled_at ? (n.cancellable
+          ? <button type="button" className="btn btn--ghost btn--small" disabled={busy} onClick={() => void cancelNotice(n)}>ביטול הבקשה</button>
+          : n.cancel_blocked_reason ? <span className="notice-list__blocked">{n.cancel_blocked_reason}</span> : null) : null}
+      </li>)}</ul></details>:<p className="hint">אין בקשות קודמות בתיק.</p>}
+    {dialog}
   </Panel>;
 }
 
-export function AgreementPanel({rows,loading,error,canManage,canManageClosing=false,phone,onChanged}: {
+export function AgreementPanel({rows,loading,error,canManage,canManageClosing=false,phone,onChanged,onRevise}: {
   rows:PlanAgreement[];loading:boolean;error?:string|null;canManage:boolean;canManageClosing?:boolean;phone?:string|null;onChanged:()=>void;
+  /** Admin: edit the terms of a pending opening agreement (issues a replacement). */
+  onRevise?:(row:PlanAgreement)=>void;
 }) {
   const {user}=useAuth();
+  const {confirmWithReason, dialog}=useConfirm();
+  async function cancelDraft(row:PlanAgreement){
+    const reason=await confirmWithReason({
+      title:`ביטול ${row.snapshot.title} #${row.id}`,
+      message:`לבטל את ההסכם של ${row.snapshot.investor_name} שממתין לחתימה?`,
+      details:["קישור החתימה יפסיק לעבוד והמשקיע לא יוכל לחתום על מסמך זה.","לא בוצעה ולא תבוצע שום פעולה כספית — ההסכם טרם נחתם.","המסמך נשמר בהיסטוריה תחת ״טיוטות שבוטלו״.",...(row.kind==="open"&&onRevise?["כדי רק לשנות תנאים, עדיף ״עריכת תנאים״ — זה מבטל ומחליף בפעולה אחת."]:[])],
+      reason:{label:"סיבה (אופציונלי)",placeholder:"לדוגמה: המשקיע ביקש לדחות"},
+      confirmLabel:"ביטול ההסכם",danger:true,
+    });
+    if(reason===null)return;
+    setBusyId(row.id);setFailure("");
+    try{await api.cancelAgreement(row.id,reason);setSelected(null);onChanged();}
+    catch(e){setFailure(e instanceof Error?e.message:"ביטול נכשל");}
+    finally{setBusyId(null);}
+  }
   const ownsAgreement=(row:PlanAgreement)=>Boolean(user&&!user.is_manager&&row.investor_id===user.investor_id);
   const [selected,setSelected]=useState<PlanAgreement|null>(null);const [year,setYear]=useState("");
   const [planFilter,setPlanFilter]=useState("");const [status,setStatus]=useState("pending");
@@ -83,11 +129,11 @@ export function AgreementPanel({rows,loading,error,canManage,canManageClosing=fa
       {ownsAgreement(row)&&row.status==="pending"&&!isAgreementExpired(row)?<Link className="btn btn--primary" to={`/agreements/${row.id}/sign`}>קריאת ההסכם וחתימה</Link>:null}
       <AgreementReminderAction agreement={row} />
       {canManageClosing && row.kind === "open" && row.status === "pending" ? <DateAmendmentAction mode="pending" sourceId={row.id} sourceName={row.snapshot.investor_name} currentStart={String(row.snapshot.terms.start_date || "")} sourceVersion={row.document_hash} canManage={canManageClosing} onPrepared={replacement => {setSelected(replacement); onChanged();}}/> : null}
-      {canManage&&(row.kind==="open"||canManageClosing)&&row.status==="pending"?<button className="btn btn--ghost" disabled={busyId!==null} onClick={async()=>{
-        setBusyId(row.id);setFailure("");try{await api.cancelAgreement(row.id);setSelected(null);onChanged();}catch(e){setFailure(e instanceof Error?e.message:"ביטול נכשל");}finally{setBusyId(null);}
-      }}>{busyId===row.id?"מבטל...":"ביטול טיוטה"}</button>:null}
+      {onRevise&&row.kind==="open"&&row.status==="pending"&&!row.plan_id?<button type="button" className="btn btn--ghost" disabled={busyId!==null} onClick={()=>onRevise(row)}>עריכת תנאים</button>:null}
+      {canManage&&(row.kind==="open"||canManageClosing)&&row.status==="pending"?<button type="button" className="btn btn--ghost" disabled={busyId!==null} onClick={()=>void cancelDraft(row)}>{busyId===row.id?"מבטל...":"ביטול ההסכם"}</button>:null}
     </article>)}
     {!loading&&!visible.length&&!error?<p className="empty">{status==="pending"?"אין הסכמים הממתינים לחתימה. לצפייה בהסכמים קודמים שנו את מצב ההסכם למעלה.":"אין הסכמים התואמים לסינון."}</p>:null}
+    {dialog}
     {selected&&(user?.is_manager||ownsAgreement(selected))?<div className="modal" role="dialog" aria-modal="true" aria-label={`הסכם ${selected.id}`}><button className="modal__backdrop" aria-label="סגירה" onClick={()=>setSelected(null)}/><div className="modal__sheet"><header className="modal__head"><h2>הסכם {selected.id}</h2><button className="btn btn--ghost" onClick={()=>setSelected(null)}>סגירה</button></header><div className="modal__body"><AgreementContent row={selected}/>{canManage&&(selected.kind==="open"||canManageClosing)&&selected.status==="pending"?<AgreementShare row={selected} phone={phone}/>:null}</div><div className="modal__actions">{ownsAgreement(selected)&&selected.status==="pending"&&!isAgreementExpired(selected)?<Link className="btn btn--primary" to={`/agreements/${selected.id}/sign`}>קריאת ההסכם וחתימה</Link>:null}<button className="btn btn--ghost" onClick={async()=>{try{const f=await agreementPdfFile(selected);savePdfBlob(f,f.name);}catch(e){setFailure(e instanceof Error?e.message:"הפקת המסמך נכשלה");}}}>הורדת PDF</button></div></div></div>:null}
   </Panel>;
 }

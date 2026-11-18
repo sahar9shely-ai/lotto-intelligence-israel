@@ -28,6 +28,9 @@ import type {
   AvailableBalance,
   BalanceTransferRequest,
   BalanceTransferResult,
+  AdminCorrections,
+  IntegrityReport,
+  PlanNoticeRow,
 } from "../types/investments";
 import type { TutorialCatalogue } from "../types/tutorials";
 import type { AssistantActionConfirmation, AssistantChatResponse } from "../types/assistant";
@@ -150,11 +153,16 @@ export const api = {
     request<AgreementReminderResult>(`/api/v1/push/agreements/${id}/reminder`, { method: "POST", body: JSON.stringify(body), signal }),
   tutorials: () => request<TutorialCatalogue>("/api/v1/tutorials"),
   agreements: (investorId: number) => request<PlanAgreement[]>(`/api/v1/investments/investors/${investorId}/agreements`),
-  notices: (investorId: number) => request<{id: number; purpose: string; requested_on: string; eligible_on: string; notes: string | null}[]>(`/api/v1/investments/investors/${investorId}/notices`),
+  notices: (investorId: number) => request<PlanNoticeRow[]>(`/api/v1/investments/investors/${investorId}/notices`),
+  cancelNotice: (investorId: number, noticeId: number, reason?: string) => request<PlanNoticeRow>(`/api/v1/investments/investors/${investorId}/notices/${noticeId}/cancel`, {method: "POST", body: JSON.stringify({reason: reason || null})}),
+  reviseAgreement: (id: number, body: Record<string, unknown>) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}/revise`, {method: "POST", body: JSON.stringify(body)}),
+  reverseWalletEntry: (investorId: number, entryId: number, reason: string) => request<{reversed_entry_id: number}>(`/api/v1/investments/investors/${investorId}/wallet/entries/${entryId}/reverse`, {method: "POST", body: JSON.stringify({reason})}),
+  adminCorrections: () => request<AdminCorrections>("/api/v1/investments/admin/corrections"),
+  adminIntegrity: () => request<IntegrityReport>("/api/v1/investments/admin/integrity"),
   agreement: (id: number) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}`),
   signOwnAgreement: (id: number, body: AgreementSignatureInput) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}/sign`, {method: "POST", body: JSON.stringify(body)}),
   agreementLink: (id: number) => request<{token: string}>(`/api/v1/investments/agreements/${id}/link`, {method: "POST"}),
-  cancelAgreement: (id: number) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}/cancel`, {method: "POST"}),
+  cancelAgreement: (id: number, reason?: string) => request<PlanAgreement>(`/api/v1/investments/agreements/${id}/cancel`, {method: "POST", body: JSON.stringify({reason: reason || null})}),
   createNotice: (id: number, body: {purpose: string; requested_on?: string; notes?: string}) => request<{id: number; eligible_on: string}>(`/api/v1/investments/investors/${id}/notices`, {method: "POST", body: JSON.stringify(body)}),
   openAgreement: (body: Record<string, unknown>) => request<PlanAgreement>("/api/v1/investments/agreements/open", {method: "POST", body: JSON.stringify(body)}),
   previewDateAmendment: (id: number, body: DateAgreementInput) => request<DateAgreementPreview>(`/api/v1/investments/plans/${id}/date-amendment-preview`, {method: "POST", body: JSON.stringify(body)}),
@@ -379,8 +387,8 @@ export const api = {
   depositBalance: (id: number, amount: number, operationKey: string) => request<{balance_after: number}>(`/api/v1/investments/investors/${id}/wallet/deposit`, {
     method: "POST", body: JSON.stringify({amount, operation_key: operationKey}),
   }),
-  withdrawBalance: (id: number, amount: number, operationKey: string) => request<{balance_after: number}>(`/api/v1/investments/investors/${id}/wallet/withdraw`, {
-    method: "POST", body: JSON.stringify({amount, operation_key: operationKey}),
+  withdrawBalance: (id: number, amount: number, operationKey: string, requestedOn?: string) => request<{balance_after: number}>(`/api/v1/investments/investors/${id}/wallet/withdraw`, {
+    method: "POST", body: JSON.stringify({amount, operation_key: operationKey, ...(requestedOn ? {requested_on: requestedOn} : {})}),
   }),
   transferBalance: (id: number, body: BalanceTransferRequest) => request<BalanceTransferResult>(`/api/v1/investments/investors/${id}/wallet/transfer`, {
     method: "POST", body: JSON.stringify(body),

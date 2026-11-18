@@ -72,6 +72,9 @@ export function kindLabel(kind: string) {
   if (kind.startsWith("savings")) return "חיסכון";
   if (kind.startsWith("investor")) return "משקיע";
   if (kind.startsWith("settings")) return "הגדרות";
+  if (kind.startsWith("wallet")) return "יתרה זמינה";
+  if (kind.startsWith("agreement")) return "הסכם";
+  if (kind.startsWith("notice")) return "בקשה מתועדת";
   return "פעילות";
 }
 

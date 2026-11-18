@@ -16,6 +16,8 @@ const GROUPS: { id: string; label: string; group?: string }[] = [
   { id: "plan", label: "מסלולים", group: "plan" },
   { id: "savings", label: "חיסכון", group: "savings" },
   { id: "investor", label: "משקיעים", group: "investor" },
+  { id: "wallet", label: "יתרה זמינה", group: "wallet" },
+  { id: "agreement", label: "הסכמים ובקשות", group: "agreement" },
   { id: "user", label: "משתמשים וסיסמאות", group: "user" },
   { id: "settings", label: "הגדרות", group: "settings" },
 ];

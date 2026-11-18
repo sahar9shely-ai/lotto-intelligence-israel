@@ -2,11 +2,19 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useAsync } from "../hooks/useAsync";
 import { api } from "../services/api";
 import type { AvailableBalanceEntry, Investor } from "../types/investments";
-import { formatDate, formatMoney } from "../utils/format";
+import { addMonthsISO, formatDate, formatMoney, todayISO } from "../utils/format";
 import { isAdminShellInvestor } from "../utils/roles";
+import { useConfirm } from "./ConfirmDialog";
 import { Panel } from "./Panel";
+import "./adminCorrections.css";
 
-const labels: Record<string, string> = {plan_close: "סגירת מסלול", withdraw: "משיכה", deposit: "תוספת כסף", plan_funding: "פתיחת מסלול", transfer_in: "העברה נכנסת", transfer_out: "העברה יוצאת"};
+const labels: Record<string, string> = {
+  plan_close: "סגירת מסלול", withdraw: "משיכה", deposit: "תוספת כסף", plan_funding: "פתיחת מסלול",
+  transfer_in: "העברה נכנסת", transfer_out: "העברה יוצאת",
+  deposit_reversal: "ביטול תוספת כסף", withdraw_reversal: "ביטול משיכה",
+  transfer_reversal_out: "ביטול העברה (הוחזר)", transfer_reversal_in: "ביטול העברה (התקבל בחזרה)",
+};
+const REVERSAL_TYPES = new Set(["deposit_reversal", "withdraw_reversal", "transfer_reversal_out", "transfer_reversal_in"]);
 
 function transferAmountCents(value: string): number | null {
   const text = value.trim();
@@ -26,6 +34,8 @@ function entryLabel(row: AvailableBalanceEntry): string {
   if (row.counterparty_name) {
     if (row.type === "transfer_out") return `העברה אל ${row.counterparty_name}`;
     if (row.type === "transfer_in") return `העברה מאת ${row.counterparty_name}`;
+    if (row.type === "transfer_reversal_out") return `ביטול העברה · הוחזר ל${row.counterparty_name}`;
+    if (row.type === "transfer_reversal_in") return `ביטול העברה · הוחזר מ${row.counterparty_name}`;
   }
   return labels[row.type] || row.type;
 }
@@ -39,7 +49,9 @@ export function AvailableBalancePanel({investorId, investorName, sourceAvailable
   const [showWithdrawal, setShowWithdrawal] = useState(false);
   const [showDeposit, setShowDeposit] = useState(false);
   const [amount, setAmount] = useState("");
-  const [requestedOn,setRequestedOn] = useState(new Date().toLocaleDateString("en-CA"));
+  const [requestedOn,setRequestedOn] = useState(todayISO());
+  const {confirmWithReason, dialog} = useConfirm();
+  const [reversingId, setReversingId] = useState<number | null>(null);
   const [operationKey, setOperationKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -112,23 +124,73 @@ export function AvailableBalancePanel({investorId, investorName, sourceAvailable
     if (busy || !canDeposit || !received) return;
     setBusy(true); setFailure(null);
     try {
-      await api.depositBalance(investorId, Number(amount), operationKey);
+      const result = await api.depositBalance(investorId, Number(amount), operationKey);
       setOperationKey(crypto.randomUUID()); setShowDeposit(false); setAmount(""); setReceived(false);
+      setSuccess(`נרשמה תוספת של ${formatMoney(Number(amount), true)}. יתרה זמינה: ${formatMoney(result.balance_after, true)}. אם נרשמה בטעות — אפשר לבטל מהיסטוריית התנועות.`);
       reload(); onChanged();
     } catch (err) { setFailure(err instanceof Error ? err.message : "רישום התוספת נכשל"); }
     finally { setBusy(false); }
   }
+  const today = todayISO();
+  const existingEligible = data?.withdrawal_eligible_on ?? null;
+  const existingAllows = Boolean(existingEligible && existingEligible <= today);
+  const inputEligible = requestedOn ? addMonthsISO(requestedOn, 1) : null;
+  const withdrawalAllowed = existingAllows || Boolean(inputEligible && inputEligible <= today);
+  const earliestWithdrawal = [existingEligible, inputEligible].filter(Boolean).sort()[0] ?? null;
+
   async function withdraw(e: FormEvent) {
     e.preventDefault();
-    if (busy) return;
-    setBusy(true); setFailure(null);
+    if (busy || !withdrawalAllowed) return;
+    setBusy(true); setFailure(null); setSuccess(null);
     try {
-      await api.createNotice(investorId,{purpose:"withdraw",requested_on:requestedOn});
-      await api.withdrawBalance(investorId, Number(amount), operationKey);
+      // The server records the request and the withdrawal in one transaction.
+      const result = await api.withdrawBalance(investorId, Number(amount), operationKey, existingAllows ? undefined : requestedOn);
       setOperationKey(crypto.randomUUID()); setShowWithdrawal(false); setAmount("");
+      setSuccess(`נרשמה משיכה של ${formatMoney(Number(amount), true)}. יתרה זמינה: ${formatMoney(result.balance_after, true)}. אפשר לבטל מהיסטוריית התנועות אם נרשם בטעות.`);
       reload(); onChanged();
     } catch (err) { setFailure(err instanceof Error ? err.message : "המשיכה נכשלה"); }
     finally { setBusy(false); }
+  }
+
+  async function recordRequestOnly() {
+    if (busy) return;
+    setBusy(true); setFailure(null); setSuccess(null);
+    try {
+      const notice = await api.createNotice(investorId, {purpose: "withdraw", requested_on: requestedOn});
+      setShowWithdrawal(false);
+      setSuccess(`בקשת המשיכה נרשמה. ניתן יהיה לרשום את המשיכה החל מ־${formatDate(notice.eligible_on)}. אם נרשמה בטעות — אפשר לבטל אותה בלשונית "בקשות".`);
+      reload(); onChanged();
+    } catch (err) { setFailure(err instanceof Error ? err.message : "רישום הבקשה נכשל"); }
+    finally { setBusy(false); }
+  }
+
+  async function reverse(row: AvailableBalanceEntry) {
+    if (reversingId !== null) return;
+    const isTransfer = row.type === "transfer_out" || row.type === "transfer_in";
+    const amountText = formatMoney(Math.abs(row.amount), true);
+    const reason = await confirmWithReason({
+      title: `ביטול ${entryLabel(row)}`,
+      message: `הפעולה מ־${formatDate(row.created_at)} על סך ${amountText} תבוטל באמצעות תנועה הפוכה.`,
+      details: [
+        row.type === "deposit" ? `${amountText} יירדו מהיתרה הזמינה של ${investorName}.`
+          : row.type === "withdraw" ? `${amountText} יחזרו ליתרה הזמינה של ${investorName}.`
+          : `${amountText} יוחזרו מ${row.counterparty_name || "המשקיע השני"} אל המשקיע ששלח את ההעברה.`,
+        "הרישום המקורי נשאר בהיסטוריה ומסומן כ״בוטל״. שום נתון אחר לא משתנה.",
+        isTransfer ? "הביטול יופיע בהיסטוריה של שני המשקיעים." : "הביטול יופיע בהיסטוריית התנועות של המשקיע.",
+        "פעולה כספית בפועל (העברה בנקאית) — אם בוצעה — יש להסדיר בנפרד.",
+      ],
+      reason: {label: "סיבת הביטול", required: true, placeholder: "לדוגמה: הסכום הוקלד בטעות"},
+      confirmLabel: "ביטול הפעולה",
+      danger: true,
+    });
+    if (reason === null) return;
+    setReversingId(row.id); setFailure(null); setSuccess(null);
+    try {
+      await api.reverseWalletEntry(investorId, row.id, reason);
+      setSuccess(`${entryLabel(row)} על סך ${amountText} בוטלה. הרישום המקורי נשמר בהיסטוריה.`);
+      reload(); onChanged();
+    } catch (err) { setFailure(err instanceof Error ? err.message : "ביטול הפעולה נכשל"); }
+    finally { setReversingId(null); }
   }
   return <Panel title="חשבון יתרה זמינה">
     {loading ? <p role="status">טוען יתרה...</p> : error || !data ? <p role="alert">{error || "לא ניתן לטעון יתרה"} <button type="button" className="btn" onClick={reload}>נסה שוב</button></p> : <>
@@ -181,18 +243,36 @@ export function AvailableBalancePanel({investorId, investorName, sourceAvailable
         <div className="page-head__actions"><button className="btn btn--primary" disabled={busy || !received}>{busy ? "רושם תוספת..." : "אישור רישום תוספת"}</button><button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setShowDeposit(false)}>ביטול</button></div>
       </form> : null}
       {showWithdrawal ? <form className="form" onSubmit={withdraw}>
-        <label>מועד קבלת בקשת המשיכה<input type="date" required max={new Date().toLocaleDateString("en-CA")} value={requestedOn} disabled={busy} onChange={e=>setRequestedOn(e.target.value)}/><span className="hint">יש לתעד את מועד הבקשה בפועל. נדרש חודש מראש לפני משיכת הכספים.</span></label>
-        <label>סכום למשיכה (₪)<input type="number" min="0.01" max={data.available_balance} step="0.01" required value={amount} disabled={busy} onChange={e => {setAmount(e.target.value); setOperationKey(crypto.randomUUID());}} /></label>
-        <p className="hint">יתרה לאחר משיכה: {formatMoney(Math.max(0, data.available_balance - Number(amount || 0)), true)}. כל היתרה שתישאר תשמש למסלול הבא.</p>
+        {existingAllows ? <p className="correction-note correction-note--ok">קיימת בקשת משיכה מתועדת שחלף עליה חודש — אפשר לרשום את המשיכה.</p> : <>
+          <label>מועד קבלת בקשת המשיכה<input type="date" required max={today} value={requestedOn} disabled={busy} onChange={e=>setRequestedOn(e.target.value)}/><span className="hint">יש לתעד את מועד הבקשה בפועל. נדרש חודש מראש לפני משיכת הכספים.</span></label>
+          {withdrawalAllowed ? <p className="correction-note correction-note--ok">חלף חודש ממועד הבקשה — הבקשה והמשיכה יירשמו יחד.</p>
+            : <p className="correction-note correction-note--wait" role="status">לפי מועד זה המשיכה תתאפשר החל מ־{earliestWithdrawal ? formatDate(earliestWithdrawal) : "—"}. עד אז אפשר לרשום את הבקשה בלבד — לא יירד כסף מהיתרה.</p>}
+        </>}
+        <label>סכום למשיכה (₪)<input type="number" min="0.01" max={data.available_balance} step="0.01" required={withdrawalAllowed} value={amount} disabled={busy || !withdrawalAllowed} onChange={e => {setAmount(e.target.value); setOperationKey(crypto.randomUUID());}} /></label>
+        {withdrawalAllowed ? <p className="hint">יתרה לאחר משיכה: {formatMoney(Math.max(0, data.available_balance - Number(amount || 0)), true)}. כל היתרה שתישאר תשמש למסלול הבא.</p> : null}
         <p className="hint">האישור רושם משיכה במערכת; יש לבצע את העברת הכסף בפועל בנפרד.</p>
         {failure ? <p role="alert" className="form-error">{failure}</p> : null}
-        <div className="page-head__actions"><button className="btn btn--primary" disabled={busy}>{busy ? "רושם משיכה..." : "אישור רישום משיכה"}</button><button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setShowWithdrawal(false)}>ביטול</button></div>
+        <div className="page-head__actions">
+          {withdrawalAllowed
+            ? <button className="btn btn--primary" disabled={busy}>{busy ? "רושם משיכה..." : "אישור רישום משיכה"}</button>
+            : <button type="button" className="btn btn--primary" disabled={busy || !requestedOn} onClick={() => void recordRequestOnly()}>{busy ? "רושם בקשה..." : "רישום הבקשה בלבד"}</button>}
+          <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setShowWithdrawal(false)}>ביטול</button>
+        </div>
       </form> : null}
-      {data.entries.length > 0 ? <details><summary>היסטוריית תנועות ({data.entries.length})</summary>
-        <div className="table-wrap"><table><thead><tr><th>תאריך</th><th>פעולה</th><th>סכום</th><th>יתרה אחרי הפעולה</th></tr></thead><tbody>
-          {data.entries.map(row => <tr key={row.id}><td>{formatDate(row.created_at)}</td><td>{entryLabel(row)}{row.plan_id ? ` · מסלול ${row.plan_id}` : ""}{canTransfer && row.notes ? <span className="wallet-transfer__history-note">{row.notes}</span> : null}</td><td>{formatMoney(row.amount, true)}</td><td>{formatMoney(row.balance_after, true)}</td></tr>)}
+      {data.entries.length > 0 ? <details open={canDeposit}><summary>היסטוריית תנועות ({data.entries.length})</summary>
+        {canDeposit ? <p className="hint">תנועה שנרשמה בטעות אפשר לבטל כאן. הביטול נרשם כתנועה הפוכה — הרישום המקורי נשמר.</p> : null}
+        <div className="table-wrap"><table className="wallet-history"><thead><tr><th>תאריך</th><th>פעולה</th><th>סכום</th><th>יתרה אחרי הפעולה</th>{canDeposit ? <th><span className="sr-only">ניהול</span></th> : null}</tr></thead><tbody>
+          {data.entries.map(row => <tr key={row.id} className={row.reversed ? "wallet-history__row--reversed" : REVERSAL_TYPES.has(row.type) ? "wallet-history__row--reversal" : undefined}>
+            <td>{formatDate(row.created_at)}</td>
+            <td>{entryLabel(row)}{row.plan_id ? ` · מסלול ${row.plan_id}` : ""}{row.reversed ? <span className="status-chip status-chip--muted">בוטל</span> : null}{canTransfer && row.notes ? <span className="wallet-transfer__history-note">{REVERSAL_TYPES.has(row.type) ? `סיבה: ${row.notes}` : row.notes}</span> : null}</td>
+            <td>{formatMoney(row.amount, true)}</td><td>{formatMoney(row.balance_after, true)}</td>
+            {canDeposit ? <td className="wallet-history__actions">{row.reversible
+              ? <button type="button" className="btn btn--small btn--ghost" disabled={reversingId !== null} onClick={() => void reverse(row)}>{reversingId === row.id ? "מבטל..." : "ביטול התנועה"}</button>
+              : !row.reversed && row.reversal_blocked_reason ? <span className="hint" title={row.reversal_blocked_reason}>{row.reversal_blocked_reason}</span> : null}</td> : null}
+          </tr>)}
         </tbody></table></div>
       </details> : <p className="hint">עדיין אין תנועות בחשבון.</p>}
     </>}
+    {dialog}
   </Panel>;
 }

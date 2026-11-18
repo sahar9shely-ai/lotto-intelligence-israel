@@ -3,6 +3,7 @@ import { PlanTrackFields } from "./PlanTrackFields";
 import { FirstPaymentPreview } from "./FirstPaymentPreview";
 import { SignaturePad } from "./SignaturePad";
 import { api, getToken } from "../services/api";
+import { confirmAsync } from "./ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { matchesTopupDetail, ownedTopupFocus } from "../utils/topupFocus";
 import type { Settings, TopupRequest } from "../types/investments";
@@ -339,7 +340,13 @@ export function TopupRequestsPanel({
   }
 
   async function cancelRequest(req: TopupRequest) {
-    if (!window.confirm("לבטל את בקשת המסלול? אפשר לפתוח בקשה חדשה אחר כך.")) return;
+    if (!(await confirmAsync({
+      title: "ביטול בקשת המסלול",
+      message: `לבטל את הבקשה על סך ${formatMoney(req.amount)}?`,
+      details: ["לא בוצעה שום פעולה כספית.", "אפשר לפתוח בקשה חדשה בכל זמן."],
+      confirmLabel: "ביטול הבקשה",
+      danger: true,
+    }))) return;
     setBusyId(req.id);
     try {
       await api.cancelTopupRequest(req.id);
@@ -353,9 +360,13 @@ export function TopupRequestsPanel({
   }
 
   async function rejectRequest(req: TopupRequest) {
-    if (!window.confirm(`לדחות את הבקשה של ${req.investor_name} על סך ${formatMoney(req.amount)}?`)) {
-      return;
-    }
+    if (!(await confirmAsync({
+      title: "דחיית בקשת מסלול",
+      message: `לדחות את הבקשה של ${req.investor_name} על סך ${formatMoney(req.amount)}?`,
+      details: ["המשקיע יראה שהבקשה נדחתה.", "לא בוצעה שום פעולה כספית.", "הדחייה נרשמת ביומן הפעולות."],
+      confirmLabel: "דחיית הבקשה",
+      danger: true,
+    }))) return;
     setBusyId(req.id);
     try {
       await api.rejectTopupRequest(req.id);
@@ -369,13 +380,13 @@ export function TopupRequestsPanel({
   }
 
   async function reverseRequest(req: TopupRequest) {
-    if (
-      !window.confirm(
-        `לבטל את ההשקעה החדשה${isManager ? ` של ${req.investor_name}` : ""}?\nהמסלול ייסגר. הביטול אפשרי רק עד תום 3 ימי עסקים.`,
-      )
-    ) {
-      return;
-    }
+    if (!(await confirmAsync({
+      title: "ביטול ההשקעה החדשה",
+      message: `לבטל את ההשקעה החדשה${isManager ? ` של ${req.investor_name}` : ""}?`,
+      details: ["המסלול שנפתח מהבקשה ייסגר.", "הביטול אפשרי רק עד תום 3 ימי עסקים מהפתיחה."],
+      confirmLabel: "ביטול ההשקעה",
+      danger: true,
+    }))) return;
     setBusyId(req.id);
     try {
       await api.reverseTopupRequest(req.id);
@@ -869,13 +880,13 @@ export function PlanCoolingOffBanner({
   if (!canCancel) return null;
 
   async function reverse() {
-    if (
-      !window.confirm(
-        `לבטל את מסלול #${planId}?\nהביטול אפשרי רק עד תום 3 ימי עסקים, והמסלול ייסגר.`,
-      )
-    ) {
-      return;
-    }
+    if (!(await confirmAsync({
+      title: `ביטול מסלול #${planId}`,
+      message: `לבטל את מסלול #${planId}?`,
+      details: ["המסלול ייסגר.", "הביטול אפשרי רק עד תום 3 ימי עסקים מהפתיחה."],
+      confirmLabel: "ביטול המסלול",
+      danger: true,
+    }))) return;
     setBusy(true);
     try {
       await api.reverseTopupRequest(requestId);

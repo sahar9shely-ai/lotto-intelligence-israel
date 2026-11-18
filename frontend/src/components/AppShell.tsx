@@ -61,6 +61,14 @@ function DockGlyph({ path }: { path: string }) {
       </svg>
     );
   }
+  if (path === "/corrections") {
+    return (
+      <svg {...common}>
+        <path d="M9 7 5 11l4 4" />
+        <path d="M5 11h9a5 5 0 0 1 0 10h-3" />
+      </svg>
+    );
+  }
   if (path === "/documents") {
     return (
       <svg {...common}>
@@ -168,6 +176,7 @@ export function AppShell() {
     { to: "/documents", label: "מסמכים", dockLabel: "מסמכים", managerOnly: false, investorOnly: false },
     ...(tutorials?.available ? [{to: "/tutorials", label: "הדרכה", dockLabel: "הדרכה", managerOnly: false, investorOnly: true}] : []),
     { to: "/activity", label: "מעקב", dockLabel: "מעקב", managerOnly: true, investorOnly: false },
+    { to: "/corrections", label: "ביטולים ותיקונים", dockLabel: "תיקונים", managerOnly: true, investorOnly: false },
     { to: "/quotes", label: "הצעות", dockLabel: "הצעות", managerOnly: true, investorOnly: false },
     { to: "/users", label: "משתמשים", dockLabel: "משתמשים", managerOnly: true, investorOnly: false },
     { to: "/settings", label: "הגדרות", dockLabel: "הגדרות", managerOnly: true, investorOnly: false },

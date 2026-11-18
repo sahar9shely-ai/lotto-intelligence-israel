@@ -31,6 +31,7 @@ import {
 } from "../utils/paymentOps";
 import type { Plan } from "../types/investments";
 import "./paymentClarity.css";
+import "../components/adminCorrections.css";
 import "./paymentHistoryToggle.css";
 
 function visibleFocusEl(selector: string): HTMLElement | null {
@@ -559,13 +560,16 @@ export function PaymentsPage() {
       setMessage("סנכרון הסכומים ממתין לחתימה או לביטול הסכם עדכון מועדי המסלול.");
       return;
     }
-    if (
-      !window.confirm(
-        `לסנכרן את סכומי התשלומים לשנת ${year} לפי המסלולים הנוכחיים?\nתאריכי התחלה ותאריכי תשלום לא ישתנו — רק הסכומים.`,
-      )
-    ) {
-      return;
-    }
+    if (!(await confirm({
+      title: `סנכרון סכומי תשלומים · ${year}`,
+      message: `לסנכרן את סכומי התשלומים לשנת ${year} לפי תנאי המסלולים הנוכחיים?`,
+      details: [
+        "תאריכי התחלה ותאריכי תשלום לא ישתנו — רק הסכומים.",
+        "מסלולים עם הסכם חתום נשמרים לפי ההסכם.",
+        "מומלץ להשתמש בזה רק אחרי תיקון תנאי מסלול שלא נחתם.",
+      ],
+      confirmLabel: "סנכרון הסכומים",
+    }))) return;
     setSyncBusy(true);
     setMessage(null);
     try {
@@ -627,6 +631,27 @@ export function PaymentsPage() {
 
   async function markScheduled(id: number) {
     if (paymentAwaitingDateAmendment(id)) return;
+    const payment = payments.find((p) => p.id === id);
+    if (payment) {
+      const wasPaid = payment.status === "paid";
+      const ok = await confirm({
+        title: wasPaid ? "החזרת תשלום שאושר למתוכנן" : "ביטול בקשת אישור התשלום",
+        message: `${payment.investor_name} · ${formatCalendarMonth(payment.due_date)} · ${formatMoney(payment.investor_amount, true)}`,
+        details: wasPaid
+          ? [
+              "התשלום סומן כבוצע (המשקיע אישר קבלה). הפעולה תחזיר אותו לסטטוס ״מתוכנן״.",
+              "סכום ״שולם בפועל״ בדוחות יקטן בהתאם, עד שתישלח ותאושר בקשה חדשה.",
+              "השינוי נרשם ביומן הפעולות. השתמשו בזה רק לתיקון טעות.",
+            ]
+          : [
+              "הבקשה תוסר מהמשקיע והתשלום יחזור לסטטוס ״מתוכנן״.",
+              "אפשר לשלוח בקשת אישור חדשה בכל רגע.",
+            ],
+        confirmLabel: wasPaid ? "החזרה למתוכנן" : "ביטול הבקשה",
+        danger: wasPaid,
+      });
+      if (!ok) return;
+    }
     setMarkBusyId(id);
     setMessage(null);
     try {
@@ -745,13 +770,23 @@ export function PaymentsPage() {
       setMessage("שליחה לכל השנה ממתינה לחתימה או לביטול הסכם עדכון מועדים. ניתן לשלוח בנפרד תשלומים ממסלולים אחרים.");
       return;
     }
-    if (
-      !window.confirm(
-        `לשלוח בקשת אישור לכל התשלומים המתוכננים בשנת ${year}?\nכל משקיע יצטרך לאשר לפני שהסטטוס יהפוך לבוצע.`,
-      )
-    ) {
-      return;
-    }
+    const batch = (yearAll ?? []).filter(
+      (p) => p.status === "scheduled" && (investorFilter == null || p.investor_id === investorFilter),
+    );
+    const today = todayISO();
+    const future = batch.filter((p) => p.due_date > today).length;
+    const zero = batch.filter((p) => p.investor_amount === 0).length;
+    if (!(await confirm({
+      title: `בקשת אישור לכל שנת ${year}`,
+      message: `תישלח בקשת אישור קבלה על ${batch.length} תשלומים במצב ״מתוכנן״ בשנת ${year}.`,
+      details: [
+        ...(future ? [`${future} מהם עם מועד עתידי (טרם הגיע זמנם).`] : []),
+        ...(zero ? [`${zero} מהם בסכום 0 ₪ למשקיע (מסלולי חיסכון).`] : []),
+        "כל משקיע יצטרך לאשר לפני שהסטטוס יהפוך ל״בוצע״.",
+        "בקשה שנשלחה בטעות אפשר לבטל בעמוד ״ביטולים ותיקונים״ או בשורת התשלום.",
+      ],
+      confirmLabel: `שליחת ${batch.length} בקשות`,
+    }))) return;
     setMarkBusy(true);
     setMessage(null);
     try {
@@ -772,13 +807,16 @@ export function PaymentsPage() {
   }
 
   async function removeInvestorFromYear(inv: { id: number; name: string }) {
-    if (
-      !window.confirm(
-        `להסיר את ${inv.name} מלוח שנת ${year}?\nהמסלול של ${year} והתשלומים שלו יימחקו, והוא לא יופיע בדוח השנתי.`,
-      )
-    ) {
-      return;
-    }
+    if (!(await confirm({
+      title: `הסרת ${inv.name} מלוח ${year}`,
+      message: `להסיר את ${inv.name} מלוח שנת ${year}?`,
+      details: [
+        `המסלול של ${year} והתשלומים שלו יימחקו, ו${inv.name} לא יופיע בדוח השנתי.`,
+        "לא ניתן לשחזר את המחיקה. תיקים עם הסכמים חתומים מוגנים ולא יימחקו.",
+      ],
+      confirmLabel: "הסרה מהלוח",
+      danger: true,
+    }))) return;
     setRemoveBusyId(inv.id);
     setMessage(null);
     try {
@@ -795,6 +833,16 @@ export function PaymentsPage() {
     } finally {
       setRemoveBusyId(null);
     }
+  }
+
+  function paymentFlag(p: (typeof payments)[number]) {
+    if (p.investor_amount === 0 && (p.status === "scheduled" || p.status === "awaiting_confirmation")) {
+      return <span className="payment-flag payment-flag--zero" title="במסלול חיסכון אין תשלום מזומן למשקיע בחודש זה">ללא מזומן</span>;
+    }
+    if (p.status === "scheduled" && p.due_date < todayISO()) {
+      return <span className="payment-flag payment-flag--overdue" title="מועד התשלום עבר וטרם נשלחה בקשת אישור">באיחור</span>;
+    }
+    return null;
   }
 
   function paymentAwaitingDateAmendment(id: number) {
@@ -1200,6 +1248,7 @@ export function PaymentsPage() {
                     ) : null}
                     <td>
                       <span className={`badge badge--${p.status}`}>{paymentDisplayStatus(p)}</span>
+                      {paymentFlag(p)}
                       {p.date_amendment_pending ? <p className="hint">ממתין לחתימת הסכם עדכון מועדים</p> : null}
                     </td>
                     <td className="table__actions">{paymentRowActions(p)}</td>
@@ -1239,7 +1288,10 @@ export function PaymentsPage() {
                         : formatDate(p.due_date)}
                     </span>
                   </div>
-                  <span className={`badge badge--${p.status}`}>{paymentDisplayStatus(p)}</span>
+                  <span>
+                    <span className={`badge badge--${p.status}`}>{paymentDisplayStatus(p)}</span>
+                    {paymentFlag(p)}
+                  </span>
                 </div>
                 <div className="pay-card__amount">
                   <span>{isManager ? "סכום למשקיע" : "הסכום שלך"}</span>

@@ -14,6 +14,7 @@ import { PlanTrackFields } from "../components/PlanTrackFields";
 import { SavingsActions } from "../components/SavingsActions";
 import { PlanCoolingOffBanner, TopupRequestsPanel } from "../components/TopupRequestsPanel";
 import { ScrollReveal } from "../components/motion/ScrollReveal";
+import { useConfirm } from "../components/ConfirmDialog";
 import { Toast } from "../components/Toast";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../hooks/useAsync";
@@ -92,6 +93,8 @@ export function InvestorsPage() {
   const [showNewInvestor, setShowNewInvestor] = useState(false);
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [issuedAgreement, setIssuedAgreement] = useState<PlanAgreement | null>(null);
+  const [revisingAgreement, setRevisingAgreement] = useState<PlanAgreement | null>(null);
+  const {confirm, dialog: confirmDialog} = useConfirm();
   const [showTopupCreate, setShowTopupCreate] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
@@ -174,6 +177,15 @@ export function InvestorsPage() {
   const selectedRequests = (topupRequests ?? []).filter(row => row.investor_id === selected?.id);
   const pendingRequests = selectedRequests.filter(row => row.status === "pending" || row.status === "contract");
   function openAgreement(row: PlanAgreement) {setIssuedAgreement(row); goToSection("documents");}
+  // Deep link from the corrections hub: /investors?investor_id=X&section=documents&revise=ID
+  useEffect(() => {
+    const reviseId = Number(searchParams.get("revise"));
+    if (!reviseId || !canClosePlans) return;
+    const row = selectedAgreements.find(a => a.id === reviseId && a.kind === "open" && a.status === "pending");
+    if (!row) return;
+    setRevisingAgreement(row);
+    setSearchParams(previous => {const next = new URLSearchParams(previous); next.delete("revise"); return next;}, {replace: true});
+  }, [searchParams, selectedAgreements, canClosePlans, setSearchParams]);
   function agreementPrepared(row: PlanAgreement) {openAgreement(row); refreshAll();}
 
   useEffect(() => {
@@ -235,13 +247,45 @@ export function InvestorsPage() {
     reload();
   }
 
+  function planTermsFromForm(fd: FormData, investorId: number) {
+    return {
+      investor_id: investorId,
+      principal: Number(fd.get("principal") || 0),
+      additional_funds: Number(fd.get("additional_funds") || 0),
+      operation_key: String(fd.get("operation_key")),
+      plan_type: String(fd.get("plan_type") || "monthly"),
+      monthly_rate_percent: Number(fd.get("monthly_rate_percent") || 0),
+      savings_rate_percent: Number(fd.get("savings_rate_percent") || 0),
+      manager_fee_percent: Number(fd.get("manager_fee_percent") || 0),
+      manager_savings_rate_percent: Number(fd.get("manager_savings_rate_percent") || 0),
+      start_date: String(fd.get("start_date") || yearStartISO()),
+      duration_months: Number(fd.get("duration_months") || 12),
+      notes: String(fd.get("notes") || "") || undefined,
+      generate_schedule: true,
+    };
+  }
+
+  async function onRevisePlan(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selected || !revisingAgreement) return;
+    const fd = new FormData(e.currentTarget);
+    const agreement = await api.reviseAgreement(revisingAgreement.id, {
+      ...planTermsFromForm(fd, selected.id),
+      revision_notes: String(fd.get("revision_notes") || "").trim() || undefined,
+    });
+    setRevisingAgreement(null);
+    openAgreement(agreement);
+    setMessage(`ההסכם עודכן: הסכם #${revisingAgreement.id} בוטל והוחלף בהסכם #${agreement.id}. לא בוצעה פעולה כספית.`);
+    refreshAll();
+  }
+
   async function onCreatePlan(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!selected) return;
     const fd = new FormData(e.currentTarget);
-    const notice = await api.createNotice(selected.id, {purpose: "new", requested_on: String(fd.get("notice_requested_on"))});
+    // One request: the notice is recorded only if the agreement is created too.
     const agreement = await api.openAgreement({
-      notice_id: notice.id,
+      notice_requested_on: String(fd.get("notice_requested_on")),
       investor_id: selected.id,
       principal: Number(fd.get("principal") || 0),
       additional_funds: Number(fd.get("additional_funds") || 0),
@@ -300,17 +344,18 @@ export function InvestorsPage() {
     paid_count: number;
   }) {
     const year = plan.start_date.slice(0, 4);
-    const paidNote =
-      plan.paid_count > 0
-        ? `\nשים לב: יש ${plan.paid_count} תשלומים שסומנו כשולמו — גם הם יימחקו.`
-        : "";
-    if (
-      !window.confirm(
-        `למחוק את מסלול #${plan.id} של ${plan.investor_name} (שנת ${year})?\nאחרי המחיקה המשקיע לא יופיע בדוח של ${year}.${paidNote}`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `מחיקת מסלול #${plan.id}`,
+      message: `למחוק את מסלול #${plan.id} של ${plan.investor_name} (שנת ${year})? לא ניתן לשחזר מסלול שנמחק.`,
+      details: [
+        `אחרי המחיקה ${plan.investor_name} לא יופיע בדוח של ${year} עבור מסלול זה.`,
+        ...(plan.paid_count > 0 ? [`יש ${plan.paid_count} תשלומים שסומנו כשולמו — גם הם יימחקו מההיסטוריה.`] : []),
+        "מסלולים חתומים או סגורים אינם ניתנים למחיקה ונשמרים כהיסטוריה.",
+      ],
+      confirmLabel: "מחיקת המסלול",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.deletePlan(plan.id);
       setMessage(`מסלול #${plan.id} נמחק — ${plan.investor_name} לא יופיע בדוח ${year}`);
@@ -559,7 +604,7 @@ export function InvestorsPage() {
           <p className="workspace-section-hint">{WORKSPACE_SECTIONS.find(s => s.id === workspaceSection)?.hint}</p>
           {workspaceSection === "balance" ? <AvailableBalancePanel key={selected.id} investorId={selected.id} investorName={selected.name} sourceAvailableBalance={selected.available_balance} canManage={isManager} canDeposit={canClosePlans} canTransfer={canTransferBalance} recipients={canTransferBalance ? bookInvestors : []} onChanged={refreshAll}/> : null}
           {workspaceSection === "documents" ? <div className="stack" key={`documents:${selected.id}`}>
-            <AgreementPanel rows={selectedAgreements} loading={agreementsLoading || agreementsRefreshing} error={agreementsError} canManage={isManager} canManageClosing={canClosePlans} phone={selected.phone} onChanged={refreshAll}/>
+            <AgreementPanel rows={selectedAgreements} loading={agreementsLoading || agreementsRefreshing} error={agreementsError} canManage={isManager} canManageClosing={canClosePlans} phone={selected.phone} onChanged={refreshAll} onRevise={canClosePlans ? row => setRevisingAgreement(row) : undefined}/>
             <DocumentsPage key={`vault:${selected.id}:${agreementRevision}`} investorId={selected.id} embedded excludeAgreements/>
           </div> : null}
           {workspaceSection === "requests" ? <div className="stack" key={`requests:${selected.id}`}>
@@ -800,6 +845,12 @@ export function InvestorsPage() {
           <PlanForm settings={settings} investor={planTarget} onSubmit={onCreatePlan} />
         </Modal>
       ) : null}
+      {revisingAgreement && planTarget && revisingAgreement.investor_id === planTarget.id ? (
+        <Modal title={`עריכת תנאי הסכם #${revisingAgreement.id} · ${planTarget.name}`} onClose={() => setRevisingAgreement(null)}>
+          <PlanForm key={revisingAgreement.id} settings={settings} investor={planTarget} onSubmit={onRevisePlan} revising={revisingAgreement} />
+        </Modal>
+      ) : null}
+      {confirmDialog}
     </div>
   );
 }
@@ -998,16 +1049,24 @@ function PlanCard({
   );
 }
 
-export function PlanForm({settings, investor, onSubmit}: {
+export function PlanForm({settings, investor, onSubmit, revising}: {
   settings: Settings | null; investor: Investor;
   onSubmit: (e: FormEvent<HTMLFormElement>) => Promise<void>;
+  /** A pending opening agreement whose terms are being revised before signature. */
+  revising?: PlanAgreement | null;
 }) {
-  const [additional, setAdditional] = useState("");
-  const [cashRate, setCashRate] = useState(String(settings?.default_monthly_rate_percent ?? 0));
-  const [savingsRate, setSavingsRate] = useState("0");
-  const [managerCash, setManagerCash] = useState(String(settings?.default_manager_fee_percent ?? 0));
-  const [managerSavings, setManagerSavings] = useState("0");
-  const [startDate, setStartDate] = useState(todayISO);
+  const draft = revising ? {...(revising.snapshot.terms || {}), ...(revising.private_terms || {})} as Record<string, unknown> : null;
+  const draftNumber = (key: string, fallback: number) => {
+    const value = draft ? Number(draft[key]) : NaN;
+    return Number.isFinite(value) ? value : fallback;
+  };
+  const initialAdditional = draft ? Math.max(0, Math.round((draftNumber("principal", 0) - (investor.available_balance ?? 0)) * 100) / 100) : null;
+  const [additional, setAdditional] = useState(initialAdditional == null ? "" : String(initialAdditional));
+  const [cashRate, setCashRate] = useState(String(draftNumber("monthly_rate_percent", settings?.default_monthly_rate_percent ?? 0)));
+  const [savingsRate, setSavingsRate] = useState(String(draftNumber("savings_rate_percent", 0)));
+  const [managerCash, setManagerCash] = useState(String(draftNumber("manager_fee_percent", settings?.default_manager_fee_percent ?? 0)));
+  const [managerSavings, setManagerSavings] = useState(String(draftNumber("manager_savings_rate_percent", 0)));
+  const [startDate, setStartDate] = useState(() => draft && typeof draft.start_date === "string" ? String(draft.start_date).slice(0, 10) : todayISO());
   const [operationKey, setOperationKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1022,7 +1081,7 @@ export function PlanForm({settings, investor, onSubmit}: {
     if (busy) return;
     if (!review) {
       const values = new FormData(e.currentTarget);
-      setReview({start: String(values.get("start_date")), requested: String(values.get("notice_requested_on")), duration: String(values.get("duration_months")), notes: String(values.get("notes") || "")});
+      setReview({start: String(values.get("start_date")), requested: String(values.get("notice_requested_on") || (revising ? revising.snapshot.notice_requested_on : "")), duration: String(values.get("duration_months")), notes: String(values.get("notes") || "")});
       return;
     }
     setBusy(true); setError(null);
@@ -1060,11 +1119,14 @@ export function PlanForm({settings, investor, onSubmit}: {
       </fieldset>
       <fieldset disabled={busy} className="plan-opening__section"><legend>4 · תקופה וסיכום לפני שמירה</legend>
         <div className="form__grid" hidden={Boolean(review)}>
-          <label>מועד קבלת הבקשה מהמשקיע<input name="notice_requested_on" type="date" max={new Date().toLocaleDateString("en-CA")} defaultValue={new Date().toLocaleDateString("en-CA")} required /></label>
-          <p className="hint">יש לתעד את מועד קבלת הבקשה בפועל. המסלול ייפתח לאחר חתימה, ללא המתנה של חודש.</p>
+          {revising ? <p className="hint">הבקשה המקורית מ־{formatDate(revising.snapshot.notice_requested_on)} נשמרת. ההסכם הקודם (#{revising.id}) יבוטל ויוחלף בהסכם המעודכן — המשקיע יוכל לחתום רק על הגרסה החדשה.</p> : <>
+            <label>מועד קבלת הבקשה מהמשקיע<input name="notice_requested_on" type="date" max={todayISO()} defaultValue={todayISO()} required /></label>
+            <p className="hint">יש לתעד את מועד קבלת הבקשה בפועל. המסלול ייפתח לאחר חתימה, ללא המתנה של חודש.</p>
+          </>}
           <label>תאריך התחלה מוצע<input name="start_date" type="date" value={startDate} onInput={e => setStartDate(e.currentTarget.value)} onChange={e => setStartDate(e.target.value)} required /></label>
-          <label>משך בחודשים<input name="duration_months" type="number" min="1" max="120" defaultValue={settings?.default_duration_months ?? 12} required /></label>
-          <label>הערות<input name="notes" placeholder="אופציונלי" /></label>
+          <label>משך בחודשים<input name="duration_months" type="number" min="1" max="120" defaultValue={draft ? draftNumber("duration_months", 12) : settings?.default_duration_months ?? 12} required /></label>
+          <label>הערות<input name="notes" placeholder="אופציונלי" defaultValue={draft && typeof draft.notes === "string" ? draft.notes : ""} /></label>
+          {revising ? <label>מה השתנה? (נשמר ביומן ומוצג בהסכם)<input name="revision_notes" maxLength={500} placeholder="לדוגמה: עדכון סכום לפי שיחה עם המשקיע" /></label> : null}
         </div>
         <FirstPaymentPreview startDate={review?.start ?? startDate} hasCash={cash > 0} />
         <dl className="plan-opening-summary">
@@ -1082,7 +1144,7 @@ export function PlanForm({settings, investor, onSubmit}: {
       </fieldset>
       {error ? <p role="alert" className="form-error">{error}</p> : null}
     </div>
-    <div className="modal__actions">{review ? <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setReview(null)}>חזרה לעריכה</button> : null}<button type="submit" className="btn btn--primary" disabled={busy || principal <= 0}>{busy ? "מכין הסכם..." : review ? "הכנת הסכם לחתימת המשקיע" : "בדיקת הנתונים לפני הכנת הסכם"}</button></div>
+    <div className="modal__actions">{review ? <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setReview(null)}>חזרה לעריכה</button> : null}<button type="submit" className="btn btn--primary" disabled={busy || principal <= 0}>{busy ? "מכין הסכם..." : review ? (revising ? `הכנת הסכם מעודכן במקום #${revising.id}` : "הכנת הסכם לחתימת המשקיע") : "בדיקת הנתונים לפני הכנת הסכם"}</button></div>
   </form>;
 }
 

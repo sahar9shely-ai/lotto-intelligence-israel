@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.admin_stats import router as admin_stats_router
 from app.api.v1.agreements import router as agreements_router
+from app.api.v1.corrections import router as corrections_router
 from app.api.v1.assistant import router as assistant_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.draws import router as draws_router
@@ -47,6 +48,7 @@ app.include_router(goturs_router)
 app.include_router(auth_router)
 app.include_router(investments_router)
 app.include_router(agreements_router)
+app.include_router(corrections_router)
 app.include_router(assistant_router)
 app.include_router(tutorials_router)
 app.include_router(push_router)

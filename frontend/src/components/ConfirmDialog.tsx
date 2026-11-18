@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { createRoot } from "react-dom/client";
+import "./adminCorrections.css";
 
 export type ConfirmOptions = {
   title: string;
@@ -7,10 +9,14 @@ export type ConfirmOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+  /** Short bullet list of exactly what will (and will not) change. */
+  details?: string[];
+  /** Ask for a free-text reason that is saved in the activity log. */
+  reason?: { label: string; required?: boolean; placeholder?: string };
 };
 
 type Pending = ConfirmOptions & {
-  resolve: (value: boolean) => void;
+  resolve: (value: string | null) => void;
 };
 
 function lockPageScroll() {
@@ -32,16 +38,23 @@ function lockPageScroll() {
 
 export function useConfirm() {
   const [pending, setPending] = useState<Pending | null>(null);
-  const resolveRef = useRef<((value: boolean) => void) | null>(null);
+  const resolveRef = useRef<((value: string | null) => void) | null>(null);
 
-  const confirm = useCallback((options: ConfirmOptions) => {
-    return new Promise<boolean>((resolve) => {
+  /** Resolves to the typed reason ("" when none was asked), or null when cancelled. */
+  const confirmWithReason = useCallback((options: ConfirmOptions) => {
+    return new Promise<string | null>((resolve) => {
+      resolveRef.current?.(null);
       resolveRef.current = resolve;
       setPending({ ...options, resolve });
     });
   }, []);
 
-  const close = useCallback((value: boolean) => {
+  const confirm = useCallback(
+    (options: ConfirmOptions) => confirmWithReason(options).then((value) => value !== null),
+    [confirmWithReason],
+  );
+
+  const close = useCallback((value: string | null) => {
     resolveRef.current?.(value);
     resolveRef.current = null;
     setPending(null);
@@ -54,28 +67,36 @@ export function useConfirm() {
       confirmLabel={pending.confirmLabel}
       cancelLabel={pending.cancelLabel}
       danger={pending.danger}
-      onConfirm={() => close(true)}
-      onCancel={() => close(false)}
+      details={pending.details}
+      reason={pending.reason}
+      onConfirm={(reason) => close(reason ?? "")}
+      onCancel={() => close(null)}
     />
   ) : null;
 
-  return { confirm, dialog };
+  return { confirm, confirmWithReason, dialog };
 }
 
 export function ConfirmDialog({
   title,
   message,
   confirmLabel = "אישור",
-  cancelLabel = "ביטול",
+  // "חזרה" rather than "ביטול": many actions are themselves called "ביטול" (undo).
+  cancelLabel = "חזרה",
   danger = false,
+  details,
+  reason,
   onConfirm,
   onCancel,
 }: ConfirmOptions & {
-  onConfirm: () => void;
+  onConfirm: (reason?: string) => void;
   onCancel: () => void;
 }) {
   const titleId = useId();
   const messageId = useId();
+  const reasonId = useId();
+  const [reasonText, setReasonText] = useState("");
+  const reasonMissing = Boolean(reason?.required) && reasonText.trim().length < 2;
 
   useEffect(() => lockPageScroll(), []);
 
@@ -113,6 +134,30 @@ export function ConfirmDialog({
           <p id={messageId} className="confirm-sheet__message">
             {message}
           </p>
+          {details?.length ? (
+            <ul className="confirm-sheet__details">
+              {details.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
+          {reason ? (
+            <label className="confirm-sheet__reason" htmlFor={reasonId}>
+              <span>
+                {reason.label}
+                {reason.required ? " (חובה)" : ""}
+              </span>
+              <textarea
+                id={reasonId}
+                rows={2}
+                maxLength={500}
+                value={reasonText}
+                placeholder={reason.placeholder}
+                onChange={(e) => setReasonText(e.target.value)}
+              />
+              <span className="hint">הסיבה נשמרת ביומן הפעולות ומוצגת בהיסטוריה.</span>
+            </label>
+          ) : null}
         </div>
         <div className="modal__actions action-bar">
           <button type="button" className="btn btn--ghost" onClick={onCancel}>
@@ -121,8 +166,9 @@ export function ConfirmDialog({
           <button
             type="button"
             className={`btn ${danger ? "btn--ghost btn--danger" : "btn--primary"}`}
-            onClick={onConfirm}
-            autoFocus
+            onClick={() => onConfirm(reasonText.trim())}
+            disabled={reasonMissing}
+            autoFocus={!reason}
           >
             {confirmLabel}
           </button>
@@ -131,4 +177,21 @@ export function ConfirmDialog({
     </div>,
     document.body,
   );
+}
+
+/** Imperative styled confirm (drop-in for window.confirm) for code outside a hook scope. */
+export function confirmAsync(options: ConfirmOptions): Promise<boolean> {
+  return new Promise((resolve) => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const done = (value: boolean) => {
+      root.unmount();
+      host.remove();
+      resolve(value);
+    };
+    root.render(
+      <ConfirmDialog {...options} onConfirm={() => done(true)} onCancel={() => done(false)} />,
+    );
+  });
 }
