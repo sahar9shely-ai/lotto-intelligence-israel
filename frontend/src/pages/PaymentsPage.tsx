@@ -33,6 +33,7 @@ import type { Plan } from "../types/investments";
 import "./paymentClarity.css";
 import "../components/adminCorrections.css";
 import { useConfirmOnBehalf } from "../components/ConfirmOnBehalf";
+import { InvestorPaymentsTimeline } from "../components/InvestorPaymentsTimeline";
 import "./paymentHistoryToggle.css";
 
 function visibleFocusEl(selector: string): HTMLElement | null {
@@ -1039,6 +1040,7 @@ export function PaymentsPage() {
             ))}
           </select>
         </label>
+        {isManager ? (<>
         <label>
           סטטוס
           <select
@@ -1063,6 +1065,7 @@ export function PaymentsPage() {
           <span className="payment-history-toggle__track" aria-hidden="true" />
           <span className="payment-history-toggle__label">הצגת היסטוריית ביטולים</span>
         </label>
+        </>) : null}
         {isManager ? (
           <label>
             משקיע
@@ -1089,15 +1092,15 @@ export function PaymentsPage() {
       <section className="payment-current-summary" aria-label={`סיכום תשלומי ${year}`}>
         <p className="payment-current-summary__scope">סיכום {year}{selectedInvestorName ? ` · ${selectedInvestorName}` : ""}{allYears ? " · הרשימה מציגה את כל השנים" : ""}</p>
         <div className="payment-current-summary__grid">
-          <Stat label={isManager ? "שולם למשקיעים בפועל" : "שולם לך בפועל"}
+          <Stat label={isManager ? "שולם למשקיעים בפועל" : "קיבלת השנה"}
             value={formatMoney(yearly?.paid_investor ?? 0, true)}
             hint={`${yearly?.paid_count ?? 0} תשלומים ששולמו`}
             active={detailFocus === "yearly-paid"} onClick={() => openDetail("yearly-paid")} />
-          <Stat label="ממתינים לאישור" value={String(yearly?.awaiting_count ?? 0)}
+          <Stat label={isManager ? "ממתינים לאישור" : "מחכים לאישור שלך"} value={String(yearly?.awaiting_count ?? 0)}
             active={detailFocus === "yearly-awaiting"} onClick={() => openDetail("yearly-awaiting")} />
-          <Stat label="תשלומים מתוכננים" value={String(yearly?.scheduled_count ?? 0)}
+          <Stat label={isManager ? "תשלומים מתוכננים" : "עוד צפויים השנה"} value={String(yearly?.scheduled_count ?? 0)}
             active={detailFocus === "yearly-scheduled"} onClick={() => openDetail("yearly-scheduled")} />
-          <Stat label="תכנון לשנה · כולל מה ששולם" value={formatMoney(yearly?.planned_investor ?? 0, true)}
+          <Stat label={isManager ? "תכנון לשנה · כולל מה ששולם" : "סה״כ לשנה (שהתקבל + צפוי)"} value={formatMoney(yearly?.planned_investor ?? 0, true)}
             active={detailFocus === "yearly-planned"} onClick={() => openDetail("yearly-planned")} />
         </div>
       </section>
@@ -1202,6 +1205,8 @@ export function PaymentsPage() {
               <Link className="btn btn--admin" to="/investors">להסכמים ולמסלולים</Link>
             ) : null}
           </div>
+        ) : !isManager && !detailFocus && !allYears && !status && !focusPaymentId ? (
+          <InvestorPaymentsTimeline payments={payments} />
         ) : (
           <>
           <div className="table-wrap table-wrap--desktop">

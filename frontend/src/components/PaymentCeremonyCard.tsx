@@ -1,4 +1,5 @@
 import type { Payment } from "../types/investments";
+import "./investorHome.css";
 import { formatCalendarMonth, formatDate, formatMoney } from "../utils/format";
 
 export function PaymentCeremonyCard({
@@ -16,12 +17,13 @@ export function PaymentCeremonyCard({
 
   return (
     <section className="payment-ceremony" aria-label="אישור העברה">
-      <h2 className="payment-ceremony__title">אישור העברה</h2>
+      <h2 className="payment-ceremony__title">{payments.length > 1 ? "נשלחו אליך תשלומים — קיבלת?" : "נשלח אליך תשלום — קיבלת?"}</h2>
+      <p className="payment-ceremony__lead">לחיצה אחת מאשרת שהכסף הגיע לחשבון שלך. אם עוד לא — לחצו ״עדיין לא הגיע״ ונבדוק.</p>
       <ul className="payment-ceremony__list">
         {payments.map((p) => (
           <li key={p.id} className="payment-ceremony__item">
             <p className="payment-ceremony__month">{formatCalendarMonth(p.due_date)}</p>
-            <p className="payment-ceremony__amount">{formatMoney(p.investor_amount)}</p>
+            <p className="payment-ceremony__amount">{formatMoney(p.investor_amount, true)}</p>
             <p className="payment-ceremony__date">מועד {formatDate(p.due_date)}</p>
             {p.date_amendment_pending ? <p className="hint" role="status">התשלום ממתין לחתימת הסכם עדכון מועדי המסלול. ניתן לאשר אותו לאחר החתימה או ביטול ההסכם.</p> : null}
             <div className="payment-ceremony__actions">
@@ -31,7 +33,7 @@ export function PaymentCeremonyCard({
                 disabled={busyId === p.id || p.date_amendment_pending}
                 onClick={() => onReceived(p.id)}
               >
-                {busyId === p.id ? "רושם..." : "קיבלתי את ההעברה"}
+                {busyId === p.id ? "רושם..." : "✓ קיבלתי את הכסף"}
               </button>
               <button
                 type="button"

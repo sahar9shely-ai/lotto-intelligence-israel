@@ -8821,3 +8821,12 @@ body {
   .wallet-transfer .page-head__actions {display:flex;flex-wrap:wrap;}
   .wallet-transfer .page-head__actions .btn {flex:1 1 140px;}
 }
+
+/* Phones: assistant button steps aside while scrolling (see PersonalAssistant). */
+@media (max-width: 700px) {
+  .assistant-fab { transition: opacity 0.25s ease, transform 0.25s ease; }
+  .assistant-fab.is-tucked { opacity: 0; transform: translateY(12px); pointer-events: none; }
+}
+@media (max-width: 700px) and (prefers-reduced-motion: reduce) {
+  .assistant-fab.is-tucked { transform: none; }
+}

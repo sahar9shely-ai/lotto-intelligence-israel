@@ -33,11 +33,15 @@ import {
 type Scope = "all" | number;
 type TrackView = "active" | "closed";
 type WorkspaceSection = "plans" | "balance" | "documents" | "requests";
-const WORKSPACE_SECTIONS: {id: WorkspaceSection; title: string; hint: string}[] = [
-  {id:"plans",title:"מסלולים",hint:"ניהול מסלולים פעילים וסגורים. סיום מסלול מתחיל בכרטיס המסלול ומתבצע רק לאחר חתימה."},
-  {id:"balance",title:"יתרה זמינה",hint:"תוספות כסף, כסף שהשתחרר ממסלולים סגורים, משיכות והיסטוריית תנועות."},
-  {id:"documents",title:"מסמכים וחתימות",hint:"מסמכים הממתינים לחתימה, הסכמים קודמים ודוחות המשקיע."},
-  {id:"requests",title:"בקשות",hint:"טיפול בבקשות המשקיע. הודעה חודש מראש נדרשת למשיכת כספים בתום המסלול בלבד."},
+const WORKSPACE_SECTIONS: {id: WorkspaceSection; title: string; hint: string; investorTitle: string; investorHint: string}[] = [
+  {id:"plans",title:"מסלולים",hint:"ניהול מסלולים פעילים וסגורים. סיום מסלול מתחיל בכרטיס המסלול ומתבצע רק לאחר חתימה.",
+    investorTitle:"ההשקעה שלי",investorHint:"כל פרטי ההשקעה שלך: כמה השקעת, כמה מקבלים כל חודש ומתי התקופה מסתיימת."},
+  {id:"balance",title:"יתרה זמינה",hint:"תוספות כסף, כסף שהשתחרר ממסלולים סגורים, משיכות והיסטוריית תנועות.",
+    investorTitle:"יתרה זמינה",investorHint:"כסף שכבר לא נמצא בהשקעה ומחכה להחלטה שלך — משיכה או השקעה חדשה."},
+  {id:"documents",title:"מסמכים וחתימות",hint:"מסמכים הממתינים לחתימה, הסכמים קודמים ודוחות המשקיע.",
+    investorTitle:"מסמכים",investorHint:"ההסכמים שחתמת עליהם, מסמכים שמחכים לחתימה שלך ודוחות להורדה."},
+  {id:"requests",title:"בקשות",hint:"טיפול בבקשות המשקיע. הודעה חודש מראש נדרשת למשיכת כספים בתום המסלול בלבד.",
+    investorTitle:"בקשות",investorHint:"רוצה להגדיל השקעה או למשוך בסוף התקופה? כאן מבקשים. למשיכה בסוף התקופה צריך להודיע חודש מראש."},
 ];
 
 function cashOf(inv: Investor) {
@@ -384,7 +388,7 @@ export function InvestorsPage() {
       <header className="page-intro">
         <div>
           <h1 className="page-intro__title">
-            {isManager ? "תיקי משקיעים" : "תיק ההשקעה שלי"}
+            {isManager ? "תיקי משקיעים" : "ההשקעה שלי"}
           </h1>
           {isManager ? (
             <p className="hint" id="new-plan-help">
@@ -582,26 +586,26 @@ export function InvestorsPage() {
         </ScrollReveal>
       ) : selected ? (
         <ScrollReveal className="stack">
-          <Panel title={`תיק המשקיע · ${selected.name}`} className="investor-workspace-header" action={
+          <Panel title={isManager ? `תיק המשקיע · ${selected.name}` : "ההשקעה שלך"} className="investor-workspace-header" action={
             <div className="page-head__actions">
-              <Link className="btn btn--ghost btn--small" to={`/payments?investor_id=${selected.id}`}>תשלומי המשקיע</Link>
+              <Link className="btn btn--ghost btn--small" to={isManager ? `/payments?investor_id=${selected.id}` : "/payments"}>{isManager ? "תשלומי המשקיע" : "התשלומים שלי"}</Link>
               {isManager ? <button className="btn btn--primary" disabled={agreementsLoading || agreementsRefreshing || Boolean(agreementsError) || pendingAgreements.length > 0} onClick={() => setShowNewPlan(true)} title={pendingAgreements.length ? "יש להשלים או לבטל את ההסכם הממתין לפני הכנת מסלול חדש" : undefined}>מסלול חדש</button> : null}
             </div>
           }>
             <div className="investor-overview">
-              <div className="investor-overview__item"><span>קרן במסלולים פעילים</span><strong>{formatMoney(selected.active_principal)}</strong></div>
-              <div className="investor-overview__item investor-overview__item--accent"><span>חיסכון שנצבר כעת</span><strong>{formatMoney(selected.current_savings_balance ?? 0)}</strong><small>צבירה חודשית: {formatMoney(savingsOf(selected))}</small></div>
-              <div className="investor-overview__item"><span>יתרה זמינה</span><strong>{formatMoney(selected.available_balance ?? 0)}</strong><small>למשיכה או למסלול הבא</small></div>
-              <div className="investor-overview__item"><span>החזר מזומן חודשי</span><strong>{formatMoney(cashOf(selected))}</strong><small>משולם בנפרד מהחיסכון</small></div>
+              <div className="investor-overview__item"><span>{isManager ? "קרן במסלולים פעילים" : "הכסף שהשקעת"}</span><strong>{formatMoney(selected.active_principal)}</strong>{!isManager ? <small>הקרן שעובדת עבורך עכשיו</small> : null}</div>
+              {isManager || (selected.current_savings_balance ?? 0) > 0 || savingsOf(selected) > 0 ? <div className="investor-overview__item investor-overview__item--accent"><span>חיסכון שנצבר כעת</span><strong>{formatMoney(selected.current_savings_balance ?? 0)}</strong><small>{isManager ? "צבירה חודשית" : "נצבר בכל חודש"}: {formatMoney(savingsOf(selected))}</small></div> : null}
+              {isManager || (selected.available_balance ?? 0) > 0 ? <div className="investor-overview__item"><span>יתרה זמינה</span><strong>{formatMoney(selected.available_balance ?? 0)}</strong><small>למשיכה או למסלול הבא</small></div> : null}
+              <div className="investor-overview__item"><span>{isManager ? "החזר מזומן חודשי" : "מקבלים כל חודש"}</span><strong>{formatMoney(cashOf(selected))}</strong><small>{isManager ? "משולם בנפרד מהחיסכון" : "במזומן, לחשבון שלך"}</small></div>
             </div>
             {isManager && selected.has_login ? <details className="workspace-contact"><summary>פרטי קשר וכניסה למשקיע</summary><div className="workspace-contact__body"><span>שם משתמש: <strong dir="ltr">{selected.access_username || "—"}</strong></span><RevealSecret value={selected.access_password}/><span>{selected.phone ? `וואטסאפ: ${formatPhoneDisplay(selected.phone)}` : "חסר מספר טלפון"}</span><button className="btn btn--ghost btn--small" onClick={() => void copyInvestorAccess(selected)}>העתקת פרטי כניסה</button><button className="btn btn--ghost btn--small" onClick={() => openInvestorWhatsApp(selected)}>הכנת הודעת כניסה בוואטסאפ</button></div></details> : null}
             {agreementsError ? <p role="alert">לא ניתן לטעון את מצב החתימות. {agreementsError} <button className="btn btn--ghost btn--small" onClick={refreshAll}>נסה שוב</button></p> : null}
             {pendingAgreements.length ? <div className="workspace-pending"><span>{pendingAgreements.length} הסכמים ממתינים לחתימת המשקיע. הפעולה הכספית טרם בוצעה.</span><button className="text-link" onClick={() => goToSection("documents")}>למסמכים ולחתימה</button></div> : null}
           </Panel>
           <nav className="investor-workspace-nav" aria-label="אזורי תיק המשקיע">
-            {WORKSPACE_SECTIONS.map(section => <button key={section.id} type="button" className={workspaceSection === section.id ? "investor-workspace-nav__item is-active" : "investor-workspace-nav__item"} aria-pressed={workspaceSection === section.id} onClick={() => goToSection(section.id)}>{section.title}{section.id === "documents" && pendingAgreements.length ? <em>{pendingAgreements.length}</em> : section.id === "requests" && pendingRequests.length ? <em>{pendingRequests.length}</em> : null}</button>)}
+            {WORKSPACE_SECTIONS.map(section => <button key={section.id} type="button" className={workspaceSection === section.id ? "investor-workspace-nav__item is-active" : "investor-workspace-nav__item"} aria-pressed={workspaceSection === section.id} onClick={() => goToSection(section.id)}>{isManager ? section.title : section.investorTitle}{section.id === "documents" && pendingAgreements.length ? <em>{pendingAgreements.length}</em> : section.id === "requests" && pendingRequests.length ? <em>{pendingRequests.length}</em> : null}</button>)}
           </nav>
-          <p className="workspace-section-hint">{WORKSPACE_SECTIONS.find(s => s.id === workspaceSection)?.hint}</p>
+          <p className="workspace-section-hint">{(() => { const s = WORKSPACE_SECTIONS.find(x => x.id === workspaceSection); return isManager ? s?.hint : s?.investorHint; })()}</p>
           {workspaceSection === "balance" ? <AvailableBalancePanel key={selected.id} investorId={selected.id} investorName={selected.name} sourceAvailableBalance={selected.available_balance} canManage={isManager} canDeposit={canClosePlans} canTransfer={canTransferBalance} recipients={canTransferBalance ? bookInvestors : []} onChanged={refreshAll}/> : null}
           {workspaceSection === "documents" ? <div className="stack" key={`documents:${selected.id}`}>
             <AgreementPanel rows={selectedAgreements} loading={agreementsLoading || agreementsRefreshing} error={agreementsError} canManage={isManager} canManageClosing={canClosePlans} phone={selected.phone} onChanged={refreshAll} onRevise={canClosePlans ? row => setRevisingAgreement(row) : undefined}/>
@@ -670,7 +674,7 @@ export function InvestorsPage() {
               {trackView === "active" ? (
                 activeSelectedPlans.length > 0 || otherSelectedPlans.length > 0 ? (
                   <div className="stack track-section track-section--active">
-                    <p className="track-section__label">מסלולים פעילים בלבד</p>
+                    <p className="track-section__label">{isManager ? "מסלולים פעילים בלבד" : "ההשקעה הפעילה שלך"}</p>
                     {[...activeSelectedPlans, ...otherSelectedPlans].map((plan) => (
                       <PlanCard
                         key={`${selected.id}:${plan.id}`}

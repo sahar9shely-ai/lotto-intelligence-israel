@@ -23,6 +23,23 @@ function AssistantConversation({user}: {user: AuthUser}) {
   const mounted = useRef(true);
   const requestVersion = useRef(0);
   const busyRef = useRef(false);
+  // On phones the floating button steps aside while the page scrolls, so it never hides amounts.
+  const [tucked, setTucked] = useState(false);
+  useEffect(() => {
+    let timer = 0;
+    const onScroll = () => {
+      if (window.innerWidth > 700) return;
+      setTucked(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setTucked(false), 1200);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -210,7 +227,7 @@ function AssistantConversation({user}: {user: AuthUser}) {
     <>
       <button
         type="button"
-        className={open ? "assistant-fab is-open" : "assistant-fab"}
+        className={open ? "assistant-fab is-open" : tucked ? "assistant-fab is-tucked" : "assistant-fab"}
         aria-expanded={open}
         aria-controls="personal-assistant-panel"
         aria-label={open ? "סגירת העוזר האישי" : "עוזר אישי"}

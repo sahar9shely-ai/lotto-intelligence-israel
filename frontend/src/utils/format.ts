@@ -7,6 +7,7 @@ const moneyFmt = new Intl.NumberFormat("he-IL", {
 const moneyPreciseFmt = new Intl.NumberFormat("he-IL", {
   style: "currency",
   currency: "ILS",
+  minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
@@ -16,8 +17,11 @@ const dateFmt = new Intl.DateTimeFormat("he-IL", {
   year: "numeric",
 });
 
+/** Whole shekels stay whole (2,000 ₪); agorot appear only when they exist (2,000.50 ₪). */
 export function formatMoney(value: number, precise = false): string {
-  return (precise ? moneyPreciseFmt : moneyFmt).format(value || 0);
+  const amount = value || 0;
+  if (!precise || Number.isInteger(Math.round(amount * 100) / 100)) return moneyFmt.format(amount);
+  return moneyPreciseFmt.format(amount);
 }
 
 export function formatPercent(value: number): string {

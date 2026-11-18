@@ -49,10 +49,19 @@ export function DashboardPage() {
   );
 
   const { data: topupRequests } = useAsync(() => api.topupRequests(), []);
-  const { data: investorPayments, reload: reloadInvestorPayments } = useAsync(
-    () => (isManager ? Promise.resolve([]) : api.payments({ year: new Date().getFullYear() })),
+  // Investors: all years, so the home page can show "received to date".
+  const { data: investorPaymentsAll, reload: reloadInvestorPayments } = useAsync(
+    () => (isManager ? Promise.resolve([]) : api.payments()),
     [isManager],
   );
+  const { data: investorPlans } = useAsync(
+    () => (isManager ? Promise.resolve([]) : api.plans()),
+    [isManager],
+  );
+  const thisYear = String(new Date().getFullYear());
+  const investorPayments = investorPaymentsAll
+    ? investorPaymentsAll.filter((p) => p.due_date.startsWith(thisYear))
+    : investorPaymentsAll;
   const [monthlyBusy, setMonthlyBusy] = useState(false);
   const [dashMessage, setDashMessage] = useState<string | null>(null);
   const [ceremonyBusyId, setCeremonyBusyId] = useState<number | null>(null);
@@ -80,7 +89,7 @@ export function DashboardPage() {
   const topupTasks = (topupRequests ?? []).filter(row => isActionQueueAdmin(user)
     ? row.can_reverse_investment && (filterId == null || row.investor_id === filterId)
     : row.status === "pending" || row.status === "contract" || row.can_reverse_investment);
-  const awaitingPayments = (investorPayments ?? []).filter(
+  const awaitingPayments = (investorPaymentsAll ?? []).filter(
     (p) => p.status === "awaiting_confirmation",
   );
   const nextPayment =
@@ -166,29 +175,27 @@ export function DashboardPage() {
         </ScrollReveal>
       ) : (
         <div className="investor-home-stage">
-          <InvestorHeroCard
-            greeting={user?.investor_name || user?.username || ""}
-            principal={data.total_principal}
-            nextPayment={nextPayment}
-            paidThisYear={data.ytd_investor_paid}
-            savingsBalance={savingsBalance}
-            availableBalance={data.available_balance ?? 0}
-            onDownloadMonthly={() => void downloadMonthly()}
-            monthlyBusy={monthlyBusy}
-          />
-        </div>
-      )}
-
-      {!isManager ? (
-        <ScrollReveal>
+          {/* A payment waiting for the investor's confirmation comes first. */}
           <PaymentCeremonyCard
             payments={awaitingPayments}
             busyId={ceremonyBusyId}
             onReceived={(id) => void confirmReceived(id)}
             onNotYet={(id) => void markNotYet(id)}
           />
-        </ScrollReveal>
-      ) : null}
+          <InvestorHeroCard
+            greeting={user?.investor_name || user?.username || ""}
+            principal={data.total_principal}
+            nextPayment={nextPayment}
+            paidThisYear={data.ytd_investor_paid}
+            paidLifetime={investorPaymentsAll ? investorPaymentsAll.filter((p) => p.status === "paid").reduce((sum, p) => sum + (p.investor_amount || 0), 0) : undefined}
+            savingsBalance={savingsBalance}
+            availableBalance={data.available_balance ?? 0}
+            activePlans={(investorPlans ?? []).filter((p) => p.status === "active" && !p.closed_on)}
+            onDownloadMonthly={() => void downloadMonthly()}
+            monthlyBusy={monthlyBusy}
+          />
+        </div>
+      )}
 
       {isManager ? (
         <ScrollReveal>
