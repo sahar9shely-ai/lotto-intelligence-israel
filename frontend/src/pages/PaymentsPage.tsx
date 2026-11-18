@@ -32,6 +32,7 @@ import {
 import type { Plan } from "../types/investments";
 import "./paymentClarity.css";
 import "../components/adminCorrections.css";
+import { useConfirmOnBehalf } from "../components/ConfirmOnBehalf";
 import "./paymentHistoryToggle.css";
 
 function visibleFocusEl(selector: string): HTMLElement | null {
@@ -110,6 +111,13 @@ export function PaymentsPage() {
   const { user } = useAuth();
   const isManager = Boolean(user?.is_manager);
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const onBehalf = useConfirmOnBehalf(
+    (text) => {
+      setMessage(text);
+      refreshAll();
+    },
+    (text) => setMessage(text),
+  );
   const [searchParams] = useSearchParams();
   const yearNow = new Date().getFullYear();
   const incomingFocus = parsePaymentsFocusSearch(searchParams);
@@ -227,6 +235,9 @@ export function PaymentsPage() {
   function paymentDisplayStatus(payment: (typeof payments)[number]) {
     if (!isManager && payment.status === "scheduled" && !payment.date_amendment_pending && payment.due_date < todayISO()) {
       return "טרם הושלם · המועד עבר";
+    }
+    if (payment.status === "paid" && payment.confirmed_on_behalf) {
+      return isManager ? "בוצע · אושר על ידך בשם המשקיע" : "בוצע · אושר על ידי המנהל בשמך";
     }
     return payment.status === "skipped" && closedPlanIds.has(payment.plan_id)
       ? "בוטל בסיום המסלול" : statusLabel(payment.status);
@@ -770,17 +781,23 @@ export function PaymentsPage() {
       setMessage("שליחה לכל השנה ממתינה לחתימה או לביטול הסכם עדכון מועדים. ניתן לשלוח בנפרד תשלומים ממסלולים אחרים.");
       return;
     }
-    const batch = (yearAll ?? []).filter(
+    const today = todayISO();
+    const scheduled = (yearAll ?? []).filter(
       (p) => p.status === "scheduled" && (investorFilter == null || p.investor_id === investorFilter),
     );
-    const today = todayISO();
-    const future = batch.filter((p) => p.due_date > today).length;
+    // Only payments whose due date has arrived are included (same rule as the server).
+    const batch = scheduled.filter((p) => p.due_date <= today);
+    const future = scheduled.length - batch.length;
     const zero = batch.filter((p) => p.investor_amount === 0).length;
+    if (!batch.length) {
+      setMessage(future ? `אין תשלומים שמועדם הגיע. ${future} תשלומים עתידיים יישלחו בבוא מועדם.` : `אין תשלומים מתוכננים לשנת ${year}`);
+      return;
+    }
     if (!(await confirm({
-      title: `בקשת אישור לכל שנת ${year}`,
-      message: `תישלח בקשת אישור קבלה על ${batch.length} תשלומים במצב ״מתוכנן״ בשנת ${year}.`,
+      title: `בקשת אישור לתשלומים שמועדם הגיע · ${year}`,
+      message: `תישלח בקשת אישור קבלה על ${batch.length} תשלומים שמועדם כבר הגיע.`,
       details: [
-        ...(future ? [`${future} מהם עם מועד עתידי (טרם הגיע זמנם).`] : []),
+        ...(future ? [`${future} תשלומים עתידיים לא ייכללו — אפשר לשלוח אותם כשיגיע מועדם.`] : []),
         ...(zero ? [`${zero} מהם בסכום 0 ₪ למשקיע (מסלולי חיסכון).`] : []),
         "כל משקיע יצטרך לאשר לפני שהסטטוס יהפוך ל״בוצע״.",
         "בקשה שנשלחה בטעות אפשר לבטל בעמוד ״ביטולים ותיקונים״ או בשורת התשלום.",
@@ -851,30 +868,50 @@ export function PaymentsPage() {
     return true;
   }
 
+  function onBehalfButton(p: (typeof payments)[number]) {
+    if (p.due_date > todayISO()) return null;
+    return (
+      <button
+        type="button"
+        className="btn btn--small btn--ghost"
+        disabled={markBusyId === p.id || onBehalf.busyId !== null || p.date_amendment_pending}
+        onClick={() => void onBehalf.start({ ...p, phone: (investors ?? []).find((i) => i.id === p.investor_id)?.phone })}
+      >
+        {onBehalf.busyId === p.id ? "רושם..." : "אישור בשם המשקיע"}
+      </button>
+    );
+  }
+
   function paymentRowActions(p: (typeof payments)[number]) {
     if (isManager) {
       if (p.status === "scheduled") {
         return (
-          <button
-            type="button"
-            className="btn btn--small btn--admin"
-            disabled={markBusyId === p.id || p.date_amendment_pending}
-            onClick={() => markPaid(p.id)}
-          >
-            {markBusyId === p.id ? "שולח..." : "שלח לאישור"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn btn--small btn--admin"
+              disabled={markBusyId === p.id || p.date_amendment_pending}
+              onClick={() => markPaid(p.id)}
+            >
+              {markBusyId === p.id ? "שולח..." : "שלח לאישור"}
+            </button>
+            {onBehalfButton(p)}
+          </>
         );
       }
       if (p.status === "awaiting_confirmation") {
         return (
-          <button
-            type="button"
-            className="btn btn--small btn--ghost"
-            disabled={markBusyId === p.id || p.date_amendment_pending}
-            onClick={() => markScheduled(p.id)}
-          >
-            {markBusyId === p.id ? "מבטל..." : "בטל בקשה"}
-          </button>
+          <>
+            {onBehalfButton(p)}
+            <button
+              type="button"
+              className="btn btn--small btn--ghost"
+              disabled={markBusyId === p.id || p.date_amendment_pending}
+              onClick={() => markScheduled(p.id)}
+            >
+              {markBusyId === p.id ? "מבטל..." : "בטל בקשה"}
+            </button>
+          </>
         );
       }
       if (p.status === "paid") {
@@ -930,6 +967,7 @@ export function PaymentsPage() {
   return (
     <div className={`page payments-page${refreshing ? " page--refreshing" : ""}`}>
       {confirmDialog}
+      {onBehalf.element}
       <Toast message={message} onClear={clearMessage} />
       <ScrollReveal>
       <header className="page-intro">
@@ -1249,6 +1287,7 @@ export function PaymentsPage() {
                     <td>
                       <span className={`badge badge--${p.status}`}>{paymentDisplayStatus(p)}</span>
                       {paymentFlag(p)}
+                      {p.status === "paid" && p.confirmed_on_behalf && p.confirmation_note ? <p className="hint">{p.confirmation_note}</p> : null}
                       {p.date_amendment_pending ? <p className="hint">ממתין לחתימת הסכם עדכון מועדים</p> : null}
                     </td>
                     <td className="table__actions">{paymentRowActions(p)}</td>

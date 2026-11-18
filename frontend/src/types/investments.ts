@@ -260,6 +260,9 @@ export type Payment = {
   paid_at?: string | null;
   confirmation_requested_at?: string | null;
   notes?: string | null;
+  /** The admin confirmed receipt for the investor (e.g. by phone). */
+  confirmed_on_behalf?: boolean;
+  confirmation_note?: string | null;
 };
 
 export type PaymentNudge = {

@@ -619,6 +619,11 @@ export const api = {
     }),
   paymentConfirmationNudges: () =>
     request<PaymentNudgeList>("/api/v1/investments/payments/confirmation-nudges"),
+  confirmPaymentOnBehalf: (id: number, note: string) =>
+    request<Payment>(`/api/v1/investments/payments/${id}/confirm-on-behalf`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
   rejectPayment: (id: number) =>
     request<Payment>(`/api/v1/investments/payments/${id}/reject`, {
       method: "POST",

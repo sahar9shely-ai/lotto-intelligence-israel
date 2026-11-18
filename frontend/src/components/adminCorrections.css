@@ -160,3 +160,17 @@
   .corrections-row__actions .btn { min-height: var(--touch-min); }
   .wallet-history__actions .hint { max-width: 160px; }
 }
+
+/* Confirm on behalf: message preview */
+.on-behalf__preview {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--foam);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

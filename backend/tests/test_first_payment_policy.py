@@ -416,7 +416,8 @@ class FirstPaymentPolicyTests(unittest.TestCase):
                 db.execute(text("UPDATE payments SET due_date='2027-01-10' WHERE id=:id"),{"id":year_rows[0].id})
                 db.execute(text("UPDATE payments SET status='awaiting_confirmation' WHERE id=:id"),{"id":year_rows[1].id})
             return real_lock(db,investor_id)
-        with patch.object(wallet,"lock_investor",side_effect=changed_before_lock),patch.object(svc,"_notify_payment_confirmation_request") as notify:
+        # Year-wide requests cover only due payments: run at year end so both rows are due.
+        with patch.object(wallet,"lock_investor",side_effect=changed_before_lock),patch.object(svc,"_notify_payment_confirmation_request") as notify,patch.object(svc,"israel_today",return_value=date(2026,12,31)):
             result=svc.mark_year_payments_paid(self.db,year=2026,investor_id=self.investor.id,actor=self.admin)
         self.assertEqual(result["marked_count"],0);notify.assert_not_called()
         self.assertEqual(year_rows[0].status,"scheduled");self.assertEqual(year_rows[0].due_date,date(2027,1,10))

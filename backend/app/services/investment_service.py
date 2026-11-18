@@ -1116,6 +1116,8 @@ def serialize_payment(payment: Payment) -> dict:
         "confirmation_requested_at": payment.confirmation_requested_at,
         "date_amendment_pending": pending_date_amendment(object_session(payment), payment.plan_id),
         "notes": payment.notes,
+        "confirmed_on_behalf": bool(getattr(payment, "confirmed_on_behalf", False)),
+        "confirmation_note": getattr(payment, "confirmation_note", None),
     }
 
 
@@ -2343,10 +2345,25 @@ def mark_year_payments_paid(
     investor_id: Optional[int] = None,
     actor=None,
 ) -> dict:
-    """Ask for investor confirmation on all scheduled payments in a calendar year."""
+    """Ask for investor confirmation on the scheduled payments of a year that are already due.
+
+    Payments whose due date has not arrived yet are left untouched (counted in
+    ``future_count``) so a year-wide action never asks to confirm money that was
+    not sent yet.
+    """
+    today = israel_today()
+    last_due = min(date(year, 12, 31), today)
+    future_query = db.query(Payment).filter(
+        Payment.due_date > last_due,
+        Payment.due_date <= date(year, 12, 31),
+        Payment.status == "scheduled",
+    )
+    if investor_id is not None:
+        future_query = future_query.filter(Payment.investor_id == investor_id)
+    future_count = future_query.count()
     query = db.query(Payment).options(joinedload(Payment.investor)).filter(
         Payment.due_date >= date(year, 1, 1),
-        Payment.due_date <= date(year, 12, 31),
+        Payment.due_date <= last_due,
         Payment.status == "scheduled",
     )
     if investor_id is not None:
@@ -2362,7 +2379,7 @@ def mark_year_payments_paid(
     # An amendment or another payout can finish while this batch waits for its
     # investor locks. The refreshed rows, not the original SELECT, define scope.
     payments = [payment for payment in payments if payment.status == "scheduled"
-        and date(year, 1, 1) <= payment.due_date <= date(year, 12, 31)]
+        and date(year, 1, 1) <= payment.due_date <= last_due]
     requested = 0
     auto_paid = 0
     for payment in payments:
@@ -2379,6 +2396,7 @@ def mark_year_payments_paid(
         "marked_count": requested + auto_paid,
         "awaiting_count": requested,
         "auto_paid_count": auto_paid,
+        "future_count": future_count,
     }
 
 
@@ -2459,6 +2477,9 @@ def request_payment_confirmation(
         payment.status = "paid"
         payment.paid_at = israel_today()
         payment.confirmation_requested_at = None
+        payment.confirmed_by_user_id = actor.id
+        payment.confirmed_on_behalf = False
+        payment.confirmation_note = None
         if commit:
             db.commit()
         return {
@@ -2493,7 +2514,41 @@ def confirm_payment(db: Session, *, payment: Payment, actor) -> dict:
     payment.status = "paid"
     payment.paid_at = israel_today()
     payment.confirmation_requested_at = None
+    payment.confirmed_by_user_id = actor.id
+    payment.confirmed_on_behalf = False
+    payment.confirmation_note = None
     _notify_payment_confirmed(db, payment)
+    db.commit()
+    return {"status": "paid", "payment_id": payment.id}
+
+
+def clear_payment_confirmation(payment: Payment) -> None:
+    """Forget who confirmed — used whenever a payment goes back to not-paid."""
+    payment.confirmed_by_user_id = None
+    payment.confirmed_on_behalf = None
+    payment.confirmation_note = None
+
+
+def confirm_payment_on_behalf(db: Session, *, payment: Payment, actor, note: str) -> dict:
+    """Admin records that the investor confirmed receipt (e.g. by phone).
+
+    The payment becomes paid exactly as if the investor confirmed, and it is
+    stored that the admin confirmed on the investor's behalf and how.
+    """
+    note = (note or "").strip()
+    if len(note) < 2 or len(note) > 500:
+        raise ValueError("יש לכתוב איך המשקיע אישר את הקבלה (לדוגמה: אישר בשיחת טלפון)")
+    require_payment_dates_settled(db, payment)
+    if payment.status not in {"scheduled", "awaiting_confirmation"}:
+        raise ValueError("אפשר לאשר רק תשלום מתוכנן או ממתין לאישור")
+    if payment.due_date and payment.due_date > israel_today():
+        raise ValueError("מועד התשלום עוד לא הגיע. אפשר לאשר בשם המשקיע רק תשלום שמועדו הגיע")
+    payment.status = "paid"
+    payment.paid_at = israel_today()
+    payment.confirmation_requested_at = None
+    payment.confirmed_by_user_id = actor.id
+    payment.confirmed_on_behalf = True
+    payment.confirmation_note = note
     db.commit()
     return {"status": "paid", "payment_id": payment.id}
 
@@ -2512,6 +2567,7 @@ def reject_payment_confirmation(db: Session, *, payment: Payment, actor) -> dict
     payment.status = "scheduled"
     payment.paid_at = None
     payment.confirmation_requested_at = None
+    clear_payment_confirmation(payment)
     db.commit()
     return {"status": "scheduled", "payment_id": payment.id}
 

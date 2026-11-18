@@ -239,6 +239,8 @@ class PaymentOut(PrivateFinancialOut):
     confirmation_requested_at: Optional[datetime] = None
     date_amendment_pending: bool = False
     notes: Optional[str] = None
+    confirmed_on_behalf: bool = False
+    confirmation_note: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

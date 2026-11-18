@@ -10,6 +10,7 @@ import {
   buildPaymentNudgeWhatsAppMessage,
   whatsAppPaymentNudgeUrl,
 } from "../utils/whatsapp";
+import { useConfirmOnBehalf } from "./ConfirmOnBehalf";
 
 const DISMISS_KEY = "tazrim_payment_nudge_dismissed";
 
@@ -51,6 +52,13 @@ export function PaymentNudgeDialog() {
   });
   const [busyId, setBusyId] = useState<number | null>(null);
   const [copyNote, setCopyNote] = useState<string | null>(null);
+  const onBehalf = useConfirmOnBehalf(
+    (text) => {
+      setCopyNote(text);
+      reload();
+    },
+    (text) => setCopyNote(text),
+  );
 
   const items = data?.items ?? [];
   const sig = useMemo(() => signature(items.map((row) => row.id)), [items]);
@@ -122,9 +130,10 @@ export function PaymentNudgeDialog() {
     }
   }
 
-  if (!open) return null;
+  // Keep the on-behalf dialogs alive after the last nudge row disappears.
+  if (!open) return onBehalf.element;
 
-  return createPortal(
+  return (<>{createPortal(
     <div
       className="modal modal--confirm"
       role="dialog"
@@ -187,6 +196,14 @@ export function PaymentNudgeDialog() {
                       )}
                       <button
                         type="button"
+                        className="btn btn--small btn--ghost"
+                        disabled={onBehalf.busyId !== null}
+                        onClick={() => void onBehalf.start({ ...row, phone: row.investor_phone })}
+                      >
+                        {onBehalf.busyId === row.id ? "רושם..." : "אישור בשם המשקיע"}
+                      </button>
+                      <button
+                        type="button"
                         className="btn btn--small btn--ghost hide-on-phone"
                         onClick={() => void copyMessage(row)}
                       >
@@ -225,5 +242,5 @@ export function PaymentNudgeDialog() {
       </div>
     </div>,
     document.body,
-  );
+  )}{onBehalf.element}</>);
 }

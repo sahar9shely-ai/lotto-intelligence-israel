@@ -256,6 +256,55 @@ class AdminCorrectionsTests(unittest.TestCase):
         self.current_user = self.alice_user
         self.assertEqual(self.client.get("/api/v1/investments/admin/corrections").status_code, 403)
 
+    def test_year_wide_request_only_covers_payments_already_due(self):
+        plan = InvestmentPlan(investor_id=self.alice.id, principal=10000, accrual_principal=10000, plan_type="monthly",
+                              monthly_rate_percent=1, manager_fee_percent=0, start_date=date(2026, 9, 1), duration_months=12)
+        self.db.add(plan); self.db.flush()
+        due = Payment(plan_id=plan.id, investor_id=self.alice.id, month_number=1, due_date=date(2026, 10, 1),
+                      investor_amount=100, manager_amount=0, status="scheduled")
+        today_row = Payment(plan_id=plan.id, investor_id=self.alice.id, month_number=2, due_date=TODAY,
+                            investor_amount=100, manager_amount=0, status="scheduled")
+        future = Payment(plan_id=plan.id, investor_id=self.alice.id, month_number=3, due_date=date(2026, 12, 1),
+                         investor_amount=100, manager_amount=0, status="scheduled")
+        self.db.add_all([due, today_row, future]); self.db.commit()
+        r = self.client.post("/api/v1/investments/payments/mark-year-paid", params={"year": 2026})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["marked_count"], body["future_count"]), (2, 1))
+        self.db.expire_all()
+        self.assertEqual(self.db.get(Payment, due.id).status, "awaiting_confirmation")
+        self.assertEqual(self.db.get(Payment, today_row.id).status, "awaiting_confirmation")
+        self.assertEqual(self.db.get(Payment, future.id).status, "scheduled")
+        self.assertIsNone(self.db.get(Payment, future.id).confirmation_requested_at)
+
+    def test_admin_confirms_receipt_on_behalf_of_investor(self):
+        plan = InvestmentPlan(investor_id=self.alice.id, principal=10000, accrual_principal=10000, plan_type="monthly",
+                              monthly_rate_percent=1, manager_fee_percent=0, start_date=date(2026, 9, 1), duration_months=12)
+        self.db.add(plan); self.db.flush()
+        waiting = Payment(plan_id=plan.id, investor_id=self.alice.id, month_number=1, due_date=date(2026, 10, 1),
+                          investor_amount=100, manager_amount=0, status="awaiting_confirmation")
+        future = Payment(plan_id=plan.id, investor_id=self.alice.id, month_number=3, due_date=date(2026, 12, 1),
+                         investor_amount=100, manager_amount=0, status="scheduled")
+        self.db.add_all([waiting, future]); self.db.commit()
+        url = f"/api/v1/investments/payments/{waiting.id}/confirm-on-behalf"
+        self.assertEqual(self.client.post(url, json={"note": ""}).status_code, 422)  # how it was confirmed is required
+        r = self.client.post(url, json={"note": "אישרה בשיחת טלפון"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["status"], r.json()["confirmed_on_behalf"]), ("paid", True))
+        self.assertEqual(r.json()["confirmation_note"], "אישרה בשיחת טלפון")
+        self.assertIn("payment_confirmed_on_behalf", self.kinds())
+        self.assertEqual(self.client.post(url, json={"note": "שוב"}).status_code, 409)  # already paid
+        # Not before the money is due, and never by the investor themself.
+        self.assertEqual(self.client.post(f"/api/v1/investments/payments/{future.id}/confirm-on-behalf",
+                                          json={"note": "מוקדם"}).status_code, 409)
+        self.current_user = self.alice_user
+        self.assertEqual(self.client.post(f"/api/v1/investments/payments/{future.id}/confirm-on-behalf",
+                                          json={"note": "x1"}).status_code, 403)
+        # Undo clears who confirmed.
+        self.current_user = self.admin
+        r = self.client.patch(f"/api/v1/investments/payments/{waiting.id}", json={"status": "scheduled"})
+        self.assertEqual((r.json()["status"], r.json()["confirmed_on_behalf"], r.json()["confirmation_note"]), ("scheduled", False, None))
+
     # integrity ----------------------------------------------------------
     def test_integrity_check_reports_without_changing_anything(self):
         self.deposit(self.alice, 300, "deposit-key-0008")

@@ -1568,6 +1568,7 @@ def update_payment(
     if data.get("status") in {"scheduled", "skipped"}:
         data["paid_at"] = None
         payment.confirmation_requested_at = None
+        svc.clear_payment_confirmation(payment)
     for key, value in data.items():
         setattr(payment, key, value)
     if next_status is not None and next_status != previous_status:
@@ -1637,6 +1638,62 @@ def confirm_payment(
     )
     db.refresh(payment)
     return svc.serialize_payment(payment) if is_manager(user) else svc.redact_private_manager_data(svc.serialize_payment(payment))
+
+
+class ConfirmOnBehalfRequest(BaseModel):
+    note: str = Field(min_length=2, max_length=500)
+
+
+@router.post("/payments/{payment_id}/confirm-on-behalf", response_model=PaymentOut)
+def confirm_payment_on_behalf(
+    payment_id: int,
+    payload: ConfirmOnBehalfRequest,
+    user: User = Depends(require_manager),
+    db: Session = Depends(get_investment_db),
+):
+    """Admin confirms receipt for an investor who cannot do it in the app (e.g. by phone)."""
+    payment = (
+        db.query(Payment)
+        .options(joinedload(Payment.investor))
+        .filter(Payment.id == payment_id)
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="התשלום לא נמצא")
+    plan = db.get(InvestmentPlan, payment.plan_id)
+    if plan is not None and plan.closed_on:
+        raise HTTPException(status_code=409, detail="המסלול נסגר בהסכם חתום; סטטוס התשלומים שלו נשמר כהיסטוריה")
+    from app.models.investments import PlanAgreement
+    if db.query(PlanAgreement.id).filter(PlanAgreement.plan_id == payment.plan_id, PlanAgreement.kind == "close",
+                                         PlanAgreement.status == "pending").first():
+        raise HTTPException(status_code=409, detail=(
+            "קיים הסכם סיום הממתין לחתימה שמבוסס על התשלומים הנוכחיים. "
+            "בטלו אותו לפני אישור התשלום, ואז הכינו הסכם מעודכן"))
+    try:
+        svc.confirm_payment_on_behalf(db, payment=payment, actor=user, note=payload.note)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    from app.services import activity_service as activity_svc
+
+    investor_name = payment.investor.name if payment.investor else ""
+    activity_svc.log_activity(
+        db,
+        kind="payment_confirmed_on_behalf",
+        title=f"תשלום אושר בשם המשקיע · {investor_name}",
+        body=(f"{payment.due_date.strftime('%m/%Y')} · {payment.investor_amount:,.2f} ₪ · "
+              f"אושר על ידי המנהל · {payload.note.strip()}"),
+        severity="success",
+        actor=user,
+        investor_id=payment.investor_id,
+        investor_name=investor_name or None,
+        entity_type="payment",
+        entity_id=payment.id,
+        href="/payments",
+        commit=True,
+    )
+    db.refresh(payment)
+    return svc.serialize_payment(payment)
 
 
 @router.post("/payments/{payment_id}/reject", response_model=PaymentOut)

@@ -158,6 +158,11 @@ class Payment(Base):
     paid_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     confirmation_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Who confirmed receipt. confirmed_on_behalf=True when the admin confirmed for the
+    # investor (e.g. an elderly investor who confirmed by phone); the note says how.
+    confirmed_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    confirmed_on_behalf: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    confirmation_note: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     plan: Mapped["InvestmentPlan"] = relationship(back_populates="payments")
     investor: Mapped["Investor"] = relationship(back_populates="payments")

@@ -84,6 +84,12 @@ def ensure_schema(engine: Engine) -> None:
             "closing_savings_cents": "INTEGER",
             "closing_accrued_savings": "FLOAT",
         },
+        "payments": {
+            # Nullable: every existing payment keeps exactly its current values.
+            "confirmed_by_user_id": "INTEGER",
+            "confirmed_on_behalf": "BOOLEAN",
+            "confirmation_note": "VARCHAR(500)",
+        },
         "plan_notices": {
             # Nullable: existing notices stay active exactly as before.
             "cancelled_at": "TIMESTAMP",

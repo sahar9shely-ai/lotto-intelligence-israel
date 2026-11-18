@@ -147,6 +147,37 @@ export function whatsAppPaymentNudgeUrl(
   return `https://wa.me/${number}?text=${text}`;
 }
 
+export type OnBehalfConfirmation = {
+  investorName: string;
+  phone?: string | null;
+  dueDate: string;
+  amount: number;
+};
+
+/** Message the admin sends after confirming receipt on the investor's behalf. */
+export function buildOnBehalfConfirmedMessage(row: OnBehalfConfirmation): string {
+  const name = row.investorName.trim() || "שלום";
+  const [year, mon] = row.dueDate.slice(0, 7).split("-");
+  const monthLabel = mon && year ? `${mon}/${year}` : row.dueDate;
+  const amount = Math.round(row.amount).toLocaleString("he-IL");
+  return [
+    `שלום ${name},`,
+    "",
+    `בהמשך לאישורכם, ההעברה עבור חודש ${monthLabel} על סך ${amount} ₪ אושרה ונרשמה במערכת כהתקבלה.`,
+    "האישור מופיע גם בתיק שלכם בתזרים.",
+    "אם משהו לא מסתדר — עדכנו אותי ואתקן.",
+    "",
+    "תודה,",
+    "תזרים",
+  ].join("\n");
+}
+
+export function whatsAppOnBehalfConfirmedUrl(row: OnBehalfConfirmation): string | null {
+  const number = toWhatsAppNumber(row.phone);
+  if (!number) return null;
+  return `https://wa.me/${number}?text=${encodeURIComponent(buildOnBehalfConfirmedMessage(row))}`;
+}
+
 export function canSharePdfFile(file: File): boolean {
   const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
   try {
