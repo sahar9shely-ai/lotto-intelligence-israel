@@ -70,7 +70,8 @@ def is_enabled() -> bool:
 def public_config() -> dict:
     enabled = is_enabled()
     return {"enabled": enabled, "public_key": settings.web_push_vapid_public_key if enabled else None,
-            "require_notifications": settings.web_push_require_notifications}
+            "require_notifications": settings.web_push_require_notifications,
+            "allow_skip": settings.web_push_allow_skip}
 
 
 def validate_endpoint(endpoint: str) -> str:

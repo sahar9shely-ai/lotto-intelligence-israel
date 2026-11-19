@@ -101,7 +101,7 @@ def enforce_notification_access(user: User, db: Session, path: str) -> None:
     Subscription state is a product precondition, never an identity or financial
     authorization source. Normal authenticated ownership checks still apply.
     """
-    if not settings.web_push_require_notifications or is_manager(user):
+    if not settings.web_push_require_notifications or settings.web_push_allow_skip or is_manager(user):
         return
     if path.startswith(("/api/v1/auth/", "/api/v1/push/", "/api/v1/tutorials")):
         return

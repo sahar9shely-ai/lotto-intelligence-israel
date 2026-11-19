@@ -103,7 +103,7 @@ def test_config_authentication_and_no_secret_material(push_env, monkeypatch):
     env = push_env
     assert env.client.get("/api/v1/push/config").status_code == 401
     response = env.client.get("/api/v1/push/config", headers=env.headers[0])
-    assert response.json() == {"enabled": True, "public_key": settings.web_push_vapid_public_key, "require_notifications": False}
+    assert response.json() == {"enabled": True, "public_key": settings.web_push_vapid_public_key, "require_notifications": False, "allow_skip": True}
     assert settings.web_push_vapid_private_key not in response.text
     monkeypatch.setattr(settings, "web_push_vapid_private_key", encoded(b"b" * 32))
     assert env.client.get("/api/v1/push/config", headers=env.headers[0]).json()["enabled"] is False
@@ -131,9 +131,20 @@ def test_disabled_feature_never_touches_business_transaction(push_env, monkeypat
     assert db.mock_calls == []
 
 
+def test_investor_who_skips_notifications_is_not_blocked(push_env, monkeypatch):
+    env = push_env
+    monkeypatch.setattr(settings, "web_push_require_notifications", True)
+    monkeypatch.setattr(settings, "web_push_allow_skip", True)
+    with env.sessions() as db:
+        user = db.get(User, env.user_ids[0])
+        enforce_notification_access(user, db, "/api/v1/investments/payments")  # no 428
+    assert push.public_config()["allow_skip"] is True
+
+
 def test_notification_access_gate_owner_only_and_help_routes_allowed(push_env, monkeypatch):
     env = push_env
     monkeypatch.setattr(settings, "web_push_require_notifications", True)
+    monkeypatch.setattr(settings, "web_push_allow_skip", False)
     with env.sessions() as db:
         user = db.get(User, env.user_ids[0])
         for path in ("/api/v1/auth/me", "/api/v1/auth/me/password", "/api/v1/push/config", "/api/v1/push/subscriptions/status", "/api/v1/tutorials", "/api/v1/tutorials/8"):

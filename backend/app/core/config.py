@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     web_push_enabled: bool = False
     web_push_require_notifications: bool = False
+    # When true, investors may skip the notifications screen at login and the
+    # server does not block them; the screen becomes a recommendation.
+    web_push_allow_skip: bool = True
     web_push_vapid_public_key: str = ""
     web_push_vapid_private_key: str = ""
     web_push_vapid_subject: str = ""

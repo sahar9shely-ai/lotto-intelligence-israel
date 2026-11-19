@@ -13,6 +13,8 @@ type PushContextValue = {
   canEnable: boolean;
   enabled: boolean;
   required: boolean | null;
+  /** Investors may skip the notifications screen at login. */
+  allowSkip: boolean;
   testBusy: boolean;
   testResult: PushTestResult | null;
   testDelivery: () => Promise<void>;
@@ -35,7 +37,7 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
   const testRunning = useRef(false);
   const testVersion = useRef(0);
   const testController = useRef<AbortController | null>(null);
-  const configuration = useRef<{ enabled: boolean; public_key: string | null; require_notifications: boolean } | null>(null);
+  const configuration = useRef<{ enabled: boolean; public_key: string | null; require_notifications: boolean; allow_skip?: boolean } | null>(null);
   const currentState = useRef<PushState>("checking");
   const verifiedBinding = useRef<{ user_id: number; endpoint: string } | null>(null);
   const knownOwner = useRef<{ user_id: number; endpoint: string } | null>(null);
@@ -373,7 +375,7 @@ function PushSession({ user, children }: { user: AuthUser | null; children: Reac
 
   const canEnable = Boolean(configuration.current?.enabled && configuration.current.public_key
     && canUseDevicePush(user) && pushSupport() === "supported");
-  return <PushContext.Provider value={{ state, busy, error, canEnable, enabled: Boolean(configuration.current?.enabled), required: configuration.current?.require_notifications ?? null, testBusy, testResult, testDelivery, enable, refresh }}>{children}</PushContext.Provider>;
+  return <PushContext.Provider value={{ state, busy, error, canEnable, enabled: Boolean(configuration.current?.enabled), required: configuration.current?.require_notifications ?? null, allowSkip: configuration.current?.allow_skip ?? true, testBusy, testResult, testDelivery, enable, refresh }}>{children}</PushContext.Provider>;
 }
 
 export function usePushNotifications() {

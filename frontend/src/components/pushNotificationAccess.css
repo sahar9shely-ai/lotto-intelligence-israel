@@ -21,3 +21,4 @@
 .push-settings__result--sent { border-color: #b6ddc6; color: #245b43; background: #edf8f0; }
 .push-settings__result--failed, .push-settings__result--cancelled { border-color: #e5d6b8; color: #79572b; background: #fff8ec; }
 @media (max-width: 480px) { .push-activation__card { padding: 22px 18px; } }
+.push-activation__skip { width: 100%; margin-top: 10px; }

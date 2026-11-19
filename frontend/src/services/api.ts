@@ -137,7 +137,7 @@ async function request<T>(path: string, init?: RequestInit, auth = true, authTok
 }
 
 export const api = {
-  pushConfig: () => request<{ enabled: boolean; public_key: string | null; require_notifications: boolean }>("/api/v1/push/config"),
+  pushConfig: () => request<{ enabled: boolean; public_key: string | null; require_notifications: boolean; allow_skip?: boolean }>("/api/v1/push/config"),
   pushSubscribe: (body: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
     request<{ subscribed: boolean }>("/api/v1/push/subscriptions", { method: "POST", body: JSON.stringify(body) }),
   pushUnsubscribe: (body: { endpoint: string }, authToken?: string | null) =>

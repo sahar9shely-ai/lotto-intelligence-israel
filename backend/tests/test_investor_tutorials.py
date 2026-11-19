@@ -131,6 +131,9 @@ class InvestorTutorialTests(unittest.TestCase):
 
     def test_activation_guide_remains_accessible_before_notification_requirement_is_met(self):
         settings.web_push_require_notifications = True
+        previous_skip = settings.web_push_allow_skip
+        settings.web_push_allow_skip = False
+        self.addCleanup(setattr, settings, "web_push_allow_skip", previous_skip)
         with self.sessions() as db:
             user = db.query(User).filter_by(username="demo").one()
             with self.assertRaises(HTTPException) as missing_subscription:

@@ -33,18 +33,34 @@ function ActivationGuide() {
   </details>;
 }
 
+const SKIP_KEY = "tazrim_push_skipped_";
+
+function readSkipped(userId?: number): boolean {
+  if (!userId) return false;
+  try { return localStorage.getItem(SKIP_KEY + userId) === "1"; } catch { return false; }
+}
+
 export function PushNotificationAccess({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const push = usePushNotifications();
   const [loggingOut, setLoggingOut] = useState(false);
-  if (!user || user.is_manager || push.state === "ready" || push.required === false) return <>{children}</>;
+  const [skipped, setSkipped] = useState(() => readSkipped(user?.id));
+  useEffect(() => { setSkipped(readSkipped(user?.id)); }, [user?.id]);
+  function skip() {
+    // Remembered on this device; notifications can be turned on later in the personal area.
+    try { if (user?.id) localStorage.setItem(SKIP_KEY + user.id, "1"); } catch { /* private mode: skip for this session */ }
+    setSkipped(true);
+  }
+  if (!user || user.is_manager || push.state === "ready" || push.required === false || (push.allowSkip && skipped)) return <>{children}</>;
   const canEnable = push.canEnable && ["needs_permission", "error"].includes(push.state);
   return <main className="push-activation" dir="rtl">
     <section className="push-activation__card" aria-labelledby="push-activation-title" aria-busy={push.busy}>
       <span className="push-activation__icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 9a6 6 0 0 1 12 0v5l2 3H4l2-3z"/><path d="M10 20h4"/></svg></span>
       <p className="push-activation__eyebrow">תזרים · כניסה לתיק</p>
       <h1 id="push-activation-title">הפעלת התראות לתזרים</h1>
-      <p>כדי להיכנס לתיק, יש להפעיל במכשיר הזה התראות על בקשות אישור קבלת תשלום ועל מסמכים לחתימה.</p>
+      <p>{push.allowSkip
+        ? "מומלץ להפעיל התראות כדי לדעת מיד כשנשלח אליך תשלום לאישור או מסמך לחתימה. לא חובה — אפשר לדלג ולהפעיל מתי שרוצים מהאזור האישי."
+        : "כדי להיכנס לתיק, יש להפעיל במכשיר הזה התראות על בקשות אישור קבלת תשלום ועל מסמכים לחתימה."}</p>
       {push.state === "checking" ? <p className="push-activation__status" role="status">בודקים את ההתראות במכשיר הזה…</p> : null}
       {push.state === "install_required" ? <p className="push-activation__status">ב־iPhone או iPad: פתחו את תזרים ב־Safari, לחצו על שיתוף ואז הוספה למסך הבית. פתחו את תזרים מהסמל שנוסף והפעילו התראות.</p> : null}
       {push.state === "unsupported" ? <p className="push-activation__status">המכשיר או הדפדפן הזה אינו תומך כרגע בהתראות של תזרים. עדכנו את המכשיר והדפדפן, או פתחו את תזרים בדפדפן שתומך בהתראות. ב־iPhone יש לפתוח מהסמל במסך הבית.</p> : null}
@@ -55,6 +71,7 @@ export function PushNotificationAccess({ children }: { children: ReactNode }) {
         {canEnable ? <button type="button" className="btn btn--primary" onClick={() => void push.enable()} disabled={push.busy || loggingOut}>{push.busy ? "מפעילים התראות…" : "הפעל התראות"}</button> : null}
         <button type="button" className="btn btn--ghost" onClick={() => void push.refresh()} disabled={push.busy || push.state === "checking" || loggingOut}>בדוק שוב</button>
       </div>
+      {push.allowSkip ? <button type="button" className="btn btn--ghost push-activation__skip" onClick={skip} disabled={push.busy || loggingOut}>דלג בינתיים — אפעיל אחר כך</button> : null}
       <ActivationGuide />
       <button type="button" className="push-activation__logout" disabled={loggingOut} onClick={async () => { setLoggingOut(true); await logout(); }}>{loggingOut ? "יוצאים…" : "יציאה מהחשבון"}</button>
     </section>
@@ -73,7 +90,7 @@ export function PushNotificationSettings() {
       : !push.enabled ? "התראות אינן זמינות כרגע במערכת."
       : isAdministrator ? push.state === "ready" ? "התראות פעילות על כניסת משקיעים למערכת." : "אפשר להפעיל במכשיר הזה התראות על כניסת משקיעים למערכת."
       : push.state === "ready" ? "התראות פעילות לבקשות אישור קבלת תשלום ולמסמכים לחתימה."
-      : push.required === false ? "אפשר להפעיל התראות על בקשות אישור קבלת תשלום ועל מסמכים לחתימה." : "צריך להפעיל התראות כדי להיכנס לתיק מהמכשיר הזה."}</p>
+      : push.required === false || push.allowSkip ? "אפשר להפעיל התראות על בקשות אישור קבלת תשלום ועל מסמכים לחתימה." : "צריך להפעיל התראות כדי להיכנס לתיק מהמכשיר הזה."}</p>
     {push.state === "install_required" ? <p className="push-settings__hint">ב־iPhone או iPad יש לפתוח את תזרים ב־Safari, לבחור שיתוף והוספה למסך הבית, ולפתוח את הסמל שנוסף לפני הפעלת ההתראות.</p> : null}
     {push.state === "unsupported" ? <p className="push-settings__hint">הדפדפן הזה אינו תומך בהתראות. אפשר לפתוח בדפדפן שתומך בהן; ב־iPhone יש לפתוח מהסמל במסך הבית.</p> : null}
     {push.state === "denied" ? <p className="push-settings__hint">ההתראות חסומות. יש לאפשר התראות לתזרים בהגדרות האתר או המכשיר, ואז ללחוץ על בדיקת ההתראות.</p> : null}
